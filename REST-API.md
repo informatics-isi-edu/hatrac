@@ -30,7 +30,8 @@ The hierarchical Hatrac naming model defines three main types of resource:
 
 The model supports a hierarchy of nested namespaces while objects and
 their versions appear only at the leaves of the tree. A particular
-hierarchical name has a simple three-phase lifecycle:
+hierarchical name has a three-phase lifecycle that can oscillate in
+the latter two phases:
 
 1. Undefined, until the name is bound
 1. Defined, from the moment the name is bound until deleted
@@ -259,6 +260,7 @@ Typical PUT error responses would be:
 **Note**: There is ambiguity in the meaning of a URL when creating a
 new object or nested namespace because they have the same syntactic
 structure.  Hatrac disambiguates such requests in a decision process:
+
 1. If the full path denotes an existing object, the PUT request MUST
    denote a request to update the content of the existing object,
    regardless of what `Content-Type` and content is present.

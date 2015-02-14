@@ -87,6 +87,7 @@ decomposing a complex system into modular pieces.  These pieces, in
 turn, are meant to be put back together in novel
 combinations. However, the nature of the pieces and the means of
 recombination are different:
+
 1. **Service orientation**: a _service_ encapsulates a (possibly
    hidden) _state model_ and a set of _computational behaviors_ behind
    a _message-passing_ interface which can trigger computation and
