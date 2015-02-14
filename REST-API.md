@@ -195,7 +195,7 @@ The DELETE operation is used to delete a nested namespace
 
 for which a successful response is:
 
-    200 OK
+    204 No Content
     
 An implementation SHOULD NOT allow deletion of non-empty
 namespaces. It is RECOMMENDED that deletion of non-empty namespaces be
@@ -315,7 +315,7 @@ The DELETE operation is used to delete an object
 
 for which a successful response is:
 
-    200 OK
+    204 No Content
     
 An implementation SHOULD NOT allow deletion of objects with existing
 object versions. It is RECOMMENDED that an implementation treat
@@ -360,7 +360,7 @@ The DELETE operation is used to delete an object version
 
 for which a successful response is:
 
-    200 OK
+    204 No Content
     
 Typical DELETE error responses would be:
 - **401 Unauthorized**: the client is not authenticated and
@@ -500,7 +500,7 @@ The PUT operation is used to rewrite ACL settings en masse:
     
 for which the successful response is:
 
-    200 OK
+    204 No Content
 
 where the input JSON completely replaces the existing policy, and any
 missing _access_ field is treated as equivalent to the field being
@@ -517,7 +517,7 @@ The PUT operation is also used to rewrite a specific ACL:
     
 for which the successful response is:
 
-    200 OK
+    204 No Content
 
 where the input JSON array completely replaces the existing ACL.
 
@@ -532,7 +532,7 @@ The PUT operation is also used to add one entry to a specific ACL:
 
 for which the successful response is:
 
-    200 OK
+    204 No Content
 
 where the _entry_ role name or `*` wildcard is now present in the ACL.
    
@@ -555,7 +555,7 @@ The DELETE operation is used to clear a specific ACL:
     
 for which the successful response is:
 
-    200 OK
+    204 No Content
 
 where the ACL is now empty.
 
@@ -569,7 +569,7 @@ The DELETE operation is also used to remove one entry from a specific ACL:
 
 for which the successful response is:
 
-    200 OK
+    204 No Content
 
 where the _entry_ role name or `*` wildcard is no longer present in
 the ACL.
@@ -657,7 +657,7 @@ The PUT operation is used to send data chunks for an existing job:
     
 for which the successful response is:
 
-    200 OK
+    204 No Content
     
 where the data was received and stored.
 
@@ -686,5 +686,5 @@ that is comprised of all the uploaded data chunks.
     
 for which the successful response is:
 
-    200 OK
+    204 No Content
 
