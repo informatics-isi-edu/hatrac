@@ -23,6 +23,7 @@ in unescaped form.
 ## Resource Naming and Lifecycle Rules
 
 The hierarchical Hatrac naming model defines three main types of resource:
+
 1. Namespace
 1. Object
 1. Object Version
@@ -30,6 +31,7 @@ The hierarchical Hatrac naming model defines three main types of resource:
 The model supports a hierarchy of nested namespaces while objects and
 their versions appear only at the leaves of the tree. A particular
 hierarchical name has a simple three-phase lifecycle:
+
 1. Undefined, until the name is bound
 1. Defined, from the moment the name is bound until deleted
   - Namespaces: a name bound as a namespace will always be a namespace
@@ -58,6 +60,7 @@ all of the following hold:
 A particular object name can be qualified with a version identifier
 having a three-phase lifecycle that can oscillate on the latter two
 phases:
+
 1. Undefined, until the version identifier is issued to a content
 value
 1. Defined, from the moment a version is created until the version is
@@ -676,14 +679,10 @@ that is comprised of all the uploaded data chunks.
     
 ### Chunked Upload Job Cancellation
 
-    PUT /namespace_path/object_name;upload/job_id
+    DELETE /namespace_path/object_name;upload/job_id
     Host: authority_name
-    Content-Type: application/json
-    
-    {"hatrac-upload": true, "complete": true}
     
 for which the successful response is:
 
     200 OK
-
 
