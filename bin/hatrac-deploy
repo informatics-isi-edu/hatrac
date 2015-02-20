@@ -1,0 +1,13 @@
+#!/usr/bin/python
+#
+# Copyright 2015 University of Southern California
+# Distributed under Apache License, Version 2.0. See LICENSE for more info.
+#
+
+import sys
+
+from hatrac import deploy_cli
+
+if __name__ == '__main__':
+    result = deploy_cli(sys.argv)
+    sys.exit(result)
