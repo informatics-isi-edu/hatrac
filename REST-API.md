@@ -140,10 +140,34 @@ services in the same authority (host and port), or it MAY use an empty
 prefix if the entire HTTP namespace of the authority is dedicated to
 Hatrac resources.
 
-### TBD: Listing of Namespace Contents?
+In all documentation below, the "/ _prefix_" is considered to be part
+of the _parent path_ URL path elements.  Therefore every example URL
+will be a hierarchical name starting with a "/" character.
 
-It is undecided whether there is a need to list children of the root
-namespace.
+### Listing of Namespace Content
+
+The GET operation is used to list direct children of a namespace:
+
+    GET /parent_path/namespace_id
+    Host: authority_name
+
+for which a successful response is:
+
+    200 OK
+    Location: /parent_path/namespace_id
+    Content-Type: application/json
+    Content-Length: N
+    
+    ["/parent_path/namespace_id/child1", "/parent_path/namespace_id/child2", ...]
+    
+**Note**: future revisions may add content-negotiation with
+alternative listing formats.
+
+### Deletion of Root Namespace Forbidden
+
+The root namespace of a Hatrac deployment SHOULD forbid delete
+operations. It is nonsensical to have a Hatrac deployment without a
+root namespace.
 
 ## Nested Namespace Resources
 
@@ -158,22 +182,23 @@ deployment or another nested namespace.
 
 ### Nested Namespace Creation
 
-The PUT operation is used to create a new nested namespace.  A simple
-JSON representation of the namespace configuration is provided as input:
+The PUT operation is used to create a new nested namespace:
 
     PUT /parent_path/namespace_id
     Host: authority_name
-    Content-Type: application/json
-    
-    {"hatrac-namespace": true}
+    Content-Type: application/x-hatrac-namespace
 
 for which a successful response is:
 
     201 Created
     Location: /parent_path/namespace_id
+    Content-Type: text/uri-list
+    Content-Length: N
+
+    /parent_path/namespace_id
     
-**Note**: see related object resource interface for pragmatic discussion
-of the use of Content-Type and content to disambiguate namespace and
+**Note**: see related object resource interface for pragmatic
+discussion of the use of Content-Type to disambiguate namespace and
 object creation requests.
 
 Typical PUT error responses would be:
@@ -185,6 +210,20 @@ Typical PUT error responses would be:
   conflict with existing state of the service:
   - The _parent path_ does not denote a namespace
   - The namespace already exists
+
+### Listing Namespace Content
+
+The same GET operation documented above for the Root Namespace
+Resource can also list direct children of any nested namespace.
+
+For nested namespaces, typical GET error responses would be:
+- **404 Not Found**: the name does not map to an available resource on
+  the server.
+
+**Note**: since nested namespaces and objects share the same
+hierarchical name structure, a GET operation on a name might resolve
+to an object rather a namespace. As such, error responses applicable
+to an object might be encountered as well.
 
 ### Nested Namespace Deletion
 
@@ -215,10 +254,6 @@ Typical DELETE error responses would be:
 - **409 Conflict**: the resource cannot be deleted at this time,
     i.e. because the namespace is not empty.
 
-### Listing of Namespace Contents?
-
-See same topic under Root Namespace Resource sub-section.
-
 ## Object Resources
 
 Any unversioned object name in Hatrac has an HTTPS URL of the form:
@@ -238,6 +273,7 @@ configuration is provided as input:
     Host: authority_name
     Content-Type: content_type
     Content-Length: N
+    Content-MD5: hash_value
     
     ...content...
 
@@ -245,8 +281,20 @@ for which a successful response is:
 
     201 Created
     Location: /namespace_path/object_name:version_id
+    Content-Type: text/uri-list
+    Content-Length: N
+    
+    /namespace_path/object_name:version_id
+
+The optional `Content-MD5` header can carry an MD5 _hash value_ which
+will be stored and used for data integrity checks.  The successful
+response includes the _version id_ qualified name of the newly updated
+object.
     
 Typical PUT error responses would be:
+  - **400 Bad Request**: the client supplied a `Content-MD5` header
+      with a _hash value_ that does not match the entity _content_
+      which was recieved.
   - **401 Unauthorized**: the client is not authenticated and
       anonymous creation of such an object is not supported.
   - **403 Forbidden**: the client is authenticated but does not have
@@ -263,22 +311,18 @@ structure.  Hatrac disambiguates such requests in a decision process:
 
 1. If the full path denotes an existing object, the PUT request MUST
    denote a request to update the content of the existing object,
-   regardless of what `Content-Type` and content is present.
-1. If `Content-Type` is any value other than `application/json`, the
-   PUT request MUST denote a request to create a new object with the
-   specified content.
-1. If `Content-Type` is `application/json` **and** the input JSON
-   content contains the field `hatrac-namspace` with value `true`, the
-   PUT request MUST denote a request to create a new nested namespace.
+   regardless of what `Content-Type` is present.
+1. If `Content-Type` is `application/x-hatrac-namespace`, the PUT
+   request MUST denote a request to create a new nested namespace.
 1. Any other PUT request not matching the above is considered an
    object creation request.
 
 This set of rules makes it simple to create any common object or
 namespace. In the degenerate case where one wishes to create an object
-with a JSON content that looks exactly like a namespace request input,
-the solution is to first create an empty object and then immediately
-update its content with the desired JSON content.  We feel that this is
-a reasonable trade-off for 
+with content that looks exactly like a namespace request input, the
+solution is to first create an empty object (e.g. with `Content-Type:
+text/plan`) and then immediately update its content with the desired
+content.
 
 ### Object Retrieval
 
@@ -294,8 +338,13 @@ for which a successful response is:
     Location: https://authority_name/namespace_path/object_name:version_id
     Content-Type: content_type
     Content-Length: N
+    Content-MD5: hash_value
     
     ...content...
+
+The optional `Content-MD5` header MUST be present if it was supplied
+during object creation and MAY be present if the service computes
+missing checksums in other cases.
     
 Typical GET error responses would be:
   - **401 Unauthorized**: the client is not authenticated and
@@ -351,6 +400,26 @@ See the previous section on Object Creation and Update. Object
 versions are created by performing an update on the unversioned object
 URL.
 
+### Object Version Retrieval
+
+A particular version of an object can be retrieved whether or not it
+is the current version of the object:
+
+    GET /namespace_path/object_name:version_id
+    Host: authority_name
+
+for which the successful response is:
+
+    200 OK
+    Location: /namespace_path/object_name:version_id
+    Content-Type: content_type
+    Content-MD5: hash_value
+    Content-Length: N
+    
+    ...content...
+    
+with the same interpretation as documented for Object Retrieval above.
+
 ### Object Version Deletion
 
 The DELETE operation is used to delete an object version
@@ -368,6 +437,19 @@ Typical DELETE error responses would be:
 - **403 Forbidden**: the client is authenticated but does not have
   sufficient privilege to delete the resource.
 - **404 Not Found**: the name does not denote an existing resource.
+
+Versions of objects can be deleted whether or not they are the current
+version:
+
+  - Deletion of any version MUST make that version unavailable.
+  - Deletion of any version MAY permanently discard content. An
+    implementation MAY retain deleted content to allow restoration
+    procedures not documented here.
+  - Deletion of the current version will cause the next most recent
+    version of the object to become its new current version.
+  - An object may be left empty, i.e. with no current version, if all
+    versions have been deleted.  A subsequent update can reintroduce
+    content for the object.
 
 ## Access Control List Sub-Resources
 
@@ -391,10 +473,8 @@ each resource type is:
     namespace.
 - Object
   - `owner`: lists roles considered to be owners of the object.
-  - `update`: lists roles permitted to update the object with a new
-    object version.
-  - `read`: lists roles permitted to read new versions of the object
-    by default.
+  - `create`: lists roles permitted to create new versions of the
+    object.
 - Object Version
   - `owner`: lists roles considered to be owners of the object
     version.
@@ -413,17 +493,8 @@ lifetime of the main resource.
    default, but the client may specified an alternative owner list as
    part of the creation request.  In the case of a new object, the
    initial object version gets the same ACL settings as the newly
-   created object.
-1. When a client updates an existing object with a new object version,
-   the new version gets ACL settings depending on the role of the
-   authenticated client:
-   - By default, the new object version has the same ownership and
-     read permissions as the object being updated.
-   - If the authenticated client holds a role listed as an owner of
-     the object being updated, the client MAY override the ownership
-     or read permissions of the new version as part of the request.
-
-TBD: any forced ACL content inherited from parent namespace?
+   created object. **TODO:** define header to control initial ACLs
+   during PUT.
 
 ### Access Control Retrieval
 
@@ -446,6 +517,8 @@ where response contains a JSON object with one field per _access_ mode
 and an array of _role_ names and/or the `*` wildcard for each such access
 list.
 
+### Access Control List Retrieval
+
 The GET operation is also used to retrieve a specific ACL:
 
     GET /resource_name;acl/access
@@ -464,6 +537,8 @@ for which the successful response is:
 where the response contains just one array of _role_ names or the `*`
 wildcard.
 
+### Access Control List Entry Retrieval
+
 The GET operation is also used to retrieve a specific ACL entry:
 
     GET /resource_name;acl/access/entry
@@ -474,40 +549,24 @@ for which the successful response is:
 
     200 OK
     Location: https://authority_name/resource_name;acl/access/entry
-    Content-Type: application/json
+    Content-Type: text/plain
     Content-Length: N
     
-    "role"
+    role
 
-where the response contains just one _role_ names `*` wildcard entry.
+where the response contains just one _role_ name or `*` wildcard entry.
 
 Typical GET error responses would be:
   - **401 Unauthorized**: the client is not authenticated and
       anonymous retrieval of such a policy is not supported.
   - **403 Forbidden**: the client is authenticated but does not have
       sufficient privilege to retrieve the policy.
-  - **404 Not Found**: the name does not denote a defined policy.
+  - **404 Not Found**: the namespace or object resource or ACL
+      subresource is not found.
 
-### Access Control Update
+### Access Control List Update
 
-The PUT operation is used to rewrite ACL settings en masse:
-
-    PUT /resource_name;acl
-    Host: authority_name
-    Content-Type: application/json
-    
-    {"access": ["role", ...], ...}
-    
-for which the successful response is:
-
-    204 No Content
-
-where the input JSON completely replaces the existing policy, and any
-missing _access_ field is treated as equivalent to the field being
-present with an empty value `[]`, i.e. no authorized roles for that
-access mode.
-
-The PUT operation is also used to rewrite a specific ACL:
+The PUT operation is used to rewrite a specific ACL:
 
     PUT /resource_name;acl/access
     Host: authority_name
@@ -524,6 +583,8 @@ where the input JSON array completely replaces the existing ACL.
 It is RECOMMENDED that the implementation reject changes
 which would strip too many permissions, e.g. leaving a resource with
 no `owner`.
+
+### Access Control List Entry Creation
 
 The PUT operation is also used to add one entry to a specific ACL:
 
@@ -545,8 +606,7 @@ Typical PUT error responses would be:
   sufficient privilege to update the resource.
 - **404 Not Found**: the name does not denote an existing resource.
 
-
-### Access Control Deletion
+### Access Control List Deletion
 
 The DELETE operation is used to clear a specific ACL:
 
@@ -561,6 +621,8 @@ where the ACL is now empty.
 
 It is RECOMMENDED that the implementation reject changes which would
 strip too many permissions, e.g. leaving a resource with no `owner`.
+
+### Access Control List Entry Deletion
 
 The DELETE operation is also used to remove one entry from a specific ACL:
 
@@ -609,7 +671,7 @@ The three-phase chunked upload job has an effect equivalent to a
 single PUT request on an object:
 
 1. Create service-side transfer job state
-1. Send set of chunks
+1. Send set of idempotent chunks
 1. Signal job completion
 
 The benefit of this technique is that individual HTTP requests can be
@@ -622,10 +684,22 @@ This interface has been designed to accomodate two important
 implementation strategies:
 - The fixed chunk size and ordinal position can be used to compute a
   byte offset for direct assembly of data into sparse files in a
-  filesystem.
+  filesystem.  The chunks are non-overlapping byte ranges at fixed
+  offsets. Idempotent retransmission of chunks is permitted, but a
+  client SHOULD NOT send different content for multiple requests using
+  the same _position_. An implementation MAY mix content of multiple
+  transmissions for the same _position_.  An implementation MAY accept
+  completion of an upload job that has missing chunks.
 - The individual requests easily map to similar chunked upload
   interfaced in object systems such as Amazon S3, allowing a thin
-  proxy to implement Hatrac on top of such services.
+  proxy to implement Hatrac on top of such services. Retransmission or
+  out-of-order transmission of chunks is permitted, but a client
+  SHOULD NOT skip ordinal _positions_. An implementation MAY reject
+  completion of an upload job that has missing chunks.
+
+Hence, it is the client's responsibility to track acknowledged of
+individual chunk transfers and defer completion of an upload job until
+all chunks have been successfully transmitted.
 
 ### Chunked Upload Job Creation
 
