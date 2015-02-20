@@ -24,7 +24,6 @@ import hatrac.core
 _webauthn2_config = webauthn2.merge_config(
     jsonFileName='webauthn2_config.json'
 )
-# TODO: coordinate web_cookie_path setting of webauthn2?
 _webauthn2_manager = webauthn2.Manager(overrides=_webauthn2_config)
 
 
@@ -150,7 +149,8 @@ def web_method():
 
             try:
                 # run actual method
-                return original_method(*args)
+                for buf in original_method(*args):
+                    yield buf
             except hatrac.core.BadRequest, ev:
                 raise BadRequest(str(ev))
             except hatrac.core.Unauthenticated, ev:
@@ -212,17 +212,13 @@ class RestHandler (object):
 
     def get_content(self, resource, client_context):
         """Form response w/ bulk resource content."""
-        nbytes, data_generator = resource.get_content(client_context)
+        nbytes, content_type, content_md5, data_generator = resource.get_content(client_context)
         web.ctx.status = '200 OK'
-        # TODO: refactor headers into resource.get_content() result tuple
         web.header('Content-Length', nbytes)
-        if resource.is_object() and resource.is_version():
-            if resource.content_type:
-                web.header('Content-Type', resource.content_type)
-            if resource.content_md5:
-                web.header('Content-MD5', resource.content_md5)
-        else:
-            web.header('Content-Type', 'application/json')
+        if content_type:
+            web.header('Content-Type', content_type)
+        if content_md5:
+            web.header('Content-MD5', content_md5)
         for buf in data_generator:
             yield buf
 
@@ -230,7 +226,10 @@ class RestHandler (object):
         """Form response for resource creation request."""
         web.ctx.status = '201 Created'
         web.header('Location', str(resource))
-        return ''
+        web.header('Content-Type', 'text/uri-list')
+        body = str(resource) + '\n'
+        web.header('Content-Length', len(body))
+        return body
 
     def delete_response(self):
         """Form response for deletion request."""

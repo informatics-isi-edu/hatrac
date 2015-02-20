@@ -13,7 +13,7 @@ import web
 
 @web_url([
      # path, name, version
-    '/([^/:;]+/)*([^/:;]+):([^/:;]+)'
+    '/((?:[^/:;]+/)*)([^/:;]+):([^/:;]+)'
 ])
 class NameVersion (RestHandler):
     """Represent Hatrac resources addressed by version-qualified names.
@@ -47,7 +47,7 @@ class NameVersion (RestHandler):
 
 @web_url([
      # path, name
-    '/([^/:;]+/)*([^/:;]+)',
+    '/((?:[^/:;]+/)*)([^/:;]+)/?',
     '/()()'
 ])
 class Name (RestHandler):

@@ -38,6 +38,8 @@ version of any particular object.
 
 """
 
+import web
+
 from webauthn2.util import DatabaseConnection, sql_literal, sql_identifier, jsonWriter
 import hatrac.core
 
@@ -74,6 +76,13 @@ class HatracName (object):
         self.is_deleted = args['is_deleted']
         self.acls = dict()
         self._acl_load(**args)
+
+    @staticmethod
+    def construct(directory, **args):
+        if args['is_object']:
+            return HatracObject(directory, **args)
+        else:
+            return HatracNamespace(directory, **args)
 
     def __str__(self):
         return self.name
@@ -144,10 +153,10 @@ class HatracNamespace (HatracName):
         return self.directory.create_name(name, is_object, client_context)
 
     def get_content(self, client_context):
-        """Return (nbytes, data_generator) pair for namespace."""
-        body = list(self.directory.namespace_enumerate_names(self))
+        """Return (nbytes, content_type, content_md5, data_generator) for namespace."""
+        body = [ str(r) for r in self.directory.namespace_enumerate_names(self, False) ]
         body = jsonWriter(body) + '\n'
-        return (len(body), [body])
+        return (len(body), 'application/json', None, body)
 
 class HatracObject (HatracName):
     """Represent a bound object."""
@@ -169,7 +178,7 @@ class HatracObject (HatracName):
         return self.directory.create_version_from_file(self, input, nbytes, client_context, content_type, content_md5)
 
     def get_content(self, client_context):
-        """Return (nbytes, data_generator) pair for current version.
+        """Return (nbytes, content_type, content_md5, data_generator) for current version.
         """
         resource = self.get_current_version()
         return resource.get_content(client_context)
@@ -201,8 +210,10 @@ class HatracObjectVersion (HatracName):
 
     def _reload(self, db):
         object1 = self.object._reload(db)
-        result = self.directory._version_lookup(db, object1.id, self.version)[0]
-        return type(self)(self.directory, object1, **result)
+        result = self.directory._version_lookup(db, object1.id, self.version)
+        if not result:
+            raise hatrac.core.NotFound("Resource %s not found." % self)
+        return type(self)(self.directory, object1, **result[0])
 
     def is_object(self):
         return True
@@ -325,6 +336,9 @@ class HatracDirectory (DatabaseConnection):
             if resource1.is_deleted:
                 raise hatrac.core.NotFound('Namespace %s not available.' % resource)
 
+            if resource.name == '/':
+                raise hatrac.core.Forbidden('Root service namespace %s cannot be deleted.' % resource1)
+
             # test ACLs and map out recursive delete
             deleted_versions = []
             deleted_names = []
@@ -335,10 +349,7 @@ class HatracDirectory (DatabaseConnection):
                 deleted_versions.append( row )
 
             for row in self._namespace_enumerate_names(db, resource1):
-                if row.is_object:
-                    HatracObject(self, **row).enforce_acl(['owner'], client_context)
-                else:
-                    HatracNamespace(self, **row).enforce_acl(['owner'], client_context)
+                HatracName.construct(self, **row).enforce_acl(['owner'], client_context)
                 deleted_names.append( row )
 
             # we only get here if no ACL raised an exception above
@@ -413,7 +424,9 @@ class HatracDirectory (DatabaseConnection):
             return objversion1
 
         objversion = self._db_wrapper(db_thunk)
-        return self.storage.get_content(object.name, objversion.version)
+        nbytes, content_type, content_md5, data = self.storage.get_content(object.name, objversion.version)
+        # override metadata from directory??
+        return (nbytes, objversion.content_type, objversion.content_md5, data)
 
     def name_resolve(self, name, raise_notfound=True):
         """Return a HatracNamespace or HatracObject instance.
@@ -424,10 +437,7 @@ class HatracDirectory (DatabaseConnection):
                 result = result[0]
                 if raise_notfound and result.is_deleted:
                     raise hatrac.core.NotFound('Resource %s not available.' % name)
-                if result.is_object:
-                    return HatracObject(self, **result)
-                else:
-                    return HatracNamespace(self, **result)
+                return HatracName.construct(self, **result)
             elif raise_notfound:
                 raise hatrac.core.NotFound('Resource %s not found.' % name)
             else:
@@ -498,12 +508,15 @@ class HatracDirectory (DatabaseConnection):
 
         return self._db_wrapper(db_thunk)
 
-    def namespace_enumerate_names(self, resource):
+    def namespace_enumerate_names(self, resource, recursive=True):
         def db_thunk(db):
             resource1 = resource._reload(db)
-            return self._namespace_enumerate_names(db, resource1, False)
+            return list(self._namespace_enumerate_names(db, resource1, recursive))
 
-        return self._db_wrapper(db_thunk)
+        return [
+            HatracName.construct(self, **row)
+            for row in self._db_wrapper(db_thunk)
+        ]
 
     def _set_resource_acl_role(self, db, resource, access, role):
         if access not in resource._acl_names:
@@ -529,9 +542,9 @@ WHERE n.id = %(id)s
         # need to use raw SQL to compute modified array in database
         db.query("""
 UPDATE hatrac.%(table)s n
-SET %(acl)s = array_append(coalesce(n.%(acl)s, ARRAY[]::text[]), %(role)s)
+SET %(acl)s = array_remove(coalesce(n.%(acl)s, ARRAY[]::text[]), %(role)s)
 WHERE n.id = %(id)s
-  AND NOT coalesce(ARRAY[%(role)s] && n.%(acl)s, False);
+  AND coalesce(ARRAY[%(role)s] && n.%(acl)s, False);
 """ % dict(
     table=sql_identifier(resource._table_name),
     acl=sql_identifier(access),
@@ -645,7 +658,10 @@ RETURNING *
         
     def _namespace_enumerate_names(self, db, resource, recursive=True):
         # return every namespace or object under /name/...
-        pattern = "^" + regexp_escape(resource.name) + '/'
+        pattern = "^" + regexp_escape(resource.name)
+        if pattern[-1] != '/':
+            # TODO: fix special cases for rootns?
+            pattern += '/'
         if not recursive:
             pattern += '[^/]+$'
         return db.select(

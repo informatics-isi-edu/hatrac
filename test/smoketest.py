@@ -6,6 +6,7 @@ import hatrac
 import hatrac.core
 import web
 from webauthn2.manager import Context
+import web
 
 web.config.debug = False
 
@@ -45,6 +46,11 @@ def expect(cls, thunk):
 rootns = test_directory.name_resolve("/")
 
 expect(
+    hatrac.core.Forbidden,
+    lambda : rootns.delete(root_context)
+)
+
+expect(
     hatrac.core.NotFound,
     lambda : test_directory.name_resolve("/foo")
 )
@@ -75,7 +81,7 @@ obj1.create_version_from_file(
 
 vers1 = obj1.get_current_version()
 
-rbytes1, data1 = obj1.get_content(root_context)
+rbytes1, ct1, hash1, data1 = obj1.get_content(root_context)
 assert rbytes1 == nbytes1
 assert ''.join(data1) == content1
 
@@ -88,21 +94,21 @@ obj1.create_version_from_file(
 
 vers2 = obj1.get_current_version()
 
-rbytes2, data2 = obj1.get_content(root_context)
+rbytes2, ct2, hash2, data2 = obj1.get_content(root_context)
 assert rbytes2 == nbytes2
 assert ''.join(data2) == content2
 
-rbytes1, data1 = vers1.get_content(root_context)
+rbytes1, ct1, hash1, data1 = vers1.get_content(root_context)
 assert rbytes1 == nbytes1
 assert ''.join(data1) == content1
 
-rbytes2, data2 = vers2.get_content(root_context)
+rbytes2, ct2, hash2, data2 = vers2.get_content(root_context)
 assert rbytes2 == nbytes2
 assert ''.join(data2) == content2
 
 vers2.delete(root_context)
 
-rbytes3, data3 = obj1.get_content(root_context)
+rbytes3, ct3, hash3, data3 = obj1.get_content(root_context)
 assert rbytes3 == nbytes1
 assert ''.join(data3) == content1
 

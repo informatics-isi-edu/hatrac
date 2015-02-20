@@ -108,7 +108,7 @@ class HatracStorage (object):
         return version
 
     def get_content(self, name, version):
-        """Return (nbytes, data_iterator) tuple for existing file-version object."""
+        """Return (nbytes, content_type, content_md5, data_iterator) tuple for existing file-version object."""
         dirname, relname = self._dirname_relname(name, version)
         fullname = "%s/%s" % (dirname, relname)
         nbytes = os.path.getsize(fullname)
@@ -129,7 +129,7 @@ class HatracStorage (object):
                     elif buflen == 0:
                         raise IOError('Only read %s of %s expected bytes.' % (rbytes, nbytes))
 
-        return (nbytes, helper())
+        return (nbytes, None, None, helper())
 
     def delete(self, name, version):
         """Delete object version."""
@@ -140,4 +140,7 @@ class HatracStorage (object):
     def delete_namespace(self, name):
         """Tidy up after an empty namespace that has been deleted."""
         dirname, relname = self._dirname_relname(name, 'dummy')
-        os.removedirs(dirname)
+        try:
+            os.removedirs(dirname)
+        except OSError:
+            pass
