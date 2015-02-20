@@ -289,6 +289,8 @@ class HatracDirectory (DatabaseConnection):
         nameparts = [ n for n in name.split('/') if n ]
         parname = "/" + "/".join(nameparts[0:-1])
         relname = nameparts[-1]
+        if relname in [ '.', '..' ]:
+            raise hatrac.core.BadRequest('Illegal name "%s".' % relname)
 
         def db_thunk(db): 
             result = list(self._name_lookup(db, name))
