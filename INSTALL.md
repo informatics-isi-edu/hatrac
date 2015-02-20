@@ -66,7 +66,9 @@ ERMrest installation as described in the subsequent configration
 examples of this document):
 
     # manually create a session cookie
-    % curl -b cookie -c cookie -d username=testuser -d password=testpassword https://$(hostname)/ermrest/auth/session
+    % curl -b cookie -c cookie \
+       -d username=testuser -d password=testpassword \
+       https://$(hostname)/ermrest/auth/session
 
     # run the test script
     % COOKIES=cookie bash test/rest-smoketest.sh
@@ -134,9 +136,6 @@ installed under `/etc/httpd/conf.d/` on Red Hat flavored machines:
     
        WSGIProcessGroup hatrac
         
-       # site can disable redundant service logging by adding env=!dontlog to their CustomLog or similar directives
-       SetEnv dontlog
-    
     </Location>
 
 ## Working with SE-Linux
