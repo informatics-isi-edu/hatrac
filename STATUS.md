@@ -8,6 +8,7 @@ The current status is that basic APIs seem to work:
 1. ACL GET, PUT, DELETE 
 1. ACL entry GET, PUT, DELETE 
 1. ACL-based authorization of all requests
+1. integrity checking when Content-MD5 is present
 
 This includes the specified immutable/stable reference semantics from 
 the REST-API.md doc, i.e. deletion leaves breadcrumbs in the database 
@@ -24,7 +25,6 @@ Known Issues/Limitations:
 
 Missing implementation features include: 
  
-1. integrity checking (i.e. actual MD5 data validation) 
 1. chunked upload API 
 1. Any support for webauthn2 login w/o external deployment such as ERMrest
 1. Tracking object version content size in database to allow integrity checking etc. 

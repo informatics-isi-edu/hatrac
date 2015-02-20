@@ -7,6 +7,7 @@ import hatrac.core
 import web
 from webauthn2.manager import Context
 import web
+import hashlib
 
 web.config.debug = False
 
@@ -74,9 +75,15 @@ expect(
 
 content1 = 'test data 1\n'
 nbytes1 = len(content1)
+content1_md5 = hashlib.md5(content1).hexdigest()
+
+expect(
+    hatrac.core.BadRequest,
+    lambda : obj1.create_version_from_file(StringIO(content1), nbytes1, root_context, 'text/plain', 'thisisbroken')
+)
 
 obj1.create_version_from_file(
-    StringIO(content1), nbytes1, root_context, 'text/plain'
+    StringIO(content1), nbytes1, root_context, 'text/plain', content1_md5
 )
 
 vers1 = obj1.get_current_version()
@@ -87,9 +94,10 @@ assert ''.join(data1) == content1
 
 content2 = 'test data 2\n'
 nbytes2 = len(content2)
+content2_md5 = hashlib.md5(content2).hexdigest()
 
 obj1.create_version_from_file(
-    StringIO(content2), nbytes2, root_context, 'text/plain'
+    StringIO(content2), nbytes2, root_context, 'text/plain', content2_md5
 )
 
 vers2 = obj1.get_current_version()
@@ -106,6 +114,15 @@ rbytes2, ct2, hash2, data2 = vers2.get_content(root_context)
 assert rbytes2 == nbytes2
 assert ''.join(data2) == content2
 
+# tamper with storage to simulate storage corruption
+f = open("%s/%s:%s" % (test_config.storage_path, vers2.name, vers2.version), "ab")
+f.write("this is broken")
+f.close()
+expect(
+    IOError,
+    lambda: ''.join(vers2.get_content(root_context)[3])
+)
+
 vers2.delete(root_context)
 
 rbytes3, ct3, hash3, data3 = obj1.get_content(root_context)
@@ -119,7 +136,7 @@ expect(
 
 expect(
     hatrac.core.NotFound,
-    lambda : vers2.get_content(root_context)
+    lambda : ''.join(vers2.get_content(root_context)[3])
 )
 
 expect(
@@ -129,12 +146,12 @@ expect(
 
 expect(
     hatrac.core.Forbidden,
-    lambda : obj1.get_content(foo_context)
+    lambda : ''.join(obj1.get_content(foo_context)[3])
 )
 
 vers1.set_acl('read', ['foo', 'bar'], root_context)
 
-obj1.get_content(foo_context)
+''.join(obj1.get_content(foo_context)[3])
 
 vers1.set_acl_role('read', 'baz', root_context)    
 vers1.drop_acl_role('read', 'bar', root_context)

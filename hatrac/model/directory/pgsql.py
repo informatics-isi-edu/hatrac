@@ -424,7 +424,7 @@ class HatracDirectory (DatabaseConnection):
             return objversion1
 
         objversion = self._db_wrapper(db_thunk)
-        nbytes, content_type, content_md5, data = self.storage.get_content(object.name, objversion.version)
+        nbytes, content_type, content_md5, data = self.storage.get_content(object.name, objversion.version, objversion.content_md5)
         # override metadata from directory??
         return (nbytes, objversion.content_type, objversion.content_md5, data)
 

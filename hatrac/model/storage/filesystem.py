@@ -16,6 +16,8 @@ import base64
 import random
 import struct
 
+from hatrac.core import BadRequest
+
 def make_file(dirname, relname, accessmode):
     """Create and open file with accessmode, including missing parents.
 
@@ -83,6 +85,11 @@ class HatracStorage (object):
         dirname, relname = self._dirname_relname(name, version)
         f = make_file(dirname, relname, 'wb')
 
+        if content_md5:
+            hasher = hashlib.md5()
+        else:
+            hasher = None
+
         rbytes = 0
         eof = False
         while not eof:
@@ -96,24 +103,40 @@ class HatracStorage (object):
             bufsize = len(buf)
             rbytes += bufsize
 
+            if hasher:
+                hasher.update(buf)
+
             if nbytes is not None:
                 if rbytes >= nbytes:
                     eof = True
                 elif buflen == 0:
                     f.close()
-                    raise IOError('Only received %s of %s expected bytes.' % (rbytes, nbytes))
+                    raise BadRequest('Only received %s of %s expected bytes.' % (rbytes, nbytes))
             elif buflen == 0:
                 eof = True
 
+        if hasher:
+            received_md5 = hasher.hexdigest().lower()
+            if content_md5.lower() != received_md5:
+                raise BadRequest(
+                    'Received content MD5 %s does not match expected %s.' 
+                    % (received_md5, content_md5)
+                )
+
         return version
 
-    def get_content(self, name, version):
+    def get_content(self, name, version, content_md5=None):
         """Return (nbytes, content_type, content_md5, data_iterator) tuple for existing file-version object."""
         dirname, relname = self._dirname_relname(name, version)
         fullname = "%s/%s" % (dirname, relname)
         nbytes = os.path.getsize(fullname)
         
         def helper():
+            if content_md5:
+                hasher = hashlib.md5()
+            else:
+                hasher = None
+
             rbytes = 0
             eof = False
             with open(fullname, 'rb') as f:
@@ -122,14 +145,25 @@ class HatracStorage (object):
                     buflen = len(buf)
                     rbytes += buflen
                     
-                    yield buf
+                    if hasher:
+                        hasher.update(buf)
 
                     if rbytes >= nbytes:
                         eof = True
                     elif buflen == 0:
                         raise IOError('Only read %s of %s expected bytes.' % (rbytes, nbytes))
 
-        return (nbytes, None, None, helper())
+                    if eof and hasher:
+                        retrieved_md5 = hasher.hexdigest().lower()
+                        if content_md5.lower() != retrieved_md5:
+                            raise IOError(
+                                'Retrieved content MD5 %s does not match expected %s.'
+                                % (retrieved_md5, content_md5)
+                            )
+
+                    yield buf
+
+        return (nbytes, None, content_md5, helper())
 
     def delete(self, name, version):
         """Delete object version."""
