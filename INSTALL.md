@@ -28,17 +28,17 @@ You can perform some local testing of Hatrac without configuring the
 whole web service stack:
 
     # make sure Hatrac is installed
-    python setup.py install
+    % python setup.py install
     
     # get rid of any previous test data
-    dropdb hatrac_test
-    rm -rf hatrac_test_data
+    % dropdb hatrac_test
+    % rm -rf hatrac_test_data
 
     # create empty test database
-    createdb hatrac_test
+    % createdb hatrac_test
     
     # run tests
-    python test/smoketest.py
+    % python test/smoketest.py
 
 The test script should run to completion without printing anything. If
 it encounters errors, diagnostics will be printed and the script will
@@ -57,6 +57,19 @@ This configuration works on a Fedora host:
         "database_schema": "hatrac",
         "database_max_retries": 5
     }
+
+## REST API testing
+
+You can perform system testing of the whole web service stack, if
+configured with cookie-based authentication (such as using a companion
+ERMrest installation as described in the subsequent configration
+examples of this document):
+
+    # manually create a session cookie
+    % curl -b cookie -c cookie -d username=testuser -d password=testpassword https://$(hostname)/ermrest/auth/session
+
+    # run the test script
+    % COOKIES=cookie bash test/rest-smoketest.sh
 
 ## Example Webauthn2 configuration 
 
