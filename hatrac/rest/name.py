@@ -92,8 +92,8 @@ class Name (RestHandler):
                 content_md5 = None
             resource = resource.create_version_from_file(
                 web.ctx.env['wsgi.input'],
-                nbytes,
                 web.ctx.webauthn2_context,
+                nbytes,
                 content_type=in_content_type,
                 content_md5=content_md5
             )
