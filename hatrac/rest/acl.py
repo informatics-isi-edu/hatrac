@@ -4,7 +4,7 @@
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound
+from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest
 from webauthn2.util import jsonWriterRaw, jsonReader
 import web
 

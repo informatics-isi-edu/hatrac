@@ -4,59 +4,118 @@
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-from core import web_url
-
+import web
+from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest
+from webauthn2.util import jsonReader
 
 @web_url([
     # path, name, job, chunk
-    '/([^/:;]+/)*([^/:;]+);upload/([^/:;]+)/([^/:;]+)'
+    '/((?:[^/:;]+/)*)([^/:;]+);upload/([^/:;]+)/([^/:;]+)'
 ])
-class ObjectTransferChunk (object):
+class ObjectTransferChunk (RestHandler):
 
     def __init__(self):
-        pass
+        RestHandler.__init__(self)
 
+    @web_method()
     def PUT(self, path, name, job, chunk):
         """Upload chunk of transfer job."""
-        pass
+        try:
+            chunk = int(chunk)
+        except ValueError:
+            raise BadRequest('Invalid chunk number %s.' % chunk)
+        try:
+            nbytes = int(web.ctx.env['CONTENT_LENGTH'])
+        except:
+            raise LengthRequired()
+        if 'CONTENT_MD5' in web.ctx.env:
+            content_md5 = web.ctx.env.get('CONTENT_MD5').lower()
+        else:
+            content_md5 = None
+        upload = self.resolve_upload(path, name, job)
+        upload.version.enforce_acl(['owner'], web.ctx.webauthn2_context)
+        upload.upload_chunk_from_file(
+            chunk, 
+            web.ctx.env['wsgi.input'],
+            web.ctx.webauthn2_context,
+            nbytes,
+            content_md5
+        )
+        return self.update_response()
 
 
 @web_url([
     # path, name, job
-    '/([^/:;]+/)*([^/:;]+);upload/([^/:;]+)/?'
+    '/((?:[^/:;]+/)*)([^/:;]+);upload/([^/:;]+)/?'
 ])
-class ObjectTransfer (object):
+class ObjectTransfer (RestHandler):
 
     def __init__(self):
-        pass
+        RestHandler.__init__(self)
 
-    def PUT(self, path, name, job):
+    @web_method()
+    def POST(self, path, name, job):
         """Update status of transfer job to finalize."""
-        pass
+        upload = self.resolve_upload(path, name, job)
+        version = upload.finalize(web.ctx.webauthn2_context)
+        return self.create_response(version)
 
+    @web_method()
     def DELETE(self, path, name, job):
         """Cancel existing transfer job."""
-        pass
+        upload = self.resolve_upload(path, name, job)
+        upload.cancel(web.ctx.webauthn2_context)
+        return self.update_response(version)
 
-    def GET(self, path, name, job):
+    def _GET(self, path, name, job):
         """Get status of transfer job."""
         pass
 
 
 @web_url([
     # path, name
-    '/([^/:;]+/)*([^/:;]+);upload/?'
+    '/((?:[^/:;]+/)*)([^/:;]+);upload/?'
 ])
-class ObjectTransfers (object):
+class ObjectTransfers (RestHandler):
 
     def __init__(self):
-        pass
+        RestHandler.__init__(self)
 
+    @web_method()
     def POST(self, path, name):
         """Create a new chunked transfer job."""
-        pass
+        in_content_type = self.in_content_type()
 
-    def GET(self, path, name):
+        if in_content_type != 'application/json':
+            raise BadRequest('Only application/json input is accepted for upload jobs.')
+        try:
+            job = jsonReader(web.ctx.env['wsgi.input'].read())
+        except ValueError, ev:
+            raise BadRequest('Error reading JSON input:' % ev)
+        if type(job) != dict:
+            raise BadRequest('Job input must be a flat JSON object.')
+
+        try:
+            chunksize = int(job['chunk_bytes'])
+            nbytes = int(job['total_bytes'])
+            content_type = job.get('content_type')
+            content_md5 = job.get('content_md5')
+        except KeyError, ev:
+            raise BadRequest('Missing required field %s.' % ev)
+        except ValueError, ev:
+            raise BadRequest('Invalid count: %s.' % ev)
+
+        resource = self.resolve(path, name)
+        resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
+        if not resource.is_object():
+            raise NoMethod('POST not supported on namespaces.')
+
+        upload = resource.create_version_upload_job(
+            chunksize, web.ctx.webauthn2_context, nbytes, content_type, content_md5
+        )
+        return self.create_response(upload)
+
+    def _GET(self, path, name):
         """List outstanding chunked transfer jobs."""
         pass
         

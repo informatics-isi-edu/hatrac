@@ -709,10 +709,10 @@ The POST operation is used to create a new upload job:
     Host: authority_name
     Content-Type: application/json
     
-    {"chunk-bytes": K, 
-     "total-bytes": N,
-     "content-type": "content_type",
-     "content-md5": "hash_value"}
+    {"chunk_bytes": K, 
+     "total_bytes": N,
+     "content_type": "content_type",
+     "content_md5": "hash_value"}
 
 where the JSON attributes `chunk-bytes` and `total-bytes` are
 mandatory to describe the shape of the data upload, while

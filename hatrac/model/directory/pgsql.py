@@ -199,6 +199,9 @@ class HatracObject (HatracName):
         """
         return self.directory.version_resolve(self, version)
 
+    def upload_resolve(self, upload):
+        return self.directory.upload_resolve(self, upload)
+
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
     _acl_names = ['owner', 'read']
@@ -250,10 +253,12 @@ class HatracUpload (HatracName):
 
     def _reload(self, db):
         version1 = self.version._reload(db)
-        result = self.directory._upload_lookup(db, version1.id, self.job)
+        result = self.directory._upload_lookup(db, version1.object.id, self.job)
         if not result:
             raise hatrac.core.NotFound("Resource %s not found." % self)
-        return type(self)(self.directory, version1, **result[0])
+        result = result[0]
+        del result['version']
+        return type(self)(self.directory, version1, **result)
 
     def upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5=None):
         return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5)
@@ -567,6 +572,20 @@ class HatracDirectory (DatabaseConnection):
         r = self._db_wrapper(db_thunk)
         return HatracObjectVersion(self, object, **r)
 
+    def upload_resolve(self, object, job, raise_notfound=True):
+        """Return a HatracObjectVersion instance corresponding to referenced version.
+        """
+        def db_thunk(db):
+            result = list(self._upload_lookup(db, object.id, job))
+            if not result:
+                raise hatrac.core.NotFound("Upload job %s;upload/%s not found." % (object.name, job))
+            return result[0]
+
+        r = self._db_wrapper(db_thunk)
+        version = self.version_resolve(object, r.version, False)
+        del r['version']
+        return HatracUpload(self, version, **r)
+
     def get_current_version(self, object):
         """Return a HatracObjectVersion instance corresponding to latest.
         """
@@ -758,11 +777,13 @@ RETURNING *
             ])
         )
 
-    def _upload_lookup(self, db, versionid, job):
+    def _upload_lookup(self, db, oid, job):
         return db.select(
-            ["hatrac.upload u"],
+            ["hatrac.upload u", "hatrac.version v"],
+            what="u.*, v.version",
             where=' AND '.join([
-                "u.versionid = %s" % sql_literal(int(versionid)),
+                "v.nameid = %s" % sql_literal(int(oid)),
+                "u.versionid = v.id",
                 "u.job = %s" % sql_literal(job)
             ])
         )

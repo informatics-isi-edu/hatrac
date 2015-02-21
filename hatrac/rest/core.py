@@ -197,6 +197,10 @@ class RestHandler (object):
         object = self.resolve(path, name)
         return object.version_resolve(version)
 
+    def resolve_upload(self, path, name, job):
+        resource = self.resolve(path, name)
+        return resource.upload_resolve(job)
+        
     def resolve_name_or_version(self, path, name, version):
         if version:
             return self.resolve_version(path, name, version)

@@ -42,10 +42,12 @@ EOF
 RUNKEY=smoketest-$RANDOM
 RESPONSE_HEADERS=/tmp/${RUNKEY}-response-headers
 RESPONSE_CONTENT=/tmp/${RUNKEY}-response-content
+TEST_DATA=/tmp/${RUNKEY}-test-data
 
 cleanup()
 {
-    rm -f ${RESPONSE_HEADERS} ${RESPONSE_CONTENT}
+    rm -f ${RESPONSE_HEADERS} ${RESPONSE_CONTENT} ${TEST_DATA}
+    rm -f /tmp/parts-${RUNKEY}*
 }
 
 trap cleanup 0
@@ -82,11 +84,11 @@ dotest()
     md5_mismatch=
     if grep -i -q content-md5 ${RESPONSE_HEADERS}
     then
-	hash1=$(grep -i content-md5 ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+: //")
+	hash1=$(grep -i content-md5 ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+: \([a-z0-9]\+\).*/\1/")
 	hash2=$(md5sum < ${RESPONSE_CONTENT} | sed -e "s/ \+-//")
-	if [[ $hash1 != $hash2 ]]
+	if [[ "$hash1" != "$hash2" ]]
 	then
-	    md5_mismatch="Content-MD5 != body md5sum!  $hash1 != $hash2"
+	    md5_mismatch="Content-MD5 ${hash1} mismatch body ${hash2}"
 	else
 	    echo "Content-MD5 == body md5sum $hash1 == $hash2" >&2
 	fi
@@ -95,6 +97,13 @@ dotest()
     if [[ "$summary" != $pattern ]] || [[ -n "${md5_mismatch}" ]]
     then
 	printf "FAILED.\n" >&2
+	cat <<EOF
+--
+${hash1}
+--
+${hash2}
+--
+EOF
 	cat <<EOF
 
 TEST FAILURE:
@@ -153,6 +162,28 @@ dotest "204::*::*" "${obj1_vers1}" -X DELETE
 dotest "404::*::*" "${obj1_vers1}"
 dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
 
+# test chunk upload
+cat > ${TEST_DATA} <<EOF
+{"chunk_bytes": 1024,
+ "total_bytes": $(stat -c "%s" $0),
+ "content_type": "application/x-bash",
+ "content_md5": "$md5"}
+EOF
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
+    -T "${TEST_DATA}" \
+    -X POST \
+    -H "Content-Type: application/json"
+upload="$(cat "${RESPONSE_CONTENT}")"
+split -b 1024 -d "$0" /tmp/parts-${RUNKEY}-
+for part in /tmp/parts-${RUNKEY}-*
+do
+    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
+    md5=$(md5sum < "$part" | sed -e "s/ \+-//")
+    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
+done
+dotest "201::*::*" "${upload}" -X POST
+dotest "404::*::*" "${upload}" -X POST
+dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
 
 # check ACL API
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl"
