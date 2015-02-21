@@ -64,7 +64,9 @@ expect(
 test_directory.create_name("/foo", False, root_context)
 test_directory.create_name("/foo/bar", False, root_context)
 test_directory.create_name("/foo/obj1", True, root_context)
+test_directory.create_name("/foo/objJ", True, root_context)
 obj1 = test_directory.name_resolve("/foo/obj1")
+objJ = test_directory.name_resolve("/foo/objJ")
 
 assert 'testroot' in obj1.get_acls()['owner']
 
@@ -79,12 +81,32 @@ content1_md5 = hashlib.md5(content1).hexdigest()
 
 expect(
     hatrac.core.BadRequest,
-    lambda : obj1.create_version_from_file(StringIO(content1), nbytes1, root_context, 'text/plain', 'thisisbroken')
+    lambda : obj1.create_version_from_file(StringIO(content1), root_context, nbytes1, 'text/plain', 'thisisbroken')
 )
 
 obj1.create_version_from_file(
-    StringIO(content1), nbytes1, root_context, 'text/plain', content1_md5
+    StringIO(content1), root_context, nbytes1, 'text/plain', content1_md5
 )
+
+contentJ = 'test data that will be sent in multiple parts'
+chunksize = 10
+nbytesJ = len(contentJ)
+contentJ_md5 = hashlib.md5(contentJ).hexdigest()
+
+upload = objJ.create_version_upload_job(chunksize, root_context, nbytesJ, 'text/plain', contentJ_md5)
+pos = 0
+while pos < len(contentJ):
+    chunk = contentJ[pos:min(pos+chunksize,nbytesJ)]
+    chunk_md5 = hashlib.md5(chunk).hexdigest()
+    upload.upload_chunk_from_file(pos/chunksize, StringIO(chunk), root_context, len(chunk), chunk_md5)
+    pos += chunksize
+versJ = upload.finalize(root_context)
+
+''.join(objJ.get_content(root_context)[3])
+upload = objJ.create_version_upload_job(chunksize, root_context, nbytesJ, 'text/plain', contentJ_md5)
+''.join(objJ.get_content(root_context)[3])
+upload.cancel(root_context)
+''.join(objJ.get_content(root_context)[3])
 
 vers1 = obj1.get_current_version()
 
@@ -97,7 +119,7 @@ nbytes2 = len(content2)
 content2_md5 = hashlib.md5(content2).hexdigest()
 
 obj1.create_version_from_file(
-    StringIO(content2), nbytes2, root_context, 'text/plain', content2_md5
+    StringIO(content2), root_context, nbytes2, 'text/plain', content2_md5
 )
 
 vers2 = obj1.get_current_version()

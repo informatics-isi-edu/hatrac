@@ -15,6 +15,7 @@ import hashlib
 import base64
 import random
 import struct
+from StringIO import StringIO
 
 from hatrac.core import BadRequest
 
@@ -85,6 +86,22 @@ class HatracStorage (object):
         dirname, relname = self._dirname_relname(name, version)
         f = make_file(dirname, relname, 'wb')
 
+        # upload whole content at offset 0 (for code reuse)
+        self.upload_chunk_from_file(None, None, 0, 0, input, nbytes, content_md5, f)
+        return version
+
+    def create_upload(self, name, nbytes=None, content_type=None, content_md5=None):
+        version = self.create_from_file(name, StringIO(''), 0)
+        return version
+
+    def upload_chunk_from_file(self, name, version, position, chunksize, input, nbytes, content_md5=None, f=None):
+        if f is None:
+            dirname, relname = self._dirname_relname(name, version)
+            fullname = "%s/%s" % (dirname, relname)
+            
+            f = open(fullname, "r+b")
+        f.seek(position*chunksize)
+
         if content_md5:
             hasher = hashlib.md5()
         else:
@@ -122,9 +139,7 @@ class HatracStorage (object):
                     'Received content MD5 %s does not match expected %s.' 
                     % (received_md5, content_md5)
                 )
-
-        return version
-
+                    
     def get_content(self, name, version, content_md5=None):
         """Return (nbytes, content_type, content_md5, data_iterator) tuple for existing file-version object."""
         dirname, relname = self._dirname_relname(name, version)

@@ -709,8 +709,16 @@ The POST operation is used to create a new upload job:
     Host: authority_name
     Content-Type: application/json
     
-    {"hatrac-upload": true, "chunk-bytes": K, "total-bytes": N, "content-type": "content_type"}
-    
+    {"chunk-bytes": K, 
+     "total-bytes": N,
+     "content-type": "content_type",
+     "content-md5": "hash_value"}
+
+where the JSON attributes `chunk-bytes` and `total-bytes` are
+mandatory to describe the shape of the data upload, while
+`content-type` and `content-md5` are optional and have the same
+meaning as if passed as headers in a simple PUT object operation.
+
 for which the successful response is:
 
     201 Created
@@ -739,11 +747,8 @@ where the data was received and stored.
 
 The PUT operation is used to signal completion of an upload job:
 
-    PUT /namespace_path/object_name;upload/job_id
+    POST /namespace_path/object_name;upload/job_id
     Host: authority_name
-    Content-Type: application/json
-    
-    {"hatrac-upload": true, "complete": true}
     
 for which the successful response is:
 
@@ -751,9 +756,21 @@ for which the successful response is:
     Location: /namespace_path/object_name:version_id
 
 where `Location` includes the URL of the newly created object version
-that is comprised of all the uploaded data chunks.
+that is comprised of all the uploaded data chunks as if it had been
+created by a corresponding PUT request:
+
+    PUT /namespace_path/object_name
+    Host: authority_name
+    Content-Type: content_type
+    Content-MD5: hash_value
+    Content-Length: N
+    
+    ...content...
     
 ### Chunked Upload Job Cancellation
+
+The DELETE method can be used to cancel an upload job that has not yet
+been finalized:
 
     DELETE /namespace_path/object_name;upload/job_id
     Host: authority_name
@@ -761,4 +778,7 @@ that is comprised of all the uploaded data chunks.
 for which the successful response is:
 
     204 No Content
+
+Once canceled, the job resource no longer exists and associated
+storage SHOULD be reclaimed.
 

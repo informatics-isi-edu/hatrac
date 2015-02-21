@@ -39,7 +39,10 @@ version of any particular object.
 """
 
 import web
-
+import base64
+import random
+import struct
+from StringIO import StringIO
 from webauthn2.util import DatabaseConnection, sql_literal, sql_identifier, jsonWriter
 import hatrac.core
 
@@ -171,11 +174,14 @@ class HatracObject (HatracName):
     def is_version(self):
         return False
 
-    def create_version_from_file(self, input, nbytes, client_context, content_type=None, content_md5=None):
+    def create_version_from_file(self, input, client_context, nbytes, content_type=None, content_md5=None):
         """Create, persist, and return HatracObjectVersion with given content.
 
         """
-        return self.directory.create_version_from_file(self, input, nbytes, client_context, content_type, content_md5)
+        return self.directory.create_version_from_file(self, input, client_context, nbytes, content_type, content_md5)
+
+    def create_version_upload_job(self, chunksize, client_context, nbytes=None, content_type=None, content_md5=None):
+        return self.directory.create_version_upload_job(self, chunksize, client_context, nbytes, content_type, content_md5)
 
     def get_content(self, client_context):
         """Return (nbytes, content_type, content_md5, data_generator) for current version.
@@ -202,6 +208,7 @@ class HatracObjectVersion (HatracName):
         HatracName.__init__(self, directory, **args)
         self.object = object
         self.version = args['version']
+        self.nbytes = args['nbytes']
         self.content_type = args['content_type']
         self.content_md5 = args['content_md5']
 
@@ -228,6 +235,35 @@ class HatracObjectVersion (HatracName):
         """Delete resource and its children."""
         return self.directory.delete_version(self, client_context)
 
+class HatracUpload (HatracName):
+    """Represent an upload job."""
+    def __init__(self, directory, version, **args):
+        self.directory = directory
+        self.version = version
+        self.id = args['id']
+        self.versionid = args['versionid']
+        self.job = args['job']
+        self.chunksize = args['chunksize']
+
+    def __str__(self):
+        return "%s;upload/%s" % (str(self.version.object), self.job)
+
+    def _reload(self, db):
+        version1 = self.version._reload(db)
+        result = self.directory._upload_lookup(db, version1.id, self.job)
+        if not result:
+            raise hatrac.core.NotFound("Resource %s not found." % self)
+        return type(self)(self.directory, version1, **result[0])
+
+    def upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5=None):
+        return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5)
+
+    def finalize(self, client_context):
+        return self.directory.upload_finalize(self, client_context)
+
+    def cancel(self, client_context):
+        return self.directory.upload_cancel(self, client_context)
+
 
 _name_table_sql = """
 CREATE TABLE hatrac.name (
@@ -250,6 +286,7 @@ CREATE TABLE hatrac.version (
   id bigserial PRIMARY KEY,
   nameid int8 NOT NULL REFERENCES hatrac.name(id),
   version text,
+  nbytes int8,
   content_type text,
   content_md5 text,
   is_deleted bool NOT NULL,
@@ -260,6 +297,16 @@ CREATE TABLE hatrac.version (
 );
 
 CREATE INDEX version_nameid_id_idx ON hatrac.version (nameid, id);
+"""
+
+_upload_table_sql = """
+CREATE TABLE IF NOT EXISTS hatrac.upload (
+  id bigserial PRIMARY KEY,
+  versionid int8 NOT NULL REFERENCES hatrac.version(id),
+  job text NOT NULL,
+  chunksize int8 NOT NULL,
+  CHECK(chunksize > 0)
+);
 """
 
 class HatracDirectory (DatabaseConnection):
@@ -279,10 +326,11 @@ class HatracDirectory (DatabaseConnection):
     def deploy_db(self, admin_roles):
         """Initialize database and set root namespace owners."""
         def db_thunk(db):
-            db.query('CREATE SCHEMA hatrac')
+            db.query('CREATE SCHEMA IF NOT EXISTS hatrac')
             for sql in [
                     _name_table_sql,
-                    _version_table_sql
+                    _version_table_sql,
+                    _upload_table_sql
             ]:
                 db.query(sql)
 
@@ -384,7 +432,7 @@ class HatracDirectory (DatabaseConnection):
         version = self._db_wrapper(db_thunk)
         self.storage.delete(version.name, version.version)
 
-    def create_version(self, object, client_context, content_type=None, content_md5=None):
+    def create_version(self, object, client_context, nbytes=None, content_type=None, content_md5=None):
         """Create, persist, and return a HatracObjectVersion instance.
 
            Newly created instance is marked 'deleted'.
@@ -395,7 +443,7 @@ class HatracDirectory (DatabaseConnection):
             if object1.is_deleted:
                 raise hatrac.core.NotFound('Object %s is not available.' % object1)
             object1.enforce_acl(['owner', 'create'], client_context)
-            result = list(self._create_version(db, object1.id, content_type, content_md5))[0]
+            result = list(self._create_version(db, object1.id, nbytes, content_type, content_md5))[0]
             result.name = object.name
             result = HatracObjectVersion(self, object1, **result)
             self._set_resource_acl_role(db, result, 'owner', client_context.client)
@@ -403,15 +451,73 @@ class HatracDirectory (DatabaseConnection):
 
         return self._db_wrapper(db_thunk)
 
-    def create_version_from_file(self, object, input, nbytes, client_context, content_type=None, content_md5=None):
+    def create_upload(self, version, chunksize, client_context):
+        def db_thunk(db):
+            result = list(self._create_upload(db, version.id, chunksize))[0]
+            return HatracUpload(self, version, **result)
+
+        return self._db_wrapper(db_thunk)
+
+    def create_version_from_file(self, object, input, client_context, nbytes, content_type=None, content_md5=None):
         """Create, persist, and return HatracObjectVersion with given content.
 
         """
-        resource = self.create_version(object, client_context, content_type, content_md5)
+        resource = self.create_version(object, client_context, nbytes, content_type, content_md5)
         assert resource.is_deleted
         version = self.storage.create_from_file(object.name, input, nbytes, content_type, content_md5)
         self._db_wrapper(lambda db: self._complete_version(db, resource, version))
         return self.version_resolve(object, version)
+
+    def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, content_type=None, content_md5=None):
+        resource = self.create_version(object, client_context, nbytes, content_type, content_md5)
+        assert resource.is_deleted
+        resource.version = self.storage.create_upload(object.name, nbytes, content_type, content_md5)
+        self._db_wrapper(lambda db: self._complete_version(db, resource, resource.version, True)) # still in deleted state
+        return self.create_upload(resource, chunksize, client_context)
+
+    def upload_chunk_from_file(self, upload, position, input, client_context, nbytes, content_md5=None):
+        upload.version.enforce_acl(['owner'], client_context)
+        if not upload.version.is_deleted:
+            raise hatrac.core.Conflict('Further transfers not permitted once upload job is finalized.')
+        nchunks = upload.version.nbytes / upload.chunksize
+        remainder = upload.version.nbytes % upload.chunksize
+        if position < (nchunks - 1) and nbytes != upload.chunksize:
+            raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match job chunk size %s.' % (nbytes, upload.chunksize))
+        if remainder and position == nchunks and nbytes != remainder:
+            raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match final chunk size %s.' % (nbytes, remainder))
+        self.storage.upload_chunk_from_file(
+            upload.version.object.name, 
+            upload.version.version, 
+            position, 
+            upload.chunksize, 
+            input, 
+            nbytes, 
+            content_md5
+        )
+
+    def upload_finalize(self, upload, client_context):
+        def db_thunk(db):
+            upload1 = upload._reload(db)
+            version = upload1.version._reload(db)
+            version.enforce_acl(['owner'], client_context)
+            self._complete_version(db, version, version.version)
+            self._delete_upload(db, upload1)
+            return version
+
+        version = self._db_wrapper(db_thunk)
+        return self.version_resolve(version.object, version.version)
+
+    def upload_cancel(self, upload, client_context):
+        def db_thunk(db):
+            upload1 = upload._reload(db)
+            version = upload1.version._reload(db)
+            version.enforce_acl(['owner'], client_context)
+            self._delete_upload(db, upload1)
+            return version
+
+        version = self._db_wrapper(db_thunk)
+        if version.is_deleted:
+            self.storage.delete(version.name, version.version)
 
     def get_version_content(self, object, objversion, client_context):
         """Return (nbytes, data_generator) pair for specific version."""
@@ -576,24 +682,42 @@ RETURNING *
 )
         )
 
-    def _create_version(self, db, oid, content_type=None, content_md5=None):
+    def _create_version(self, db, oid, nbytes=None, content_type=None, content_md5=None):
         return db.query("""
 INSERT INTO hatrac.version
-(nameid, content_type, content_md5, is_deleted)
-VALUES (%(nameid)s, %(type)s, %(md5)s, True)
+(nameid, nbytes, content_type, content_md5, is_deleted)
+VALUES (%(nameid)s, %(nbytes)s, %(type)s, %(md5)s, True)
 RETURNING *
 """ % dict(
     nameid=sql_literal(oid),
+    nbytes=nbytes is not None and sql_literal(int(nbytes)) or 'NULL::int8',
     type=content_type and sql_literal(content_type) or 'NULL::text',
     md5=content_md5 and sql_literal(content_md5) or 'NULL::text'
 )
         )
 
-    def _complete_version(self, db, resource, version):
+    def _create_upload(self, db, vid, chunksize):
+        jobid = base64.b32encode( 
+            (struct.pack('Q', random.getrandbits(64))
+             + struct.pack('Q', random.getrandbits(64)))[0:26]
+        ).replace('=', '') # strip off '=' padding
+        return db.query("""
+INSERT INTO hatrac.upload 
+(versionid, job, chunksize)
+VALUES (%(versionid)s, %(job)s, %(chunksize)s)
+RETURNING *
+""" % dict(
+    versionid=sql_literal(vid),
+    chunksize=sql_literal(int(chunksize)),
+    job=sql_literal(jobid)
+)
+        )
+
+    def _complete_version(self, db, resource, version, is_deleted=False):
         return db.update(
             "hatrac.version",
             where="id = %s" % sql_literal(resource.id),
-            is_deleted=False,
+            is_deleted=is_deleted,
             version=version
         )
 
@@ -609,6 +733,12 @@ RETURNING *
             "hatrac.version",
             where="id = %s" % sql_literal(resource.id),
             is_deleted=True
+        )
+
+    def _delete_upload(self, db, resource):
+        return db.delete(
+            "hatrac.upload",
+            where="id = %s" % sql_literal(resource.id)
         )
 
     def _name_lookup(self, db, name):
@@ -627,6 +757,15 @@ RETURNING *
                 "v.version = %s" % sql_literal(version)
             ])
         )
+
+    def _upload_lookup(self, db, versionid, job):
+        return db.select(
+            ["hatrac.upload u"],
+            where=' AND '.join([
+                "u.versionid = %s" % sql_literal(int(versionid)),
+                "u.job = %s" % sql_literal(job)
+            ])
+        )
         
     def _version_list(self, db, nameid, limit=None):
         # TODO: add range keying for scrolling enumeration?
@@ -634,6 +773,7 @@ RETURNING *
             ["hatrac.name n", "hatrac.version v"],
             what="v.*, n.name",
             where=' AND '.join([
+                "v.nameid = %d" % nameid,
                 "v.nameid = n.id",
                 "NOT v.is_deleted"
             ]),
