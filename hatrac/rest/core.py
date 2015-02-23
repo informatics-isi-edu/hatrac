@@ -308,7 +308,7 @@ class RestHandler (object):
                 raise ev
             except Exception, ev:
                 # HTTP spec says to ignore a Range header w/ syntax errors
-                web.debug(ev)
+                web.debug('Ignoring HTTP Range header %s due to error: %s' % (get_range, ev))
                 pass
 
         if get_slice is not None:
