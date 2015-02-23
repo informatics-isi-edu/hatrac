@@ -17,7 +17,7 @@ import random
 import struct
 from StringIO import StringIO
 
-from hatrac.core import BadRequest
+from hatrac.core import BadRequest, coalesce
 
 def make_file(dirname, relname, accessmode):
     """Create and open file with accessmode, including missing parents.
@@ -139,34 +139,51 @@ class HatracStorage (object):
                     'Received content MD5 %s does not match expected %s.' 
                     % (received_md5, content_md5)
                 )
-                    
+               
     def get_content(self, name, version, content_md5=None):
+        return self.get_content_range(name, version, content_md5)
+     
+    def get_content_range(self, name, version, content_md5=None, get_slice=None):
         """Return (nbytes, content_type, content_md5, data_iterator) tuple for existing file-version object."""
         dirname, relname = self._dirname_relname(name, version)
         fullname = "%s/%s" % (dirname, relname)
         nbytes = os.path.getsize(fullname)
+
+        if get_slice is not None:
+            pos = coalesce(get_slice.start, 0)
+            limit = coalesce(get_slice.stop, nbytes)
+        else:
+            pos = 0
+            limit = nbytes
+
+        if pos != 0 or limit != nbytes:
+            # cannot integrity-check a partial read
+            content_md5 = None
         
+        length = limit - pos
+
         def helper():
             if content_md5:
                 hasher = hashlib.md5()
             else:
                 hasher = None
 
-            rbytes = 0
+            rpos = pos
             eof = False
             with open(fullname, 'rb') as f:
+                f.seek(rpos)
                 while not eof:
-                    buf = f.read(min(nbytes-rbytes, self._bufsize))
+                    buf = f.read(min(limit-rpos, self._bufsize))
                     buflen = len(buf)
-                    rbytes += buflen
+                    rpos += buflen
                     
                     if hasher:
                         hasher.update(buf)
 
-                    if rbytes >= nbytes:
+                    if rpos >= (limit-1):
                         eof = True
                     elif buflen == 0:
-                        raise IOError('Only read %s of %s expected bytes.' % (rbytes, nbytes))
+                        raise IOError('Read truncated at %s when %s expected.' % (rpos, limit))
 
                     if eof and hasher:
                         retrieved_md5 = hasher.hexdigest().lower()
@@ -178,7 +195,7 @@ class HatracStorage (object):
 
                     yield buf
 
-        return (nbytes, None, content_md5, helper())
+        return (length, None, content_md5, helper())
 
     def delete(self, name, version):
         """Delete object version."""

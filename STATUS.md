@@ -11,6 +11,7 @@ The current status is that basic APIs seem to work:
 1. integrity checking when Content-MD5 is present
 1. chunked upload via POST, PUT..., POST sequence
 1. chunked upload cancel via DELETE
+1. partial download via GET with Range header
 
 This includes the specified immutable/stable reference semantics from 
 the REST-API.md doc, i.e. deletion leaves breadcrumbs in the database 

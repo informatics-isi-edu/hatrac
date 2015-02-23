@@ -114,6 +114,21 @@ rbytes1, ct1, hash1, data1 = obj1.get_content(root_context)
 assert rbytes1 == nbytes1
 assert ''.join(data1) == content1
 
+rbytes1, ct1, hash1, data1 = obj1.get_content_range(root_context, slice(2,8))
+assert rbytes1 == 6
+assert ''.join(data1) == content1[2:8]
+assert hash1 is None
+
+rbytes1, ct1, hash1, data1 = obj1.get_content_range(root_context, slice(2,None))
+assert rbytes1 == nbytes1 - 2
+assert ''.join(data1) == content1[2:]
+assert hash1 is None
+
+rbytes1, ct1, hash1, data1 = obj1.get_content_range(root_context, slice(0,None))
+assert rbytes1 == nbytes1
+assert ''.join(data1) == content1[0:]
+assert hash1 == content1_md5
+
 content2 = 'test data 2\n'
 nbytes2 = len(content2)
 content2_md5 = hashlib.md5(content2).hexdigest()

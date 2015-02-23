@@ -151,13 +151,30 @@ dotest "405::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatr
 
 # test objects
 md5=$(md5sum < $0 | sed -e "s/ \+-//")
+script_size=$(stat -c "%s" $0)
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
     -H "Content-Type: application/x-bash" \
     -H "Content-MD5: $md5"
 obj1_vers1="$(cat ${RESPONSE_CONTENT})"
-dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
-dotest "200::application/x-bash::*" "${obj1_vers1}"
+dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1
+dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
+
+# test partial GET
+dotest "200::*::${script_size}" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=0-"
+dotest "206::*::$((${script_size} - 10))" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=10-"
+dotest "206::*::891" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=10-900"
+dotest "206::*::900" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=-900"
+dotest "200::*::${script_size}" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=-900000"
+
+# test partial GET error conditions
+dotest "501::*::*" /ns-${RUNKEY}/foo2 -H "Range: bytes=1-2"
+dotest "501::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=1-2,3-5"
+dotest "416::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=900000-"
+# syntactically invalid means ignore Range!
+dotest "200::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=900000-5,1-2"
+
+# test deletion
 dotest "204::*::*" "${obj1_vers1}" -X DELETE
 dotest "404::*::*" "${obj1_vers1}"
 dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
@@ -165,7 +182,7 @@ dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
 # test chunk upload
 cat > ${TEST_DATA} <<EOF
 {"chunk_bytes": 1024,
- "total_bytes": $(stat -c "%s" $0),
+ "total_bytes": ${script_size},
  "content_type": "application/x-bash",
  "content_md5": "$md5"}
 EOF

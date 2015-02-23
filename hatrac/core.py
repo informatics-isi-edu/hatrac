@@ -14,6 +14,11 @@ config = merge_config(
     jsonFileName='hatrac_config.json'
 )
 
+def coalesce(*args):
+    for arg in args:
+        if arg is not None:
+            return arg
+
 class HatracException (Exception):
     """Base class for Hatrac API exceptions."""
     pass

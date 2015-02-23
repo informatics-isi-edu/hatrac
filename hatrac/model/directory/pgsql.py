@@ -45,11 +45,7 @@ import struct
 from StringIO import StringIO
 from webauthn2.util import DatabaseConnection, sql_literal, sql_identifier, jsonWriter
 import hatrac.core
-
-def coalesce(*args):
-    for arg in args:
-        if arg is not None:
-            return arg
+from hatrac.core import coalesce
 
 def regexp_escape(s):
     safe = set(
@@ -183,11 +179,14 @@ class HatracObject (HatracName):
     def create_version_upload_job(self, chunksize, client_context, nbytes=None, content_type=None, content_md5=None):
         return self.directory.create_version_upload_job(self, chunksize, client_context, nbytes, content_type, content_md5)
 
-    def get_content(self, client_context):
+    def get_content_range(self, client_context, get_slice=None):
         """Return (nbytes, content_type, content_md5, data_generator) for current version.
         """
         resource = self.get_current_version()
-        return resource.get_content(client_context)
+        return resource.get_content_range(client_context, get_slice)
+
+    def get_content(self, client_context):
+        return self.get_content_range(client_context)
 
     def get_current_version(self):
         """Return HatracObjectVersion instance corresponding to current state.
@@ -233,6 +232,9 @@ class HatracObjectVersion (HatracName):
 
     def get_content(self, client_context):
         return self.directory.get_version_content(self.object, self, client_context)
+
+    def get_content_range(self, client_context, get_slice=None):
+        return self.directory.get_version_content_range(self.object, self, get_slice, client_context)
 
     def delete(self, client_context):
         """Delete resource and its children."""
@@ -524,7 +526,7 @@ class HatracDirectory (DatabaseConnection):
         if version.is_deleted:
             self.storage.delete(version.name, version.version)
 
-    def get_version_content(self, object, objversion, client_context):
+    def get_version_content_range(self, object, objversion, get_slice, client_context):
         """Return (nbytes, data_generator) pair for specific version."""
         def db_thunk(db):
             # re-fetch status for ACID test
@@ -535,9 +537,13 @@ class HatracDirectory (DatabaseConnection):
             return objversion1
 
         objversion = self._db_wrapper(db_thunk)
-        nbytes, content_type, content_md5, data = self.storage.get_content(object.name, objversion.version, objversion.content_md5)
+        nbytes, content_type, content_md5, data = self.storage.get_content_range(object.name, objversion.version, objversion.content_md5, get_slice)
         # override metadata from directory??
-        return (nbytes, objversion.content_type, objversion.content_md5, data)
+        return (nbytes, objversion.content_type, content_md5, data)
+
+    def get_version_content(self, object, objversion, client_context):
+        """Return (nbytes, data_generator) pair for specific version."""
+        return self.get_version_content_range(object, objversion, None, client_context)
 
     def name_resolve(self, name, raise_notfound=True):
         """Return a HatracNamespace or HatracObject instance.

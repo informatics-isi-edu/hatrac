@@ -125,7 +125,17 @@ class LengthRequired (RestException):
     status = '411 Length Required'
     message = 'Content-Length header is required for this request.'
 
+class BadRange (RestException):
+    status = '416 Requested Range Not Satisfiable'
+    message = 'Requested Range is not satisfiable for this resource.'
+    def __init__(self, msg=None, headers=None, nbytes=None):
+        RestException.__init__(self, msg, headers)
+        if nbytes is not None:
+            web.header('Content-Range', 'bytes */%d' % nbytes)
 
+class NotImplemented (RestException):
+    status = '501 Not Implemented'
+    message = 'Request not implemented for this resource.'
 
 def web_method():
     """Augment web handler method with common service logic."""
@@ -216,8 +226,102 @@ class RestHandler (object):
 
     def get_content(self, resource, client_context):
         """Form response w/ bulk resource content."""
-        nbytes, content_type, content_md5, data_generator = resource.get_content(client_context)
-        web.ctx.status = '200 OK'
+        get_range = web.ctx.env.get('HTTP_RANGE')
+        get_slice = None
+        if get_range:
+            # parse HTTP Range header which can encode a set of ranges
+            get_slices = []
+
+            if resource.is_object():
+                # lookup version so we can get at nbytes
+                resource = resource.get_current_version()
+
+            if not hasattr(resource, 'nbytes') \
+               or not hasattr(resource, 'get_content_range'):
+                raise NotImplemented('Range requests not implemented for resource %s.' % resource)
+
+            try:
+                units, rset = get_range.split('=')
+
+                if units.lower() != "bytes":
+                    raise NotImplemented('Range requests with units "%s" not implemented.' % units)
+
+                for r in rset.split(","):
+                    first, last = r.split("-", 1)
+                    if first == '':
+                        # a suffix request
+                        length = int(last)
+                        if length == 0:
+                            # zero length suffix is syntactically invalid?
+                            raise ValueError('zero length suffix')
+                            
+                        if length > resource.nbytes:
+                            length = resource.nbytes
+
+                        get_slices.append(
+                            slice(
+                                max(0, resource.nbytes - length),
+                                resource.nbytes
+                            )
+                        )
+                    else:
+                        first = int(first)
+                        if last == '':
+                            # an open [first, eof] request
+                            get_slices.append(
+                                slice(first, resource.nbytes)
+                            )
+                        else:
+                            # a closed [first, last] request
+                            last = int(last)
+                            if last < first:
+                                raise ValueError('last < first')
+                            get_slices.append(
+                                slice(first, last+1)
+                            )
+
+                def intersects_resource(r):
+                    if r.start < resource.nbytes and r.start < (r.stop + 1):
+                        return True
+                    else:
+                        return False
+
+                get_slices = [ slc for slc in get_slices if intersects_resource(slc) ]
+                
+                if len(get_slices) == 0:
+                    raise BadRange(
+                        'Range not satisfiable for resource %s.' % resource, 
+                        nbytes=resource.nbytes
+                    )
+                elif len(get_slices) > 1:
+                    raise NotImplemented(
+                        'Multiple range request not implemented for resource %s.' % resource
+                    )
+                else:
+                    get_slice = get_slices[0]
+                    get_slice = slice(get_slice.start, min(get_slice.stop, resource.nbytes))
+                    if get_slice.start == 0 and get_slice.stop == resource.nbytes:
+                        # whole-entity
+                        get_slice = None
+             
+            except (BadRange, NotImplemented), ev:
+                raise ev
+            except Exception, ev:
+                # HTTP spec says to ignore a Range header w/ syntax errors
+                web.debug(ev)
+                pass
+
+        if get_slice is not None:
+            nbytes, content_type, content_md5, data_generator \
+                = resource.get_content_range(client_context, get_slice)
+            web.ctx.status = '206 Partial Content'
+            web.header(
+                'Content-Range', 'bytes %d-%d/%d' 
+                % (get_slice.start, get_slice.stop - 1, resource.nbytes)
+            )
+        else:
+            nbytes, content_type, content_md5, data_generator = resource.get_content(client_context)
+            web.ctx.status = '200 OK'
         web.header('Content-Length', nbytes)
         if content_type:
             web.header('Content-Type', content_type)
