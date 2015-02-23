@@ -144,7 +144,7 @@ In all documentation below, the "/ _prefix_" is considered to be part
 of the _parent path_ URL path elements.  Therefore every example URL
 will be a hierarchical name starting with a "/" character.
 
-### Listing of Namespace Content
+### Namespace Listing Retrieval
 
 The GET operation is used to list direct children of a namespace:
 
@@ -162,6 +162,24 @@ for which a successful response is:
     
 **Note**: future revisions may add content-negotiation with
 alternative listing formats.
+
+### Namespace Listing Metadata Retrieval
+
+The HEAD operation is used to get basic status information:
+
+    HEAD /parent_path/namespace_id
+    Host: authority_name
+
+for which a successful response is:
+
+    200 OK
+    Location: /parent_path/namespace_id
+    Content-Type: application/json
+    Content-Length: N
+    
+indicating that an `N` byte JSON representation is available.  This
+operation is essentially equivalent to the GET operation but with the
+actual child listing elided.
 
 ### Deletion of Root Namespace Forbidden
 
@@ -211,12 +229,13 @@ Typical PUT error responses would be:
   - The _parent path_ does not denote a namespace
   - The namespace already exists
 
-### Listing Namespace Content
+### Namespace Listing Retrieval
 
-The same GET operation documented above for the Root Namespace
-Resource can also list direct children of any nested namespace.
+The same GET and HEAD operations documented above for the Root
+Namespace Resource can also list direct children of any nested
+namespace.
 
-For nested namespaces, typical GET error responses would be:
+For nested namespaces, typical GET or HEAD error responses would be:
 - **404 Not Found**: the name does not map to an available resource on
   the server.
 
@@ -326,7 +345,7 @@ content.
 
 ### Object Retrieval
 
-The GET operation is used to retrieve the current version of an object
+The GET operation is used to retrieve the current version of an object:
 
     GET /namespace_path/object_name
     Host: authority_name
@@ -354,6 +373,26 @@ Typical GET error responses would be:
   - **404 Not Found**: the name does not denote a defined object.
   - **409 Conflict**: the object cannot be retrieved at this time,
       e.g. there are currently no object versions defined.
+
+### Object Metadata Retrieval
+
+The HEAD operation is used to retrieve information about the current
+version of an object:
+
+    HEAD /namespace_path/object_name
+    Host: authority_name
+    Accept: *
+    
+for which a successful response is:
+
+    200 OK
+    Location: https://authority_name/namespace_path/object_name:version_id
+    Content-Type: content_type
+    Content-Length: N
+    Content-MD5: hash_value
+
+The HEAD operation is essentially equivalent to the GET operation but
+with the actual object content elided.
 
 ### Object Deletion
 
@@ -402,8 +441,8 @@ URL.
 
 ### Object Version Retrieval
 
-A particular version of an object can be retrieved whether or not it
-is the current version of the object:
+A particular version of an object can be retrieved using the GET
+operation whether or not it is the current version of the object:
 
     GET /namespace_path/object_name:version_id
     Host: authority_name
@@ -419,6 +458,26 @@ for which the successful response is:
     ...content...
     
 with the same interpretation as documented for Object Retrieval above.
+
+### Object Version Metadata Retrieval
+
+Metadata for a particular version of an object can be retrieved using
+the HEAD operation whether or not it is the current version of the
+object:
+
+    HEAD /namespace_path/object_name:version_id
+    Host: authority_name
+
+for which the successful response is:
+
+    200 OK
+    Location: /namespace_path/object_name:version_id
+    Content-Type: content_type
+    Content-MD5: hash_value
+    Content-Length: N
+    
+with the same interpretation as documented for Object Metadata
+Retrieval above.
 
 ### Object Version Deletion
 
@@ -517,6 +576,19 @@ where response contains a JSON object with one field per _access_ mode
 and an array of _role_ names and/or the `*` wildcard for each such access
 list.
 
+The HEAD operation can likewise retrieve en masse ACL metadata:
+
+    GET /resource_name;acl
+    Host: authority_name
+    Accept: application/json
+    
+for which the successful response is:
+
+    200 OK
+    Location: https://authority_name/resource_name;acl
+    Content-Type: application/json
+    Content-Length: N
+
 ### Access Control List Retrieval
 
 The GET operation is also used to retrieve a specific ACL:
@@ -536,6 +608,19 @@ for which the successful response is:
 
 where the response contains just one array of _role_ names or the `*`
 wildcard.
+
+The HEAD operation can likewise retrieve individual ACL metadata:
+
+    GET /resource_name;acl/access
+    Host: authority_name
+    Accept: application/json
+    
+for which the successful response is:
+
+    200 OK
+    Location: https://authority_name/resource_name;acl/access
+    Content-Type: application/json
+    Content-Length: N
 
 ### Access Control List Entry Retrieval
 
@@ -563,6 +648,20 @@ Typical GET error responses would be:
       sufficient privilege to retrieve the policy.
   - **404 Not Found**: the namespace or object resource or ACL
       subresource is not found.
+
+The HEAD operation is also used to retrieve metadata for a specific
+ACL entry:
+
+    GET /resource_name;acl/access/entry
+    Host: authority_name
+    Accept: application/json
+    
+for which the successful response is:
+
+    200 OK
+    Location: https://authority_name/resource_name;acl/access/entry
+    Content-Type: text/plain
+    Content-Length: N
 
 ### Access Control List Update
 
@@ -766,7 +865,9 @@ created by a corresponding PUT request:
     Content-Length: N
     
     ...content...
-    
+
+
+
 ### Chunked Upload Job Cancellation
 
 The DELETE method can be used to cancel an upload job that has not yet

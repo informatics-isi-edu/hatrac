@@ -4,9 +4,9 @@ The current status is that basic APIs seem to work:
 1. namespace GET, PUT, DELETE, HEAD
 1. object GET, PUT, DELETE, HEAD
 1. object version GET, DELETE, HEAD
-1. ACLs GET 
-1. ACL GET, PUT, DELETE 
-1. ACL entry GET, PUT, DELETE 
+1. ACLs GET, HEAD
+1. ACL GET, PUT, DELETE, HEAD
+1. ACL entry GET, PUT, DELETE, HEAD
 1. ACL-based authorization of all requests
 1. integrity checking when Content-MD5 is present
 1. chunked upload via POST, PUT..., POST sequence
@@ -39,7 +39,7 @@ Missing specification and implementation:
 1. any way to list upload jobs 
 1. any URL-based third-party PUT 
 1. any timeout/garbage collection for jobs 
-1. any HTTP HEAD or OPTIONS operations 
+1. any HTTP OPTIONS operations 
 1. any HTTP cache-control features 
 
 Additional TODO considerations:

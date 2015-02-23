@@ -43,7 +43,7 @@ import base64
 import random
 import struct
 from StringIO import StringIO
-from webauthn2.util import DatabaseConnection, sql_literal, sql_identifier, jsonWriter
+from webauthn2.util import DatabaseConnection, sql_literal, sql_identifier, jsonWriterRaw
 import hatrac.core
 from hatrac.core import coalesce
 
@@ -63,6 +63,45 @@ def regexp_escape(s):
         
     return ''.join([ remap(c) for c in s ])
 
+class ACLEntry (str):
+    def get_content(self, client_context):
+        self.resource.enforce_acl(['owner'], client_context)
+        return len(self), 'text/plain', None, [self]
+
+class ACL (set):
+    def get_content(self, client_context):
+        self.resource.enforce_acl(['owner'], client_context)
+        body = jsonWriterRaw(list(self)) + '\n'
+        nbytes = len(body)
+        return nbytes, 'application/json', None, [body]
+
+    def __getitem__(self, role):
+        if role not in self:
+            raise hatrac.core.NotFound(
+                'ACL member %s;acl/%s/%s not found.' % (self.resource, self.access, role)
+            )
+        entry = ACLEntry(role + '\n')
+        entry.resource = self.resource
+        return entry
+
+class ACLs (dict):
+    def get_content(self, client_context):
+        self.resource.enforce_acl(['owner'], client_context)
+        body = jsonWriterRaw(self.resource.get_acls()) + '\n'
+        nbytes = len(body)
+        return nbytes, 'application/json', None, [body]
+
+    def __getitem__(self, k):
+        try:
+            return dict.__getitem__(self, k)
+        except KeyError:
+            raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (k, self.resource))
+
+    def __setitem__(self, k, v):
+        dict.__setitem__(self, k, v)
+        v.resource = self.resource
+        v.access = k
+
 class HatracName (object):
     """Represent a bound name."""
     _acl_names = []
@@ -73,7 +112,9 @@ class HatracName (object):
         self.id = args['id']
         self.name = args['name']
         self.is_deleted = args['is_deleted']
-        self.acls = dict()
+        self.acls = ACLs()
+        self.acls.directory = directory
+        self.acls.resource = self
         self._acl_load(**args)
 
     @staticmethod
@@ -92,7 +133,7 @@ class HatracName (object):
 
     def _acl_load(self, **args):
         for an in self._acl_names:
-            self.acls[an] = set(coalesce(args.get('%s' % an), []))
+            self.acls[an] = ACL(coalesce(args.get('%s' % an), []))
 
     def get_acl(self, access):
         return list(self.acls[access])
@@ -154,7 +195,7 @@ class HatracNamespace (HatracName):
     def get_content(self, client_context):
         """Return (nbytes, content_type, content_md5, data_generator) for namespace."""
         body = [ str(r) for r in self.directory.namespace_enumerate_names(self, False) ]
-        body = jsonWriter(body) + '\n'
+        body = jsonWriterRaw(body) + '\n'
         return (len(body), 'application/json', None, body)
 
 class HatracObject (HatracName):
@@ -693,7 +734,7 @@ WHERE n.id = %(id)s
             where="r.id = %s" % sql_literal(resource.id),
             **{access: acl}
         )
-        resource.acls[access] = set(acl)
+        resource.acls[access] = ACL(acl)
 
     def _create_name(self, db, name, is_object=False):
         return db.query("""

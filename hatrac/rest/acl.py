@@ -43,19 +43,10 @@ class ACLEntry (RestHandler):
         )
         return self.delete_response()
 
-    @web_method()
-    def GET(self, path, name, version, access, role):
+    def _GET(self, path, name, version, access, role):
         """Get entry from ACL."""
-        resource = self.resolve_name_or_version(path, name, version)
-        if access not in resource.acls:
-            raise BadRequest('Invalid ACL name %s for %s.' % (access, resource))
-        resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
-        if role not in resource.acls[access]:
-            raise NotFound('ACL member %s;acl/%s/%s not found.' % (resource, access, role))
-        web.ctx.status = '200 OK'
-        web.header('Content-Length', len(role) + 1)
-        web.header('Content-Type', 'text/plain')
-        return role + '\n'
+        resource = self.resolve_name_or_version(path, name, version).acls[access][role]
+        return self.get_content(resource, web.ctx.webauthn2_context)
 
 @web_url([
     # path, name, version, access
@@ -103,18 +94,10 @@ class ACL (RestHandler):
         )
         return self.update_response()
 
-    @web_method()
-    def GET(self, path, name, version, access):
+    def _GET(self, path, name, version, access):
         """Get ACL."""
-        resource = self.resolve_name_or_version(path, name, version)
-        if access not in resource.acls:
-            raise BadRequest('Invalid ACL name %s for %s.' % (access, resource))
-        resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
-        body = jsonWriterRaw(resource.get_acl(access)) + '\n'
-        web.ctx.status = '200 OK'
-        web.header('Content-Length', len(body))
-        web.header('Content-Type', 'application/json')
-        return body
+        resource = self.resolve_name_or_version(path, name, version).acls[access]
+        return self.get_content(resource, web.ctx.webauthn2_context)
         
 
 @web_url([
@@ -128,14 +111,8 @@ class ACLs (RestHandler):
     def __init__(self):
         RestHandler.__init__(self)
 
-    @web_method()
-    def GET(self, path, name, version):
+    def _GET(self, path, name, version):
         """Get ACLs."""
-        resource = self.resolve_name_or_version(path, name, version)
-        resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
-        body = jsonWriterRaw(resource.get_acls()) + '\n'
-        web.ctx.status = '200 OK'
-        web.header('Content-Length', len(body))
-        web.header('Content-Type', 'application/json')
-        return body
+        resource = self.resolve_name_or_version(path, name, version).acls
+        return self.get_content(resource, web.ctx.webauthn2_context)
 

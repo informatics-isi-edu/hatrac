@@ -192,7 +192,7 @@ class RestHandler (object):
 
     """
     def __init__(self):
-        pass
+        self.get_body = True
 
     def _fullname(self, path, name):
         nameparts = [ n for n in ((path or '') + (name or '')).split('/') if n ]
@@ -328,7 +328,7 @@ class RestHandler (object):
         if content_md5:
             web.header('Content-MD5', content_md5)
 
-        if get_body:
+        if self.get_body:
             for buf in data_generator:
                 yield buf
 
@@ -350,3 +350,21 @@ class RestHandler (object):
         """Form response for update request."""
         web.ctx.status = '204 No Content'
         return ''
+
+    @web_method()
+    def GET(self, *args):
+        """Get resource."""
+        if hasattr(self, '_GET'):
+            return self._GET(*args)
+        else:
+            raise NoMethod('Method GET not supported for this resource.')
+
+    @web_method()
+    def HEAD(self, *args):
+        """Get resource metadata."""
+        self.get_body = False
+        if hasattr(self, '_GET'):
+            return self._GET(*args)
+        else:
+            raise NoMethod('Method HEAD not supported for this resource.')
+

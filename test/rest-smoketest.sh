@@ -207,11 +207,14 @@ dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
 
 # check ACL API
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl"
+dotest "200::application/json::0" "/ns-${RUNKEY}/foo;acl" --head
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/owner"
+dotest "200::application/json::0" "/ns-${RUNKEY}/foo;acl/owner" --head
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/create"
 dotest "404::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X PUT
+dotest "200::text/plain*::0" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" --head
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE
 dotest "404::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
 

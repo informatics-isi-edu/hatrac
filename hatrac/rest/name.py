@@ -34,26 +34,16 @@ class NameVersion (RestHandler):
         )
         return self.delete_response()
 
-    def _GET(self, path, name, version, get_body=True):
+    # see core.RestHandler.GET and HEAD...
+    def _GET(self, path, name, version):
         """Get object version."""
         resource = self.resolve_version(
             path, name, version
         )
         return self.get_content(
             resource,
-            web.ctx.webauthn2_context,
-            get_body
+            web.ctx.webauthn2_context
         )
-
-    @web_method()
-    def GET(self, path, name, version):
-        """Get object version."""
-        return self._GET(path, name, version)
-
-    @web_method()
-    def HEAD(self, path, name, version):
-        """Get object version metadata."""
-        return self._GET(path, name, version, False)
 
 @web_url([
      # path, name
@@ -120,25 +110,14 @@ class Name (RestHandler):
         )
         return self.delete_response()
 
-    @web_method()
-    def _GET(self, path, name, get_body=True):
+    # see core.RestHandler.GET and HEAD...
+    def _GET(self, path, name):
         """Get latest object version or zone listing."""
         resource = self.resolve(
             path, name
         )
         return self.get_content(
             resource,
-            web.ctx.webauthn2_context,
-            get_body=True
+            web.ctx.webauthn2_context
         )
-
-    @web_method()
-    def GET(self, path, name):
-        """Get resource."""
-        return self._GET(path, name)
-
-    @web_method()
-    def HEAD(self, path, name):
-        """Get resource metadata."""
-        return self._GET(path, name, False)
 
