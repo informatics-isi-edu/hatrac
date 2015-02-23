@@ -193,7 +193,11 @@ dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
     -T "${TEST_DATA}" \
     -X POST \
     -H "Content-Type: application/json"
-upload="$(cat "${RESPONSE_CONTENT}")"
+upload="$(cat ${RESPONSE_CONTENT})"
+dotest "200::application/json::*" "${upload}"
+dotest "200::application/json::*" "${upload}" --head
+dotest "405::*::*" "${upload}/0"
+dotest "405::*::*" "${upload}/0" --head
 split -b 1024 -d "$0" /tmp/parts-${RUNKEY}-
 for part in /tmp/parts-${RUNKEY}-*
 do

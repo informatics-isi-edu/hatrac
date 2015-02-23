@@ -10,6 +10,7 @@ The current status is that basic APIs seem to work:
 1. ACL-based authorization of all requests
 1. integrity checking when Content-MD5 is present
 1. chunked upload via POST, PUT..., POST sequence
+1. chunked upload status via GET, HEAD
 1. chunked upload cancel via DELETE
 1. partial download via GET with Range header
 

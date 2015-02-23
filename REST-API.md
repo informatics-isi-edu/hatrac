@@ -866,7 +866,29 @@ created by a corresponding PUT request:
     
     ...content...
 
+### Chunked Upload Job Status Retrieval
 
+The GET operation is used to view the status of a pending upload:
+
+    GET /namespace_path/object_name;upload/job_id
+    Host: authority_name
+    
+for which the successful response is:
+
+    200 OK
+    Location: /namespace_path/object_name;upload/job_id
+    Content-Type: application/json
+    Content-Length: N
+    
+    {"url": "/namespace_path/object_name;upload/job_id",
+     "owner": ["role"...],
+     "chunksize": K,
+     "target": "/namespace_path/object_name"}
+     
+summarizing the parameters set when the job was created. Note, there
+is no support for determining which chunks have or have not been
+uploaded as such tracking is not a requirement placed on Hatrac
+implementations.
 
 ### Chunked Upload Job Cancellation
 

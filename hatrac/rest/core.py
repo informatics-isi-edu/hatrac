@@ -218,9 +218,9 @@ class RestHandler (object):
             return self.resolve(path, name)
 
     def in_content_type(self):
-        in_content_type = web.ctx.env.get('CONTENT_TYPE').lower()
+        in_content_type = web.ctx.env.get('CONTENT_TYPE')
         if in_content_type is not None:
-            return in_content_type.split(";", 1)[0].strip()
+            return in_content_type.lower().split(";", 1)[0].strip()
         else:
             return None
 

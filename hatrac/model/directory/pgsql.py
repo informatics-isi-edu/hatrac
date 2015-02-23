@@ -306,6 +306,16 @@ class HatracUpload (HatracName):
     def upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5=None):
         return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5)
 
+    def get_content(self, client_context):
+        self.version.enforce_acl(['owner'], client_context)
+        body = jsonWriterRaw(dict(
+            url=str(self), 
+            target=str(self.version.object), 
+            owner=self.version.get_acl('owner'),
+            chunksize=self.chunksize
+            )) + '\n'
+        return len(body), 'application/json', None, [body]
+
     def finalize(self, client_context):
         return self.directory.upload_finalize(self, client_context)
 

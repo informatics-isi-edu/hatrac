@@ -43,7 +43,6 @@ class ObjectTransferChunk (RestHandler):
         )
         return self.update_response()
 
-
 @web_url([
     # path, name, job
     '/((?:[^/:;]+/)*)([^/:;]+);upload/([^/:;]+)/?'
@@ -69,8 +68,8 @@ class ObjectTransfer (RestHandler):
 
     def _GET(self, path, name, job):
         """Get status of transfer job."""
-        pass
-
+        upload = self.resolve_upload(path, name, job)
+        return self.get_content(upload, web.ctx.webauthn2_context)
 
 @web_url([
     # path, name
