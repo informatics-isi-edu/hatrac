@@ -224,7 +224,7 @@ class RestHandler (object):
         else:
             return None
 
-    def get_content(self, resource, client_context):
+    def get_content(self, resource, client_context, get_body=True):
         """Form response w/ bulk resource content."""
         get_range = web.ctx.env.get('HTTP_RANGE')
         get_slice = None
@@ -327,8 +327,10 @@ class RestHandler (object):
             web.header('Content-Type', content_type)
         if content_md5:
             web.header('Content-MD5', content_md5)
-        for buf in data_generator:
-            yield buf
+
+        if get_body:
+            for buf in data_generator:
+                yield buf
 
     def create_response(self, resource):
         """Form response for resource creation request."""

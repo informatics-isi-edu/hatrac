@@ -147,6 +147,7 @@ dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/bar -X PUT -H "Content-Type: ap
 
 # status of test namespaces
 dotest "200::application/json::*" /ns-${RUNKEY}/foo
+dotest "200::application/json::0" /ns-${RUNKEY}/foo --head
 dotest "405::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
 
 # test objects
@@ -158,7 +159,9 @@ dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -H "Content-MD5: $md5"
 obj1_vers1="$(cat ${RESPONSE_CONTENT})"
 dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1
+dotest "200::application/x-bash::0" /ns-${RUNKEY}/foo2/obj1 --head
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
+dotest "200::application/x-bash::0" "${obj1_vers1}" --head
 
 # test partial GET
 dotest "200::*::${script_size}" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=0-"

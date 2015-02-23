@@ -1,9 +1,9 @@
 
 The current status is that basic APIs seem to work: 
  
-1. namespace GET, PUT, DELETE 
-1. object GET, PUT, DELETE 
-1. object version GET, DELETE 
+1. namespace GET, PUT, DELETE, HEAD
+1. object GET, PUT, DELETE, HEAD
+1. object version GET, DELETE, HEAD
 1. ACLs GET 
 1. ACL GET, PUT, DELETE 
 1. ACL entry GET, PUT, DELETE 
