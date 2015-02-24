@@ -163,6 +163,9 @@ dotest "200::application/x-bash::0" /ns-${RUNKEY}/foo2/obj1 --head
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
 dotest "200::application/x-bash::0" "${obj1_vers1}" --head
 
+dotest "200::application/json::[1-9]*" "/ns-${RUNKEY}/foo2/obj1;versions"
+dotest "404::*::*" "/ns-${RUNKEY}/foo2;versions"
+
 # test partial GET
 dotest "200::*::${script_size}" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=0-"
 dotest "206::*::$((${script_size} - 10))" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=10-"

@@ -394,6 +394,23 @@ for which a successful response is:
 The HEAD operation is essentially equivalent to the GET operation but
 with the actual object content elided.
 
+### Object Version List Retrieval
+
+The GET operation is used to list versions of an object:
+
+    GET /namespace_path/object_name;versions
+    Host: authority_name
+    
+for which a successful response is:
+
+    200 OK
+    Content-Type: application/json
+    Content-Length: N
+    
+    ["/namespace_path/object_name:version_id", ...]
+    
+representing the list of versions available for the named object.
+
 ### Object Deletion
 
 The DELETE operation is used to delete an object

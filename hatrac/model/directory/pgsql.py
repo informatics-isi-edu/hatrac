@@ -147,6 +147,9 @@ class HatracName (object):
     def get_uploads(self):
         raise hatrac.core.NotFound('Uploads sub-resource on %s not available.' % self)
 
+    def get_versions(self):
+        raise hatrac.core.NotFound('Versions sub-resource on %s not available.' % self)
+
     def is_object(self):
         raise NotImplementedError()
 
@@ -217,6 +220,9 @@ class HatracObject (HatracName):
     def get_uploads(self):
         return HatracUploads(self)
 
+    def get_versions(self):
+        return HatracVersions(self)
+
     def create_version_from_file(self, input, client_context, nbytes, content_type=None, content_md5=None):
         """Create, persist, and return HatracObjectVersion with given content.
 
@@ -247,6 +253,15 @@ class HatracObject (HatracName):
 
     def upload_resolve(self, upload):
         return self.directory.upload_resolve(self, upload)
+
+class HatracVersions (object):
+    def __init__(self, objresource):
+        self.object = objresource
+
+    def get_content(self, client_context):
+        self.object.enforce_acl(['owner'], client_context)
+        body = jsonWriterRaw(self.object.directory.object_enumerate_versions(self.object)) + '\n'
+        return len(body), 'application/json', None, [body]
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
@@ -707,6 +722,17 @@ class HatracDirectory (DatabaseConnection):
             self._set_resource_acl(db, resource1, access, [])
 
         return self._db_wrapper(db_thunk)
+
+    def object_enumerate_versions(self, object):
+        """Return a list of versions
+        """
+        def db_thunk(db):
+            return list(self._version_list(db, object.id, limit=1))
+
+        return [
+            '%s:%s' % (r.name, r.version)
+            for r in self._db_wrapper(db_thunk)
+        ]
 
     def namespace_enumerate_names(self, resource, recursive=True):
         def db_thunk(db):

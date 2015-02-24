@@ -47,6 +47,30 @@ class NameVersion (RestHandler):
 
 @web_url([
      # path, name
+    '/((?:[^/:;]+/)*)([^/:;]+);versions?'
+])
+class NameVersions (RestHandler):
+    """Represent Hatrac resources addressed by bare names.
+
+    """
+    _namespace_content_type = 'application/x-hatrac-namespace'
+
+    def __init__(self):
+        RestHandler.__init__(self)
+
+    # see core.RestHandler.GET and HEAD...
+    def _GET(self, path, name):
+        """Get version listing."""
+        resource = self.resolve(
+            path, name
+        ).get_versions()
+        return self.get_content(
+            resource,
+            web.ctx.webauthn2_context
+        )
+
+@web_url([
+     # path, name
     '/((?:[^/:;]+/)*)([^/:;]+)/?',
     '/()()'
 ])
