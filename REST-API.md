@@ -822,6 +822,10 @@ for which the successful response is:
 
     201 Created
     Location /namespace_path/object_name;upload/job_id
+    Content-Type: text/uri-list
+    Content-Length: N
+    
+    /namespace_path/object_name;upload/job_id
 
 where the new job is ready to receive data chunks.
 
@@ -853,6 +857,10 @@ for which the successful response is:
 
     201 Created
     Location: /namespace_path/object_name:version_id
+    Content-Type: text/uri-list
+    Content-Length: N
+    
+    /namespace_path/object_name:version_id
 
 where `Location` includes the URL of the newly created object version
 that is comprised of all the uploaded data chunks as if it had been
