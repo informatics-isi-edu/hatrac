@@ -196,6 +196,9 @@ dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
 upload="$(cat ${RESPONSE_CONTENT})"
 dotest "200::application/json::*" "${upload}"
 dotest "200::application/json::*" "${upload}" --head
+dotest "200::*::*" "/ns-${RUNKEY}/foo2/obj1;upload"
+dotest "200::*::*" "/ns-${RUNKEY}/foo2/obj1;upload" --head
+dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
 dotest "405::*::*" "${upload}/0"
 dotest "405::*::*" "${upload}/0" --head
 split -b 1024 -d "$0" /tmp/parts-${RUNKEY}-

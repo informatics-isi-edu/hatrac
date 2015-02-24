@@ -104,11 +104,7 @@ class ObjectTransfers (RestHandler):
         except ValueError, ev:
             raise BadRequest('Invalid count: %s.' % ev)
 
-        resource = self.resolve(path, name)
-        resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
-        if not resource.is_object():
-            raise NoMethod('POST not supported on namespaces.')
-
+        resource = self.resolve(path, name).get_uploads()
         upload = resource.create_version_upload_job(
             chunksize, web.ctx.webauthn2_context, nbytes, content_type, content_md5
         )
@@ -116,6 +112,8 @@ class ObjectTransfers (RestHandler):
 
     def _GET(self, path, name):
         """List outstanding chunked transfer jobs."""
-        pass
-        
+        resource = self.resolve(path, name).get_uploads()
+        return self.get_content(resource, web.ctx.webauthn2_context)
+    
+
 

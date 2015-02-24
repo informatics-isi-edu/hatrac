@@ -144,6 +144,9 @@ class HatracName (object):
             for k in self.acls
         ])
 
+    def get_uploads(self):
+        raise hatrac.core.NotFound('Uploads sub-resource on %s not available.' % self)
+
     def is_object(self):
         raise NotImplementedError()
 
@@ -210,6 +213,9 @@ class HatracObject (HatracName):
 
     def is_version(self):
         return False
+
+    def get_uploads(self):
+        return HatracUploads(self)
 
     def create_version_from_file(self, input, client_context, nbytes, content_type=None, content_md5=None):
         """Create, persist, and return HatracObjectVersion with given content.
@@ -280,6 +286,18 @@ class HatracObjectVersion (HatracName):
     def delete(self, client_context):
         """Delete resource and its children."""
         return self.directory.delete_version(self, client_context)
+
+class HatracUploads (object):
+    def __init__(self, objresource):
+        self.object = objresource
+
+    def create_version_upload_job(self, *args):
+        return self.object.create_version_upload_job(*args)
+
+    def get_content(self, client_context):
+        self.object.enforce_acl(['owner'], client_context)
+        body = jsonWriterRaw(self.object.directory.namespace_enumerate_uploads(self.object)) + '\n'
+        return len(body), 'application/json', None, [body]
 
 class HatracUpload (HatracName):
     """Represent an upload job."""
@@ -700,6 +718,16 @@ class HatracDirectory (DatabaseConnection):
             for row in self._db_wrapper(db_thunk)
         ]
 
+    def namespace_enumerate_uploads(self, resource, recursive=True):
+        def db_thunk(db):
+            resource1 = resource._reload(db)
+            return list(self._namespace_enumerate_uploads(db, resource, recursive))
+
+        return [
+            '%s;upload/%s' % (r.name, r.job)
+            for r in self._db_wrapper(db_thunk)
+        ]
+
     def _set_resource_acl_role(self, db, resource, access, role):
         if access not in resource._acl_names:
             raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
@@ -889,3 +917,21 @@ RETURNING *
                 "NOT n.is_deleted"
             ])
         )
+        
+    def _namespace_enumerate_uploads(self, db, resource, recursive=True):
+        # return every upload under /name... or /name/
+        if resource.is_object:
+            pattern = 'n.name = %s' % sql_literal(resource.name)
+        else:
+            pattern = "n.name ~ %s" % sql_literal("^" + regexp_escape(resource.name) + '/')
+        return db.select(
+            ['hatrac.name n', 'hatrac.version v', 'hatrac.upload u'], 
+            what="u.*, v.nameid, n.name",
+            where=' AND '.join([
+                "u.versionid = v.id",
+                "v.nameid = n.id",
+                pattern,
+                "v.is_deleted"
+            ])
+        )
+        

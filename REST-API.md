@@ -829,6 +829,23 @@ for which the successful response is:
 
 where the new job is ready to receive data chunks.
 
+### Chunked Upload Job Listing Retrieval
+
+The GET operation is used to list pending upload jobs on an object:
+
+    GET /namespace_path/object_name;upload
+    Host: authority_name
+
+where the successful response is:
+
+    200 OK
+    Content-Type: application/json
+    Content-Length: N
+    
+    ["/namespace_path/object_name;upload/job_id", ...]
+
+representing the list of upload jobs for the given object.    
+
 ### Chunk Upload
 
 The PUT operation is used to send data chunks for an existing job:
