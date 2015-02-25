@@ -57,7 +57,7 @@ expect(
 )
 
 expect(
-    hatrac.core.Conflict, 
+    hatrac.core.NotFound, 
     lambda : test_directory.create_name("/foo/bar", False, root_context)
 )
 

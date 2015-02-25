@@ -127,8 +127,8 @@ class HatracName (object):
     def __str__(self):
         return self.name
 
-    def _reload(self, db):
-        result = self.directory._name_lookup(db, self.name)[0]
+    def _reload(self, db, raise_notfound=True):
+        result = self.directory._name_lookup(db, self.name, raise_notfound)
         return type(self)(self.directory, **result)
 
     def _acl_load(self, **args):
@@ -281,10 +281,8 @@ class HatracObjectVersion (HatracName):
 
     def _reload(self, db):
         object1 = self.object._reload(db)
-        result = self.directory._version_lookup(db, object1.id, self.version)
-        if not result:
-            raise hatrac.core.NotFound("Resource %s not found." % self)
-        return type(self)(self.directory, object1, **result[0])
+        result = self.directory._version_lookup(db, object1, self.version)
+        return type(self)(self.directory, object1, **result)
 
     def is_object(self):
         return True
@@ -329,10 +327,7 @@ class HatracUpload (HatracName):
 
     def _reload(self, db):
         version1 = self.version._reload(db)
-        result = self.directory._upload_lookup(db, version1.object.id, self.job)
-        if not result:
-            raise hatrac.core.NotFound("Resource %s not found." % self)
-        result = result[0]
+        result = self.directory._upload_lookup(db, version1.object, self.job)
         del result['version']
         return type(self)(self.directory, version1, **result)
 
@@ -400,6 +395,34 @@ CREATE TABLE IF NOT EXISTS hatrac.upload (
 );
 """
 
+def db_wrap(reload_pos=None, transform=None, enforce_acl=None):
+    """Decorate a HatracDirectory method whose body should run in self._db_wrapper().
+
+       If reload_pos is not None: 
+          replace args[reload_pos] with args[reload_pos]._reload(db)
+
+       If enforce_acl is (rpos, cpos, acls):
+          call args[rpos].enforce_acl(acls, args[cpos])
+
+       If transform is not None: return transform(result)
+    """
+    def helper(original_method):
+        def wrapper(*args):
+            def db_thunk(db):
+                args1 = list(args)
+                if reload_pos is not None:
+                    args1[reload_pos] = args1[reload_pos]._reload(db)
+                if enforce_acl is not None:
+                    rpos, cpos, acls = enforce_acl
+                    args1[rpos].enforce_acl(acls, args[cpos])
+                result = original_method(*args1, db=db)
+                if transform:
+                    result = transform(result)
+                return result
+            return args[0]._db_wrapper(db_thunk)
+        return wrapper
+    return helper
+
 class HatracDirectory (DatabaseConnection):
     """Stateful Hatrac Directory tracks bound names and object versions.
 
@@ -414,25 +437,24 @@ class HatracDirectory (DatabaseConnection):
         )
         self.storage = storage
 
-    def deploy_db(self, admin_roles):
+    @db_wrap()
+    def deploy_db(self, admin_roles, db=None):
         """Initialize database and set root namespace owners."""
-        def db_thunk(db):
-            db.query('CREATE SCHEMA IF NOT EXISTS hatrac')
-            for sql in [
-                    _name_table_sql,
-                    _version_table_sql,
-                    _upload_table_sql
-            ]:
-                db.query(sql)
+        db.query('CREATE SCHEMA IF NOT EXISTS hatrac')
+        for sql in [
+                _name_table_sql,
+                _version_table_sql,
+                _upload_table_sql
+        ]:
+            db.query(sql)
 
-            rootns = HatracNamespace(self, **(self._name_lookup(db, '/')[0]))
+        rootns = HatracNamespace(self, **(self._name_lookup(db, '/')))
 
-            for role in admin_roles:
-                self._set_resource_acl_role(db, rootns, 'owner', role)
+        for role in admin_roles:
+            self._set_resource_acl_role(db, rootns, 'owner', role)
 
-        self._db_wrapper(db_thunk)
-
-    def create_name(self, name, is_object, client_context):
+    @db_wrap()
+    def create_name(self, name, is_object, client_context, db=None):
         """Create, persist, and return a HatracNamespace or HatracObject instance.
 
         """
@@ -442,134 +464,95 @@ class HatracDirectory (DatabaseConnection):
         if relname in [ '.', '..' ]:
             raise hatrac.core.BadRequest('Illegal name "%s".' % relname)
 
-        def db_thunk(db): 
-            result = list(self._name_lookup(db, name))
-            if result:
-                raise hatrac.core.Conflict('Name %s already in use.' % name)
+        try:
+            self._name_lookup(db, name)
+            raise hatrac.core.Conflict('Name %s already in use.' % name)
+        except hatrac.core.NotFound, ev:
+            pass
+            
+        parent = HatracName.construct(self, **self._name_lookup(db, parname))
+        if parent.is_object():
+            raise hatrac.core.Conflict('Parent %s is not a namespace.' % parname)
 
-            result = list(self._name_lookup(db, parname))
-            if not result or result[0].is_deleted:
-                raise hatrac.core.Conflict('Parent namespace %s not available.' % parname)
-            if result[0].is_object:
-                raise hatrac.core.Conflict('Parent %s is not a namespace.' % parname)
+        parent.enforce_acl(['owner', 'create'], client_context)
+        resource = HatracName.construct(self, **self._create_name(db, name, is_object))
+        self._set_resource_acl_role(db, resource, 'owner', client_context.client)
+        return resource
 
-            parent = HatracNamespace(self, **result[0])
-            parent.enforce_acl(['owner', 'create'], client_context)
-            result = self._create_name(db, name, is_object)[0]
-            if is_object:
-                result = HatracObject(self, **result)
-            else:
-                result = HatracNamespace(self, **result)
-
-            self._set_resource_acl_role(db, result, 'owner', client_context.client)
-
-        self._db_wrapper(db_thunk)
-        
-        return self.name_resolve(name)
-
-    def delete_name(self, resource, client_context):
+    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner']), transform=lambda thunk: thunk())
+    def delete_name(self, resource, client_context, db=None):
         """Delete an existing namespace or object resource."""
-        def db_thunk(db):
-            # re-test under transaction
-            resource1 = resource._reload(db)
-            if resource1.is_deleted:
-                raise hatrac.core.NotFound('Namespace %s not available.' % resource)
+        if resource.name == '/':
+            raise hatrac.core.Forbidden('Root service namespace %s cannot be deleted.' % resource)
 
-            if resource.name == '/':
-                raise hatrac.core.Forbidden('Root service namespace %s cannot be deleted.' % resource1)
+        # test ACLs and map out recursive delete
+        deleted_versions = []
+        deleted_names = []
 
-            # test ACLs and map out recursive delete
-            deleted_versions = []
-            deleted_names = []
-            resource1.enforce_acl(['owner'], client_context)
+        for row in self._namespace_enumerate_versions(db, resource):
+            HatracObjectVersion(self, None, **row).enforce_acl(['owner'], client_context)
+            deleted_versions.append( row )
 
-            for row in self._namespace_enumerate_versions(db, resource1):
-                HatracObjectVersion(self, None, **row).enforce_acl(['owner'], client_context)
-                deleted_versions.append( row )
+        for row in self._namespace_enumerate_names(db, resource):
+            HatracName.construct(self, **row).enforce_acl(['owner'], client_context)
+            deleted_names.append( row )
 
-            for row in self._namespace_enumerate_names(db, resource1):
-                HatracName.construct(self, **row).enforce_acl(['owner'], client_context)
-                deleted_names.append( row )
+        # we only get here if no ACL raised an exception above
+        deleted_names.append(resource)
 
-            # we only get here if no ACL raised an exception above
-            deleted_names.append(resource1)
+        for row in deleted_versions:
+            self._delete_version(db, row)
+        for row in deleted_names:
+            self._delete_name(db, row)
 
+        def cleanup():
+            # tell storage system to clean up after deletes were committed to DB
             for row in deleted_versions:
-                self._delete_version(db, row)
+                self.storage.delete(row.name, row.version)
             for row in deleted_names:
-                self._delete_name(db, row)
+                self.storage.delete_namespace(row.name)
 
-            return (deleted_versions, deleted_names)
+        return cleanup
 
-        # tell storage system to clean up after deletes were committed to DB
-        versions, names = self._db_wrapper(db_thunk)
-        for row in versions:
-            self.storage.delete(row.name, row.version)
-        for row in names:
-            self.storage.delete_namespace(row.name)
-
-    def delete_version(self, resource, client_context):
+    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner']), transform=lambda thunk: thunk())
+    def delete_version(self, resource, client_context, db=None):
         """Delete an existing version."""
-        def db_thunk(db):
-            # re-test under transaction
-            resource1 = resource._reload(db)
-            if resource1.is_deleted:
-                raise hatrac.core.NotFound('Version %s not available.' % resource)
-            resource1.enforce_acl(['owner'], client_context)
-            self._delete_version(db, resource1)
-            return resource1
+        self._delete_version(db, resource)
+        return lambda : self.storage.delete(resource.name, resource.version)
 
-        # tell storage system to clean up after deletes were committed to DB
-        version = self._db_wrapper(db_thunk)
-        self.storage.delete(version.name, version.version)
-
-    def create_version(self, object, client_context, nbytes=None, content_type=None, content_md5=None):
+    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'create']))
+    def create_version(self, object, client_context, nbytes=None, content_type=None, content_md5=None, db=None):
         """Create, persist, and return a HatracObjectVersion instance.
 
            Newly created instance is marked 'deleted'.
         """
-        def db_thunk(db):
-            # re-fetch status for ACID test/update
-            object1 = object._reload(db)
-            if object1.is_deleted:
-                raise hatrac.core.NotFound('Object %s is not available.' % object1)
-            object1.enforce_acl(['owner', 'create'], client_context)
-            result = list(self._create_version(db, object1.id, nbytes, content_type, content_md5))[0]
-            result.name = object.name
-            result = HatracObjectVersion(self, object1, **result)
-            self._set_resource_acl_role(db, result, 'owner', client_context.client)
-            return result
+        result = self._create_version(db, object.id, nbytes, content_type, content_md5)
+        resource = HatracObjectVersion(self, object, name=object.name, **result)
+        self._set_resource_acl_role(db, resource, 'owner', client_context.client)
+        return resource
 
-        return self._db_wrapper(db_thunk)
-
-    def create_upload(self, version, chunksize, client_context):
-        def db_thunk(db):
-            result = list(self._create_upload(db, version.id, chunksize))[0]
-            return HatracUpload(self, version, **result)
-
-        return self._db_wrapper(db_thunk)
+    @db_wrap()
+    def create_upload(self, version, chunksize, client_context, db=None):
+        return HatracUpload(self, version, **self._create_upload(db, version.id, chunksize))
 
     def create_version_from_file(self, object, input, client_context, nbytes, content_type=None, content_md5=None):
         """Create, persist, and return HatracObjectVersion with given content.
 
         """
         resource = self.create_version(object, client_context, nbytes, content_type, content_md5)
-        assert resource.is_deleted
         version = self.storage.create_from_file(object.name, input, nbytes, content_type, content_md5)
         self._db_wrapper(lambda db: self._complete_version(db, resource, version))
         return self.version_resolve(object, version)
 
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, content_type=None, content_md5=None):
         resource = self.create_version(object, client_context, nbytes, content_type, content_md5)
-        assert resource.is_deleted
         resource.version = self.storage.create_upload(object.name, nbytes, content_type, content_md5)
         self._db_wrapper(lambda db: self._complete_version(db, resource, resource.version, True)) # still in deleted state
         return self.create_upload(resource, chunksize, client_context)
 
     def upload_chunk_from_file(self, upload, position, input, client_context, nbytes, content_md5=None):
         upload.version.enforce_acl(['owner'], client_context)
-        if not upload.version.is_deleted:
-            raise hatrac.core.Conflict('Further transfers not permitted once upload job is finalized.')
+        assert upload.version.is_deleted
         nchunks = upload.version.nbytes / upload.chunksize
         remainder = upload.version.nbytes % upload.chunksize
         if position < (nchunks - 1) and nbytes != upload.chunksize:
@@ -586,172 +569,111 @@ class HatracDirectory (DatabaseConnection):
             content_md5
         )
 
-    def upload_finalize(self, upload, client_context):
-        def db_thunk(db):
-            upload1 = upload._reload(db)
-            version = upload1.version._reload(db)
-            version.enforce_acl(['owner'], client_context)
-            self._complete_version(db, version, version.version)
-            self._delete_upload(db, upload1)
-            return version
+    @db_wrap(reload_pos=1)
+    def upload_finalize(self, upload, client_context, db=None):
+        version = upload.version._reload(db)
+        version.enforce_acl(['owner'], client_context)
+        self._complete_version(db, version, version.version)
+        self._delete_upload(db, upload)
+        return version._reload(db)
 
-        version = self._db_wrapper(db_thunk)
-        return self.version_resolve(version.object, version.version)
+    @db_wrap(reload_pos=1, transform=lambda thunk: thunk())
+    def upload_cancel(self, upload, client_context, db=None):
+        version = upload.version._reload(db)
+        version.enforce_acl(['owner'], client_context)
+        self._delete_upload(db, upload)
+        return lambda : version.is_deleted and self.storage.delete(version.name, version.version)
 
-    def upload_cancel(self, upload, client_context):
-        def db_thunk(db):
-            upload1 = upload._reload(db)
-            version = upload1.version._reload(db)
-            version.enforce_acl(['owner'], client_context)
-            self._delete_upload(db, upload1)
-            return version
-
-        version = self._db_wrapper(db_thunk)
-        if version.is_deleted:
-            self.storage.delete(version.name, version.version)
-
-    def get_version_content_range(self, object, objversion, get_slice, client_context):
+    @db_wrap(reload_pos=2, enforce_acl=(2, 4, ['owner', 'read']))
+    def get_version_content_range(self, object, objversion, get_slice, client_context, db=None):
         """Return (nbytes, data_generator) pair for specific version."""
-        def db_thunk(db):
-            # re-fetch status for ACID test
-            objversion1 = objversion._reload(db)
-            if objversion1.is_deleted:
-                raise hatrac.core.NotFound('Resource %s is not available.' % objversion1)
-            objversion1.enforce_acl(['owner', 'read'], client_context)
-            return objversion1
-
-        objversion = self._db_wrapper(db_thunk)
+        if objversion.is_deleted:
+            raise hatrac.core.NotFound('Resource %s is not available.' % objversion)
         nbytes, content_type, content_md5, data = self.storage.get_content_range(object.name, objversion.version, objversion.content_md5, get_slice)
-        # override metadata from directory??
-        return (nbytes, objversion.content_type, content_md5, data)
+        return nbytes, objversion.content_type, objversion.content_md5, data
 
     def get_version_content(self, object, objversion, client_context):
         """Return (nbytes, data_generator) pair for specific version."""
         return self.get_version_content_range(object, objversion, None, client_context)
 
-    def name_resolve(self, name, raise_notfound=True):
+    @db_wrap()
+    def name_resolve(self, name, raise_notfound=True, db=None):
         """Return a HatracNamespace or HatracObject instance.
         """
-        def db_thunk(db):
-            result = list(self._name_lookup(db, name))
-            if result:
-                result = result[0]
-                if raise_notfound and result.is_deleted:
-                    raise hatrac.core.NotFound('Resource %s not available.' % name)
-                return HatracName.construct(self, **result)
-            elif raise_notfound:
-                raise hatrac.core.NotFound('Resource %s not found.' % name)
-            else:
-                return None
+        try:
+            return HatracName.construct(self, **self._name_lookup(db, name))
+        except hatrac.core.NotFound, ev:
+            if raise_notfound:
+                raise ev
 
-        return self._db_wrapper(db_thunk)
-
-    def version_resolve(self, object, version, raise_notfound=True):
+    @db_wrap()
+    def version_resolve(self, object, version, raise_notfound=True, db=None):
         """Return a HatracObjectVersion instance corresponding to referenced version.
         """
-        def db_thunk(db):
-            result = list(self._version_lookup(db, object.id, version))
-            if result:
-                result = result[0]
-                if raise_notfound and result.is_deleted:
-                    raise hatrac.core.NotFound('Resource %s:%s not available.' % (object.name, version))
-                return result
-            else:
-                raise hatrac.core.NotFound("Object version %s:%s not found." % (object.name, version))
+        return HatracObjectVersion(
+            self, 
+            object, 
+            **self._version_lookup(db, object, version, not raise_notfound)
+        )
 
-        r = self._db_wrapper(db_thunk)
-        return HatracObjectVersion(self, object, **r)
-
-    def upload_resolve(self, object, job, raise_notfound=True):
-        """Return a HatracObjectVersion instance corresponding to referenced version.
+    @db_wrap()
+    def upload_resolve(self, object, job, raise_notfound=True, db=None):
+        """Return a HatracUpload instance corresponding to referenced job.
         """
-        def db_thunk(db):
-            result = list(self._upload_lookup(db, object.id, job))
-            if not result:
-                raise hatrac.core.NotFound("Upload job %s;upload/%s not found." % (object.name, job))
-            return result[0]
+        upload = self._upload_lookup(db, object, job)
+        version = HatracObjectVersion(self, object, **self._version_lookup(db, object, upload.version))
+        del upload['version']
+        return HatracUpload(self, version, **upload)
 
-        r = self._db_wrapper(db_thunk)
-        version = self.version_resolve(object, r.version, False)
-        del r['version']
-        return HatracUpload(self, version, **r)
-
-    def get_current_version(self, object):
+    @db_wrap()
+    def get_current_version(self, object, db=None):
         """Return a HatracObjectVersion instance corresponding to latest.
         """
-        def db_thunk(db):
-            result = list(self._version_list(db, object.id, limit=1))
-            if result:
-                return result[0]
-            else:
-                raise hatrac.core.Conflict('Object %s currently has no content.' % object.name)
+        results = self._version_list(db, object.id, limit=1)
+        if results:
+            return HatracObjectVersion(self, object, **results[0])
+        else:
+            raise hatrac.core.Conflict('Object %s currently has no content.' % object.name)
 
-        r = self._db_wrapper(db_thunk)
-        return HatracObjectVersion(self, object, **r)
+    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner']))
+    def set_resource_acl_role(self, resource, access, role, client_context, db=None):
+        self._set_resource_acl_role(db, resource, access, role)
 
-    def set_resource_acl_role(self, resource, access, role, client_context):
-        def db_thunk(db):
-            resource1 = resource._reload(db)
-            resource1.enforce_acl(['owner'], client_context)
-            self._set_resource_acl_role(db, resource1, access, role)
+    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner']))
+    def drop_resource_acl_role(self, resource, access, role, client_context, db=None):
+        if role not in resource.acls[access]:
+            raise hatrac.core.NotFound('Resource %s;acl/%s/%s not found.' % (resource, access, role))
+        self._drop_resource_acl_role(db, resource, access, role)
 
-        return self._db_wrapper(db_thunk)
+    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner']))
+    def set_resource_acl(self, resource, access, acl, client_context, db=None):
+        self._set_resource_acl(db, resource, access, acl)
 
-    def drop_resource_acl_role(self, resource, access, role, client_context):
-        def db_thunk(db):
-            resource1 = resource._reload(db)
-            resource1.enforce_acl(['owner'], client_context)
-            if role not in resource1.acls[access]:
-                raise hatrac.core.NotFound('%s;acl/%s/%s' % (resource1, access, role))
-            self._drop_resource_acl_role(db, resource1, access, role)
+    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner']))
+    def clear_resource_acl(self, resource, access, client_context, db=None):
+        self._set_resource_acl(db, resource, access, [])
 
-        return self._db_wrapper(db_thunk)
-
-    def set_resource_acl(self, resource, access, acl, client_context):
-        def db_thunk(db):
-            resource1 = resource._reload(db)
-            resource1.enforce_acl(['owner'], client_context)
-            self._set_resource_acl(db, resource1, access, acl)
-
-        return self._db_wrapper(db_thunk)
-
-    def clear_resource_acl(self, resource, access, client_context):
-        def db_thunk(db):
-            resource1 = resource._reload(db)
-            resource1.enforce_acl(['owner'], client_context)
-            self._set_resource_acl(db, resource1, access, [])
-
-        return self._db_wrapper(db_thunk)
-
-    def object_enumerate_versions(self, object):
+    @db_wrap(reload_pos=1)
+    def object_enumerate_versions(self, object, db=None):
         """Return a list of versions
         """
-        def db_thunk(db):
-            return list(self._version_list(db, object.id, limit=1))
-
         return [
             '%s:%s' % (r.name, r.version)
-            for r in self._db_wrapper(db_thunk)
+            for r in self._version_list(db, object.id) 
         ]
 
-    def namespace_enumerate_names(self, resource, recursive=True):
-        def db_thunk(db):
-            resource1 = resource._reload(db)
-            return list(self._namespace_enumerate_names(db, resource1, recursive))
-
+    @db_wrap(reload_pos=1)
+    def namespace_enumerate_names(self, resource, recursive=True, db=None):
         return [
             HatracName.construct(self, **row)
-            for row in self._db_wrapper(db_thunk)
+            for row in self._namespace_enumerate_names(db, resource, recursive)
         ]
 
-    def namespace_enumerate_uploads(self, resource, recursive=True):
-        def db_thunk(db):
-            resource1 = resource._reload(db)
-            return list(self._namespace_enumerate_uploads(db, resource, recursive))
-
+    @db_wrap(reload_pos=1)
+    def namespace_enumerate_uploads(self, resource, recursive=True, db=None):
         return [
             '%s;upload/%s' % (r.name, r.job)
-            for r in self._db_wrapper(db_thunk)
+            for r in self._namespace_enumerate_uploads(db, resource, recursive) 
         ]
 
     def _set_resource_acl_role(self, db, resource, access, role):
@@ -810,7 +732,7 @@ RETURNING *
     name=sql_literal(name),
     isobject=is_object and 'True' or 'False'
 )
-        )
+        )[0]
 
     def _create_version(self, db, oid, nbytes=None, content_type=None, content_md5=None):
         return db.query("""
@@ -824,7 +746,7 @@ RETURNING *
     type=content_type and sql_literal(content_type) or 'NULL::text',
     md5=content_md5 and sql_literal(content_md5) or 'NULL::text'
 )
-        )
+        )[0]
 
     def _create_upload(self, db, vid, chunksize):
         jobid = base64.b32encode( 
@@ -841,7 +763,7 @@ RETURNING *
     chunksize=sql_literal(int(chunksize)),
     job=sql_literal(jobid)
 )
-        )
+        )[0]
 
     def _complete_version(self, db, resource, version, is_deleted=False):
         return db.update(
@@ -871,33 +793,48 @@ RETURNING *
             where="id = %s" % sql_literal(resource.id)
         )
 
-    def _name_lookup(self, db, name):
-        return db.select(
+    def _name_lookup(self, db, name, check_deleted=True):
+        wheres = ["n.name = %s" % sql_literal(name)]
+        if check_deleted:
+            wheres.append("NOT n.is_deleted")
+        results = db.select(
             ['hatrac.name n'],
-            where="n.name = %s" % sql_literal(name)
+            where=' AND '.join(wheres)
         )
+        if not results:
+            raise hatrac.core.NotFound('Resource %s not found.' % name)
+        return results[0]
         
-    def _version_lookup(self, db, nameid, version):
-        return db.select(
+    def _version_lookup(self, db, object, version, allow_deleted=True):
+        result = db.select(
             ["hatrac.name n", "hatrac.version v"],
             what="v.*, n.name",
             where=' AND '.join([
                 "v.nameid = n.id",
-                "v.nameid = %s" % sql_literal(int(nameid)),
+                "v.nameid = %s" % sql_literal(int(object.id)),
                 "v.version = %s" % sql_literal(version)
             ])
         )
+        if not result:
+            raise hatrac.core.NotFound("Resource %s:%s not found." % (object, version))
+        result = result[0]
+        if result.is_deleted and not allow_deleted:
+            raise hatrac.core.NotFound("Resource %s:%s not available." % (object, version))
+        return result
 
-    def _upload_lookup(self, db, oid, job):
-        return db.select(
+    def _upload_lookup(self, db, object, job):
+        result = db.select(
             ["hatrac.upload u", "hatrac.version v"],
             what="u.*, v.version",
             where=' AND '.join([
-                "v.nameid = %s" % sql_literal(int(oid)),
+                "v.nameid = %s" % sql_literal(int(object.id)),
                 "u.versionid = v.id",
                 "u.job = %s" % sql_literal(job)
             ])
         )
+        if not result:
+            raise hatrac.core.NotFound("Resource %s;upload/%s not found." % (object, job))
+        return result[0]
         
     def _version_list(self, db, nameid, limit=None):
         # TODO: add range keying for scrolling enumeration?
