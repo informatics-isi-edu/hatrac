@@ -20,12 +20,11 @@ import struct
 import urllib
 import hatrac
 import hatrac.core
+import sys
+import traceback
 
-_webauthn2_config = webauthn2.merge_config(
-    jsonFileName='webauthn2_config.json'
-)
+_webauthn2_config = webauthn2.merge_config(jsonFileName='webauthn2_config.json')
 _webauthn2_manager = webauthn2.Manager(overrides=_webauthn2_config)
-
 
 # map URL pattern (regexp) to handler class
 dispatch_rules = dict()
@@ -154,8 +153,8 @@ def web_method():
             try:
                 # get client authentication context
                 web.ctx.webauthn2_context = _webauthn2_manager.get_request_context()
-            except (ValueError, IndexError):
-                raise Unauthorized('service access')
+            except (ValueError, IndexError), ev:
+                raise Unauthorized('service access requires client authentication')
 
             try:
                 # run actual method
