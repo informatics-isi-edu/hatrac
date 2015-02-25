@@ -117,7 +117,7 @@ assert ''.join(data1) == content1
 rbytes1, ct1, hash1, data1 = obj1.get_content_range(root_context, slice(2,8))
 assert rbytes1 == 6
 assert ''.join(data1) == content1[2:8]
-assert hash1 is None
+assert hash1 is None, hash1
 
 rbytes1, ct1, hash1, data1 = obj1.get_content_range(root_context, slice(2,None))
 assert rbytes1 == nbytes1 - 2

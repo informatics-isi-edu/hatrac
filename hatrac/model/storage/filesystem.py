@@ -91,8 +91,18 @@ class HatracStorage (object):
         return version
 
     def create_upload(self, name, nbytes=None, content_type=None, content_md5=None):
-        version = self.create_from_file(name, StringIO(''), 0)
-        return version
+        upload_id = self.create_from_file(name, StringIO(''), 0)
+        return upload_id
+
+    def cancel_upload(self, name, upload_id):
+        # this backend uses upload_id as version_id
+        self.delete(name, upload_id)
+        return None
+
+    def finalize_upload(self, name, upload_id):
+        # nothing changes in storage for this backend strategy
+        version_id = upload_id
+        return version_id
 
     def upload_chunk_from_file(self, name, version, position, chunksize, input, nbytes, content_md5=None, f=None):
         if f is None:

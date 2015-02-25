@@ -33,7 +33,7 @@ class ObjectTransferChunk (RestHandler):
         else:
             content_md5 = None
         upload = self.resolve_upload(path, name, job)
-        upload.version.enforce_acl(['owner'], web.ctx.webauthn2_context)
+        upload.enforce_acl(['owner'], web.ctx.webauthn2_context)
         upload.upload_chunk_from_file(
             chunk, 
             web.ctx.env['wsgi.input'],
