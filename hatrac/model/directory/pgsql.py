@@ -393,7 +393,7 @@ CREATE INDEX version_nameid_id_idx ON hatrac.version (nameid, id);
 """
 
 _upload_table_sql = """
-CREATE TABLE IF NOT EXISTS hatrac.upload (
+CREATE TABLE hatrac.upload (
   id bigserial PRIMARY KEY,
   nameid int8 NOT NULL REFERENCES hatrac.name(id),
   job text NOT NULL,
@@ -404,6 +404,15 @@ CREATE TABLE IF NOT EXISTS hatrac.upload (
   owner text[],
   UNIQUE(nameid, job),
   CHECK(chunksize > 0)
+);
+"""
+
+_chunk_table_sql = """
+CREATE TABLE hatrac.chunk (
+  uploadid int8 NOT NULL REFERENCES hatrac.upload(id),
+  position int8 NOT NULL,
+  aux json,
+  UNIQUE(uploadid, position)
 );
 """
 
@@ -456,7 +465,8 @@ class HatracDirectory (DatabaseConnection):
         for sql in [
                 _name_table_sql,
                 _version_table_sql,
-                _upload_table_sql
+                _upload_table_sql,
+                _chunk_table_sql
         ]:
             db.query(sql)
 
@@ -566,7 +576,7 @@ class HatracDirectory (DatabaseConnection):
             raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match job chunk size %s.' % (nbytes, upload.chunksize))
         if remainder and position == nchunks and nbytes != remainder:
             raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match final chunk size %s.' % (nbytes, remainder))
-        self.storage.upload_chunk_from_file(
+        aux = self.storage.upload_chunk_from_file(
             upload.object.name, 
             upload.job, 
             position, 
@@ -576,9 +586,19 @@ class HatracDirectory (DatabaseConnection):
             content_md5
         )
 
+        def db_thunk(db):
+            self._track_chunk(db, upload, position, aux)
+
+        if self.storage.track_chunks:
+            self._db_wrapper(db_thunk)
+
     @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner']))
     def upload_finalize(self, upload, client_context, db=None):
-        version_id = self.storage.finalize_upload(upload.name, upload.job)
+        if self.storage.track_chunks:
+            chunk_aux = list(self._chunk_list(db, upload))
+        else:
+            chunk_aux = None
+        version_id = self.storage.finalize_upload(upload.name, upload.job, chunk_aux)
         version = HatracObjectVersion(self, upload.object, **self._create_version(db, upload.object, upload.nbytes, upload.content_type, upload.content_md5))
         self._set_resource_acl_role(db, version, 'owner', client_context.client)
         self._complete_version(db, version, version_id)
@@ -770,6 +790,30 @@ RETURNING *, %(name)s AS "name"
 )
         )[0]
 
+    def _track_chunk(self, db, upload, position, aux):
+        sql_fields = dict(
+            uploadid=sql_literal(upload.id),
+            position=sql_literal(int(position)),
+            aux=sql_literal(jsonWriterRaw(aux))
+        )
+        
+        try:
+            result = self._chunk_lookup(db, upload, position)
+            return db.query("""
+UPDATE hatrac.chunk
+SET aux = %(aux)s
+WHERE uploadid = %(uploadid)s AND position = %(position)s
+""" % sql_fields
+            )
+            
+        except hatrac.core.NotFound:
+            return db.query("""
+INSERT INTO hatrac.chunk
+(uploadid, position, aux)
+VALUES (%(uploadid)s, %(position)s, %(aux)s)
+""" % sql_fields
+            )
+
     def _complete_version(self, db, resource, version, is_deleted=False):
         return db.update(
             "hatrac.version",
@@ -793,6 +837,10 @@ RETURNING *, %(name)s AS "name"
         )
 
     def _delete_upload(self, db, resource):
+        db.delete(
+            "hatrac.chunk",
+            where="uploadid = %s" % sql_literal(resource.id)
+        )
         return db.delete(
             "hatrac.upload",
             where="id = %s" % sql_literal(resource.id)
@@ -841,6 +889,12 @@ RETURNING *, %(name)s AS "name"
             raise hatrac.core.NotFound("Resource %s;upload/%s not found." % (object, job))
         return result[0]
         
+    def _chunk_lookup(self, db, upload, position):
+        result = self._chunk_list(db, upload, position)
+        if not result:
+            raise hatrac.core.NotFound("Resource %s/%s not found." % (upload, position))
+        return result[0]
+        
     def _version_list(self, db, nameid, limit=None):
         # TODO: add range keying for scrolling enumeration?
         return db.select(
@@ -855,6 +909,19 @@ RETURNING *, %(name)s AS "name"
             limit=limit
         )
         
+    def _chunk_list(self, db, upload, position=None):
+        wheres = [ "uploadid = %s" % sql_literal(int(upload.id)) ]
+        if position is not None:
+            wheres.append( "position = %s" % sql_literal(int(position)) )
+        result = db.select(
+            ["hatrac.chunk"],
+            what="*",
+            where=' AND '.join(wheres)
+        )
+        if not result:
+            raise hatrac.core.NotFound("Chunk data %s/%s not found." % (upload, position))
+        return result
+
     def _namespace_enumerate_versions(self, db, resource):
         # return every version under /name... or /name/
         if resource.is_object():

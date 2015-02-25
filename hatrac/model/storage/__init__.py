@@ -14,8 +14,8 @@ backend = config.get('storage_backend')
 
 if backend == 'filesystem':
     from filesystem import HatracStorage
-elif backend == 's3':
-    from s3 import HatracStorage
+elif backend == 'amazons3':
+    from amazons3 import HatracStorage
 else:
     HatracStorage = None
 

@@ -47,6 +47,7 @@ class HatracStorage (object):
        filesystem can tolerate.
 
     """
+    track_chunks = False
 
     _bufsize = 1024**2
 
@@ -99,12 +100,20 @@ class HatracStorage (object):
         self.delete(name, upload_id)
         return None
 
-    def finalize_upload(self, name, upload_id):
+    def finalize_upload(self, name, upload_id, chunk_data):
         # nothing changes in storage for this backend strategy
         version_id = upload_id
+        assert chunk_data is None
         return version_id
 
     def upload_chunk_from_file(self, name, version, position, chunksize, input, nbytes, content_md5=None, f=None):
+        """Save chunk data into storage.
+
+           If self.track_chunks, return value must be None or a value
+           that can be serialized using webauthn2.util.jsonWriteRaw,
+           i.e. dict, array, or scalar values.
+
+        """
         if f is None:
             dirname, relname = self._dirname_relname(name, version)
             fullname = "%s/%s" % (dirname, relname)
@@ -149,6 +158,8 @@ class HatracStorage (object):
                     'Received content MD5 %s does not match expected %s.' 
                     % (received_md5, content_md5)
                 )
+
+        return "test"
                
     def get_content(self, name, version, content_md5=None):
         return self.get_content_range(name, version, content_md5)
