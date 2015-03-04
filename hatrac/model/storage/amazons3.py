@@ -26,7 +26,14 @@ class PooledS3Connection (object):
               s3_bucket: name of bucket
 
               s3_connection: nested dictionary of parameters passed as
-                 boto.S3Connection(**dict(s3_connection))
+              boto.S3Connection(**dict(s3_connection)), e.g.:
+
+                 aws_access_key_id,
+                 aws_secret_access_key,
+                 provider,
+                 security_token,
+                 anon,
+                 validate_certs
 
         """
         self.bucket_name = config['s3_bucket']
