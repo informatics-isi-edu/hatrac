@@ -11,16 +11,33 @@ import hashlib
 
 web.config.debug = False
 
-test_config = web.storage(
-    {
-    "storage_backend": "filesystem",
-    "storage_path": os.getcwd() + "/hatrac_test_data",
-    "database_type": "postgres",
-    "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
-    "database_schema": "hatrac",
-    "database_max_retries": 5
-    }
-)
+if True:
+    # do normal testing with filesystem backend
+    test_config = web.storage(
+        {
+            "storage_backend": "filesystem",
+            "storage_path": os.getcwd() + "/hatrac_test_data",
+            "database_type": "postgres",
+            "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
+            "database_schema": "hatrac",
+            "database_max_retries": 5
+        }
+    )
+else:
+    # do testing with S3 backend
+    test_config = web.storage(
+        {
+            "storage_backend": "amazons3",
+            "database_type": "postgres",
+            "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
+            "database_schema": "hatrac",
+            "database_max_retries": 5,
+            "s3_connection": {
+                "aws_access_key_id": os.environ["AWS_ACCESS_KEY"],
+                "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"]
+            }
+        }
+    )
 
 os.mkdir(test_config.storage_path)
 test_directory = hatrac.instantiate(test_config)
