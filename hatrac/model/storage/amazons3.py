@@ -15,7 +15,8 @@ import boto
 import boto.s3
 import boto.s3.key
 from hatrac.core import BadRequest, coalesce
-
+import binascii
+import base64
 
 class PooledS3Connection (object):
 
@@ -112,8 +113,12 @@ class HatracStorage (PooledS3BucketConnection):
         if content_type is not None:
             headers['Content-Type'] = content_type
         if content_md5 is not None:
-            headers['Content-MD5'] = content_md5
-        s3_key.set_contents_from_stream(input, headers=headers, replace=True, md5=md5, size=nbytes)
+            md5 = (content_md5, base64.b64encode(binascii.unhexlify(content_md5)))
+        else:
+            # TODO: stream hatrac client content to temporary file to allow MD5 calculation and rewind?
+            raise NotImplementedError('Content-MD5 is required for this storage backend.')
+
+        s3_key.set_contents_from_file(input, headers=headers, replace=True, md5=md5, size=nbytes, rewind=False)
         return s3_key.version_id
 
     def get_content(self, name, version, content_md5=None):
