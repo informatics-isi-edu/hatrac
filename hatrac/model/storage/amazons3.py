@@ -18,7 +18,7 @@ from hatrac.core import BadRequest, coalesce
 import binascii
 import base64
 
-class PooledS3Connection (object):
+class PooledS3Connection (PooledConnection):
 
     def __init__(self, config):
         """Represent a pool of S3 connections and bucket handles.
@@ -45,6 +45,7 @@ class PooledS3Connection (object):
         # TODO: encode better identifiers if we ever support multiple
         # buckets or credentials and need separate sub-pools
         self.config_tuple = (self.bucket_name,)
+        PooledConnection.__init__(self, self.config_tuple)
 
     def _new_connection(self):
         """Open a new S3 connection and get bucket handle."""
