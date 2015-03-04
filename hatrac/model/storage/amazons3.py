@@ -10,6 +10,8 @@ This module handles only low-level byte storage. Object and
 object-version lifecycle and authorization is handled by the caller.
 
 """
+import os
+import tempfile
 from webauthn2.util import PooledConnection
 import boto
 import boto.s3
@@ -110,17 +112,44 @@ class HatracStorage (PooledS3BucketConnection):
     def create_from_file(self, name, input, nbytes, content_type=None, content_md5=None, s3_conn=None, s3_bucket=None):
         """Create an entire file-version object from input content, returning version ID."""
         s3_key = boto.s3.key.Key(s3_bucket, name)
+        
+        def helper(input, headers, nbytes, md5):
+            s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
+            return s3_key.version_id
+        
+        return self._send_content_from_stream(input, nbytes, content_type, content_md5, helper)
+
+    def _send_content_from_stream(input, nbytes, content_type, content_md5, sendfunc):
+        """Common file-sending logic to talk to S3."""
         headers = {'Content-Length': str(nbytes)}
         if content_type is not None:
             headers['Content-Type'] = content_type
         if content_md5 is not None:
             md5 = (content_md5, base64.b64encode(binascii.unhexlify(content_md5)))
         else:
-            # TODO: stream hatrac client content to temporary file to allow MD5 calculation and rewind?
-            raise NotImplementedError('Content-MD5 is required for this storage backend.')
+            # let S3 backend use a temporary file to rewind and calculate MD5 if needed
+            tmpf = tempfile.TemporaryFile()
 
-        s3_key.set_contents_from_file(input, headers=headers, replace=True, md5=md5, size=nbytes, rewind=False)
-        return s3_key.version_id
+            rbytes = 0
+            while True:
+                if nbytes is not None:
+                    buf = input.read(min(self._bufsize, nbytes - rbytes))
+                else:
+                    buf = input.read(self._bufsize)
+
+                blen = len(buf)
+                rbytes += blen
+                tmpf.write(buf)
+
+                if blen == 0:
+                    if nbytes is not None and rbytes < nbytes:
+                        raise IOError('received %d of %d expected bytes' % (rbytes, nbytes))
+                    break
+
+            tmpf.seek(0)
+            input = tmpf
+
+        return sendfunc(input, headers, nbytes, md5)
 
     def get_content(self, name, version, content_md5=None):
         return self.get_content_range(name, version, content_md5, None)
@@ -174,8 +203,12 @@ class HatracStorage (PooledS3BucketConnection):
     def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, content_md5=None, s3_conn=None, s3_bucket=None):
         upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
         upload.id = upload_id
-        s3_key = upload.upload_part_from_file(input, position, md5=(content_md5, content_md5_b64), size=nbytes)
-        return dict(etag=s3_key.etag)
+
+        def helper(input, headers, nbytes, md5):
+            s3_key = upload.upload_part_from_file(input, position, md5=(content_md5, content_md5_b64), size=nbytes)
+            return dict(etag=s3_key.etag)
+
+        return self._send_content_from_stream(input, nbytes, None, content_md5, helper)
                
     @s3_bucket_wrap()
     def cancel_upload(self, upload_id, s3_conn=None, s3_bucket=None):
