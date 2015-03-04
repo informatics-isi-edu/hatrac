@@ -16,11 +16,12 @@ from webauthn2.util import PooledConnection
 import boto
 import boto.s3
 import boto.s3.key
+from boto.s3.connection import S3Connection
 from hatrac.core import BadRequest, coalesce
 import binascii
 import base64
 
-class PooledS3Connection (PooledConnection):
+class PooledS3BucketConnection (PooledConnection):
 
     def __init__(self, config):
         """Represent a pool of S3 connections and bucket handles.
@@ -42,8 +43,9 @@ class PooledS3Connection (PooledConnection):
         self.bucket_name = config['s3_bucket']
 
         # TODO: do something better for authz than storing secret in our config data!
-        self.conn_config = config['s3_connection']
-
+        self.access_key = config['s3_access_key']
+        self.secret_key = config['s3_secret_key']
+        
         # TODO: encode better identifiers if we ever support multiple
         # buckets or credentials and need separate sub-pools
         self.config_tuple = (self.bucket_name,)
@@ -51,11 +53,12 @@ class PooledS3Connection (PooledConnection):
 
     def _new_connection(self):
         """Open a new S3 connection and get bucket handle."""
-        conn = boto.S3Connection(**self.conn_config)
+        conn = S3Connection(self.access_key, self.secret_key)
         bucket = conn.get_bucket(self.bucket_name)
         return (conn, bucket)
+    
 
-def s3_bucket_wrap(deferrered_conn_reuse=False):
+def s3_bucket_wrap(deferred_conn_reuse=False):
     """Decorate a method with pooled bucket access.
 
        If deferred_conn_reuse is True, wrapped method must put back
@@ -67,7 +70,10 @@ def s3_bucket_wrap(deferrered_conn_reuse=False):
             self = args[0]
             conn_tuple = None
             try:
-                conn_tuple = self._get_pooled_connection()
+                if deferred_conn_reuse:
+                    conn_tuple = self._get_pooled_connection()
+                else:
+                    conn_tuple = self._new_connection()
                 conn, bucket = conn_tuple
                 try:
                     return orig_method(*args, s3_conn=conn, s3_bucket=bucket)
