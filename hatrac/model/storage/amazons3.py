@@ -18,8 +18,12 @@ import boto.s3
 import boto.s3.key
 from boto.s3.connection import S3Connection
 from hatrac.core import BadRequest, coalesce
+from input_wrapper import InputWrapper
 import binascii
 import base64
+import logging
+
+logger = logging.getLogger('hatrac')
 
 class PooledS3BucketConnection (PooledConnection):
 
@@ -43,9 +47,8 @@ class PooledS3BucketConnection (PooledConnection):
         self.bucket_name = config['s3_bucket']
 
         # TODO: do something better for authz than storing secret in our config data!
-        self.access_key = config['s3_access_key']
-        self.secret_key = config['s3_secret_key']
-        
+        self.conn_config = config['s3_connection']
+
         # TODO: encode better identifiers if we ever support multiple
         # buckets or credentials and need separate sub-pools
         self.config_tuple = (self.bucket_name,)
@@ -53,10 +56,9 @@ class PooledS3BucketConnection (PooledConnection):
 
     def _new_connection(self):
         """Open a new S3 connection and get bucket handle."""
-        conn = S3Connection(self.access_key, self.secret_key)
+        conn = S3Connection(**self.conn_config)
         bucket = conn.get_bucket(self.bucket_name)
         return (conn, bucket)
-    
 
 def s3_bucket_wrap(deferred_conn_reuse=False):
     """Decorate a method with pooled bucket access.
@@ -70,14 +72,12 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
             self = args[0]
             conn_tuple = None
             try:
-                if deferred_conn_reuse:
-                    conn_tuple = self._get_pooled_connection()
-                else:
-                    conn_tuple = self._new_connection()
+                conn_tuple = self._get_pooled_connection()
                 conn, bucket = conn_tuple
-                try:
+                try:             
                     return orig_method(*args, s3_conn=conn, s3_bucket=bucket)
                 except Exception, ev:
+                    logger.info(ev)
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
                     conn_tuple = None
             finally:
@@ -118,24 +118,31 @@ class HatracStorage (PooledS3BucketConnection):
     def create_from_file(self, name, input, nbytes, content_type=None, content_md5=None, s3_conn=None, s3_bucket=None):
         """Create an entire file-version object from input content, returning version ID."""
         s3_key = boto.s3.key.Key(s3_bucket, name)
-        
         def helper(input, headers, nbytes, md5):
-            s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
+            try:
+                s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
+            except Exception, ex:
+                logger.info(ev)
             return s3_key.version_id
         
         return self._send_content_from_stream(input, nbytes, content_type, content_md5, helper)
 
-    def _send_content_from_stream(input, nbytes, content_type, content_md5, sendfunc):
+    def _send_content_from_stream(self, input, nbytes, content_type, content_md5, sendfunc):
         """Common file-sending logic to talk to S3."""
         headers = {'Content-Length': str(nbytes)}
         if content_type is not None:
             headers['Content-Type'] = content_type
         if content_md5 is not None:
-            md5 = (content_md5, base64.b64encode(binascii.unhexlify(content_md5)))
+            base64_digest = base64.b64encode(binascii.unhexlify(content_md5.strip()))
+            if base64_digest[-1] == '\n':
+                base64_digest = base64_digest[0:-1]
+            md5 = (content_md5.strip(), base64_digest)
+            input = InputWrapper(input)           
         else:
             # let S3 backend use a temporary file to rewind and calculate MD5 if needed
             tmpf = tempfile.TemporaryFile()
-
+            md5 = None
+            
             rbytes = 0
             while True:
                 if nbytes is not None:
@@ -154,7 +161,7 @@ class HatracStorage (PooledS3BucketConnection):
 
             tmpf.seek(0)
             input = tmpf
-
+            
         return sendfunc(input, headers, nbytes, md5)
 
     def get_content(self, name, version, content_md5=None):
