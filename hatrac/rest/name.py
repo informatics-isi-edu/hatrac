@@ -8,6 +8,7 @@
 
 """
 
+import base64
 from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, LengthRequired
 import web
 
@@ -110,8 +111,8 @@ class Name (RestHandler):
                 nbytes = int(web.ctx.env['CONTENT_LENGTH'])
             except:
                 raise LengthRequired()
-            if 'CONTENT_MD5' in web.ctx.env:
-                content_md5 = web.ctx.env.get('CONTENT_MD5').lower()
+            if 'HTTP_CONTENT_MD5' in web.ctx.env:
+                content_md5 = base64.b64decode(web.ctx.env.get('HTTP_CONTENT_MD5').strip())
             else:
                 content_md5 = None
             resource = resource.create_version_from_file(

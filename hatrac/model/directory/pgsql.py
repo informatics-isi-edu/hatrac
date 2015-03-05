@@ -39,6 +39,7 @@ version of any particular object.
 """
 
 import web
+import binascii
 import base64
 import random
 import struct
@@ -46,6 +47,13 @@ from StringIO import StringIO
 from webauthn2.util import DatabaseConnection, sql_literal, sql_identifier, jsonWriterRaw
 import hatrac.core
 from hatrac.core import coalesce
+
+def sql_hexlify(b):
+    """Serialize binary string as hex-encoded text literal for SQL, handling None as NULL."""
+    if b is None:
+        return sql_literal(b)
+    else:
+        return sql_literal(binascii.hexlify(b))
 
 def regexp_escape(s):
     safe = set(
@@ -275,7 +283,7 @@ class HatracObjectVersion (HatracName):
         self.version = args['version']
         self.nbytes = args['nbytes']
         self.content_type = args['content_type']
-        self.content_md5 = args['content_md5']
+        self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
         return '%s:%s' % (self.name, self.version)
@@ -326,7 +334,7 @@ class HatracUpload (HatracName):
         self.nbytes = args['nbytes']
         self.chunksize = args['chunksize']
         self.content_type = args['content_type']
-        self.content_md5 = args['content_md5']
+        self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
         return "%s;upload/%s" % (str(self.object), self.job)
@@ -347,7 +355,7 @@ class HatracUpload (HatracName):
             chunksize=self.chunksize,
             nbytes=self.nbytes,
             content_type=self.content_type,
-            content_md5=self.content_md5
+            content_md5=self.content_md5 and base64.b64encode(self.content_md5) or None
             )) + '\n'
         return len(body), 'application/json', None, [body]
 
@@ -769,7 +777,7 @@ RETURNING *, %(name)s AS "name"
     nameid=sql_literal(object.id),
     nbytes=nbytes is not None and sql_literal(int(nbytes)) or 'NULL::int8',
     type=content_type and sql_literal(content_type) or 'NULL::text',
-    md5=content_md5 and sql_literal(content_md5) or 'NULL::text'
+    md5=sql_hexlify(content_md5)
 )
         )[0]
 
@@ -786,7 +794,7 @@ RETURNING *, %(name)s AS "name"
     nbytes=sql_literal(int(nbytes)),
     chunksize=sql_literal(int(chunksize)),
     content_type=sql_literal(content_type),
-    content_md5=sql_literal(content_md5)
+    content_md5=sql_hexlify(content_md5)
 )
         )[0]
 

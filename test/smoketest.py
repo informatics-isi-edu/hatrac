@@ -94,7 +94,7 @@ expect(
 
 content1 = 'test data 1\n'
 nbytes1 = len(content1)
-content1_md5 = hashlib.md5(content1).hexdigest()
+content1_md5 = hashlib.md5(content1).digest()
 
 expect(
     hatrac.core.BadRequest,
@@ -108,13 +108,13 @@ obj1.create_version_from_file(
 contentJ = 'test data that will be sent in multiple parts'
 chunksize = 10
 nbytesJ = len(contentJ)
-contentJ_md5 = hashlib.md5(contentJ).hexdigest()
+contentJ_md5 = hashlib.md5(contentJ).digest()
 
 upload = objJ.create_version_upload_job(chunksize, root_context, nbytesJ, 'text/plain', contentJ_md5)
 pos = 0
 while pos < len(contentJ):
     chunk = contentJ[pos:min(pos+chunksize,nbytesJ)]
-    chunk_md5 = hashlib.md5(chunk).hexdigest()
+    chunk_md5 = hashlib.md5(chunk).digest()
     upload.upload_chunk_from_file(pos/chunksize, StringIO(chunk), root_context, len(chunk), chunk_md5)
     pos += chunksize
 versJ = upload.finalize(root_context)
@@ -148,7 +148,7 @@ assert hash1 == content1_md5
 
 content2 = 'test data 2\n'
 nbytes2 = len(content2)
-content2_md5 = hashlib.md5(content2).hexdigest()
+content2_md5 = hashlib.md5(content2).digest()
 
 obj1.create_version_from_file(
     StringIO(content2), root_context, nbytes2, 'text/plain', content2_md5

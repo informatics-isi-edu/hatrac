@@ -4,6 +4,9 @@
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
+import re
+import binascii
+import base64
 import web
 from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest
 from webauthn2.util import jsonReader
@@ -28,8 +31,8 @@ class ObjectTransferChunk (RestHandler):
             nbytes = int(web.ctx.env['CONTENT_LENGTH'])
         except:
             raise LengthRequired()
-        if 'CONTENT_MD5' in web.ctx.env:
-            content_md5 = web.ctx.env.get('CONTENT_MD5').lower()
+        if 'HTTP_CONTENT_MD5' in web.ctx.env:
+            content_md5 = base64.b64decode(web.ctx.env.get('HTTP_CONTENT_MD5').strip())
         else:
             content_md5 = None
         upload = self.resolve_upload(path, name, job)
@@ -103,6 +106,22 @@ class ObjectTransfers (RestHandler):
             raise BadRequest('Missing required field %s.' % ev)
         except ValueError, ev:
             raise BadRequest('Invalid count: %s.' % ev)
+
+        if content_md5 is not None:
+            content_md5 = content_md5.strip()
+
+        if content_md5 is None:
+            pass
+        elif re.match('^[0-9a-zA-z]\+$', content_md5) and len(content_md5) == 32:
+            # tolerate a hex digest
+            content_md5 = binascii.unhexlify(content_md5)
+        elif len(content_md5) == 24:
+            try:
+                content_md5 = base64.b64decode(content_md5)
+            except Exception, ev:
+                raise BadRequest('Invalid content_md5 base64 encoded value: %s.' % ev)
+        else:
+            raise BadRequest('Invalid content_md5 "%s" is neither 32-byte hex or 24-byte base64 string.' % content_md5)
 
         resource = self.resolve(path, name).get_uploads()
         upload = resource.create_version_upload_job(

@@ -23,7 +23,11 @@ import hatrac.core
 import sys
 import traceback
 
-_webauthn2_config = webauthn2.merge_config(jsonFileName='webauthn2_config.json')
+try:
+    _webauthn2_config = webauthn2.merge_config(jsonFileName='webauthn2_config.json')
+except:
+    _webauthn2_config = webauthn2.merge_config()
+
 _webauthn2_manager = webauthn2.Manager(overrides=_webauthn2_config)
 
 # map URL pattern (regexp) to handler class
@@ -325,7 +329,7 @@ class RestHandler (object):
         if content_type:
             web.header('Content-Type', content_type)
         if content_md5:
-            web.header('Content-MD5', content_md5)
+            web.header('Content-MD5', base64.b64encode(content_md5.strip()))
 
         if self.get_body:
             for buf in data_generator:

@@ -13,6 +13,7 @@ object-version lifecycle and authorization is handled by the caller.
 import os
 import hashlib
 import base64
+import binascii
 import random
 import struct
 from StringIO import StringIO
@@ -152,11 +153,11 @@ class HatracStorage (object):
                 eof = True
 
         if hasher:
-            received_md5 = hasher.hexdigest().lower()
-            if content_md5.lower() != received_md5:
+            received_md5 = hasher.digest()
+            if content_md5 != received_md5:
                 raise BadRequest(
                     'Received content MD5 %s does not match expected %s.' 
-                    % (received_md5, content_md5)
+                    % (binascii.hexlify(received_md5), binascii.hexlify(content_md5))
                 )
 
         return "test"
@@ -207,11 +208,11 @@ class HatracStorage (object):
                         raise IOError('Read truncated at %s when %s expected.' % (rpos, limit))
 
                     if eof and hasher:
-                        retrieved_md5 = hasher.hexdigest().lower()
-                        if content_md5.lower() != retrieved_md5:
+                        retrieved_md5 = hasher.digest()
+                        if content_md5 != retrieved_md5:
                             raise IOError(
                                 'Retrieved content MD5 %s does not match expected %s.'
-                                % (retrieved_md5, content_md5)
+                                % (binascii.hexlify(retrieved_md5), binascii.hexlify(content_md5))
                             )
 
                     yield buf

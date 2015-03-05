@@ -66,6 +66,18 @@ mycurl()
 	"$@"
 }
 
+hex2base64()
+{
+    # decode stdin hex digits to binary and recode to base64
+    xxd -r -p | base64
+}
+
+mymd5sum()
+{
+    # take data on stdin and output base64 encoded hash
+    md5sum | sed -e "s/ \+-//" | hex2base64
+}
+
 NUM_FAILURES=0
 NUM_TESTS=0
 
@@ -82,10 +94,12 @@ dotest()
     printf " -->  %s " "$summary" >&2
 
     md5_mismatch=
-    if grep -i -q content-md5 ${RESPONSE_HEADERS}
+    hash1=
+    hash2=
+    if grep -i -q content-md5 ${RESPONSE_HEADERS} && [[ "$1" != '--head' ]]
     then
-	hash1=$(grep -i content-md5 ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+: \([a-z0-9]\+\).*/\1/")
-	hash2=$(md5sum < ${RESPONSE_CONTENT} | sed -e "s/ \+-//")
+	hash1=$(grep -i content-md5 ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+: \([A-Za-z0-9/+=]\+\).*/\1/")
+	hash2=$(mymd5sum < ${RESPONSE_CONTENT})
 	if [[ "$hash1" != "$hash2" ]]
 	then
 	    md5_mismatch="Content-MD5 ${hash1} mismatch body ${hash2}"
@@ -151,7 +165,8 @@ dotest "200::application/json::0" /ns-${RUNKEY}/foo --head
 dotest "405::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
 
 # test objects
-md5=$(md5sum < $0 | sed -e "s/ \+-//")
+
+md5=$(mymd5sum < $0)
 script_size=$(stat -c "%s" $0)
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
@@ -208,7 +223,7 @@ split -b 1024 -d "$0" /tmp/parts-${RUNKEY}-
 for part in /tmp/parts-${RUNKEY}-*
 do
     pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-    md5=$(md5sum < "$part" | sed -e "s/ \+-//")
+    md5=$(mymd5sum < "$part")
     dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
 done
 dotest "201::*::*" "${upload}" -X POST
