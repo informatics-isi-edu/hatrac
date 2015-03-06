@@ -173,6 +173,7 @@ dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -H "Content-Type: application/x-bash" \
     -H "Content-MD5: $md5"
 obj1_vers1="$(cat ${RESPONSE_CONTENT})"
+obj1_vers1="${obj1_vers1#/hatrac}"
 dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1
 dotest "200::application/x-bash::0" /ns-${RUNKEY}/foo2/obj1 --head
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
@@ -212,6 +213,7 @@ dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
     -X POST \
     -H "Content-Type: application/json"
 upload="$(cat ${RESPONSE_CONTENT})"
+upload="${upload#/hatrac}"
 dotest "200::application/json::*" "${upload}"
 dotest "200::application/json::*" "${upload}" --head
 dotest "200::*::*" "/ns-${RUNKEY}/foo2/obj1;upload"

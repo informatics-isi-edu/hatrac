@@ -133,7 +133,7 @@ class HatracName (object):
         ][args['subtype']](directory, **args)
 
     def __str__(self):
-        return self.name
+        return self.directory.prefix + self.name
 
     def _reload(self, db, raise_notfound=True):
         result = self.directory._name_lookup(db, self.name, raise_notfound)
@@ -288,7 +288,7 @@ class HatracObjectVersion (HatracName):
             self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
-        return '%s:%s' % (self.name, self.version)
+        return '%s:%s' % (self.object, self.version)
 
     def _reload(self, db):
         object1 = self.object._reload(db)
@@ -339,7 +339,7 @@ class HatracUpload (HatracName):
         self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
-        return "%s;upload/%s" % (str(self.object), self.job)
+        return "%s;upload/%s" % (self.object, self.job)
 
     def _reload(self, db):
         object = self.object._reload(db)
@@ -467,6 +467,7 @@ class HatracDirectory (DatabaseConnection):
             ]
         )
         self.storage = storage
+        self.prefix = config.get('service_prefix', '')
 
     @db_wrap()
     def deploy_db(self, admin_roles, db=None):
@@ -497,14 +498,14 @@ class HatracDirectory (DatabaseConnection):
             raise hatrac.core.BadRequest('Illegal name "%s".' % relname)
 
         try:
-            self._name_lookup(db, name)
-            raise hatrac.core.Conflict('Name %s already in use.' % name)
+            resource = HatracName.construct(self, **self._name_lookup(db, name))
+            raise hatrac.core.Conflict('Name %s already in use.' % resource)
         except hatrac.core.NotFound, ev:
             pass
             
         parent = HatracName.construct(self, **self._name_lookup(db, parname))
         if parent.is_object():
-            raise hatrac.core.Conflict('Parent %s is not a namespace.' % parname)
+            raise hatrac.core.Conflict('Parent %s is not a namespace.' % (self.prefix + parname))
 
         parent.enforce_acl(['owner', 'create'], client_context)
         resource = HatracName.construct(self, **self._create_name(db, name, is_object))
@@ -667,7 +668,7 @@ class HatracDirectory (DatabaseConnection):
         if results:
             return HatracObjectVersion(self, object, **results[0])
         else:
-            raise hatrac.core.Conflict('Object %s currently has no content.' % object.name)
+            raise hatrac.core.Conflict('Object %s currently has no content.' % object)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner']))
     def set_resource_acl_role(self, resource, access, role, client_context, db=None):
@@ -865,7 +866,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             where=' AND '.join(wheres)
         )
         if not results:
-            raise hatrac.core.NotFound('Resource %s not found.' % name)
+            raise hatrac.core.NotFound('Resource %s not found.' % (self.prefix + name))
         return results[0]
         
     def _version_lookup(self, db, object, version, allow_deleted=True):

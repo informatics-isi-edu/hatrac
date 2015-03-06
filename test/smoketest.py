@@ -15,6 +15,7 @@ if True:
     # do normal testing with filesystem backend
     test_config = web.storage(
         {
+            "service_prefix": "/hatrac",
             "storage_backend": "filesystem",
             "storage_path": os.getcwd() + "/hatrac_test_data",
             "database_type": "postgres",
@@ -27,6 +28,7 @@ else:
     # do testing with S3 backend
     test_config = web.storage(
         {
+            "service_prefix": "/hatrac",
             "storage_backend": "amazons3",
             "database_type": "postgres",
             "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
