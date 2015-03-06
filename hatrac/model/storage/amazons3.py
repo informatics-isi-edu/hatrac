@@ -16,11 +16,12 @@ from webauthn2.util import PooledConnection
 import boto
 import boto.s3
 import boto.s3.key
+from boto.s3.connection import S3Connection
 from hatrac.core import BadRequest, coalesce
 import binascii
 import base64
 
-class PooledS3Connection (PooledConnection):
+class PooledS3BucketConnection (PooledConnection):
 
     def __init__(self, config):
         """Represent a pool of S3 connections and bucket handles.
@@ -51,11 +52,11 @@ class PooledS3Connection (PooledConnection):
 
     def _new_connection(self):
         """Open a new S3 connection and get bucket handle."""
-        conn = boto.S3Connection(**self.conn_config)
+        conn = S3Connection(**self.conn_config)
         bucket = conn.get_bucket(self.bucket_name)
         return (conn, bucket)
 
-def s3_bucket_wrap(deferrered_conn_reuse=False):
+def s3_bucket_wrap(deferred_conn_reuse=False):
     """Decorate a method with pooled bucket access.
 
        If deferred_conn_reuse is True, wrapped method must put back
@@ -69,7 +70,7 @@ def s3_bucket_wrap(deferrered_conn_reuse=False):
             try:
                 conn_tuple = self._get_pooled_connection()
                 conn, bucket = conn_tuple
-                try:
+                try:             
                     return orig_method(*args, s3_conn=conn, s3_bucket=bucket)
                 except Exception, ev:
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
@@ -112,24 +113,24 @@ class HatracStorage (PooledS3BucketConnection):
     def create_from_file(self, name, input, nbytes, content_type=None, content_md5=None, s3_conn=None, s3_bucket=None):
         """Create an entire file-version object from input content, returning version ID."""
         s3_key = boto.s3.key.Key(s3_bucket, name)
-        
         def helper(input, headers, nbytes, md5):
             s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
             return s3_key.version_id
-        
         return self._send_content_from_stream(input, nbytes, content_type, content_md5, helper)
 
-    def _send_content_from_stream(input, nbytes, content_type, content_md5, sendfunc):
+    def _send_content_from_stream(self, input, nbytes, content_type, content_md5, sendfunc):
         """Common file-sending logic to talk to S3."""
         headers = {'Content-Length': str(nbytes)}
         if content_type is not None:
             headers['Content-Type'] = content_type
         if content_md5 is not None:
-            md5 = (content_md5, base64.b64encode(binascii.unhexlify(content_md5)))
+            md5 = (binascii.hexlify(content_md5), base64.b64encode(content_md5))
+            input = InputWrapper(input, nbytes)
         else:
             # let S3 backend use a temporary file to rewind and calculate MD5 if needed
             tmpf = tempfile.TemporaryFile()
-
+            md5 = None
+            
             rbytes = 0
             while True:
                 if nbytes is not None:
@@ -148,7 +149,7 @@ class HatracStorage (PooledS3BucketConnection):
 
             tmpf.seek(0)
             input = tmpf
-
+            
         return sendfunc(input, headers, nbytes, md5)
 
     def get_content(self, name, version, content_md5=None):
@@ -228,3 +229,49 @@ class HatracStorage (PooledS3BucketConnection):
         """Tidy up after an empty namespace that has been deleted."""
         # nothing to do for S3 since namespaces are not explicit resources in bucket
         pass
+
+class InputWrapper():
+    """Input stream file-like wrapper for uploading data to S3. 
+
+    This module wraps mod_wsgi_input providing implementations of
+    seek and tell that are used by boto (but not relied upon)
+
+    """
+
+    def __init__(self, ip, nbytes):
+        self._mod_wsgi_input = ip
+        self.nbytes = nbytes
+        self.reading_started = False
+        self.current_position = 0
+
+    def read(self, size=None):
+        if self.current_position != 0:
+            raise Exception("Stream seek position not at 0")
+        self.reading_started = True
+        return self._mod_wsgi_input.read(size)
+
+    def tell(self):
+        if self.reading_started: 
+            raise Exception("Stream reading started")
+        
+        return self.current_position
+
+    def seek(self, offset, whence=0):
+        if self.reading_started: 
+            raise Exception("Stream reading started")
+        
+        if whence == 0:
+            if offset > self.nbytes or offset < 0:
+                raise IOException("Can't seek beyond stream lenght")
+            self.current_position = offset
+        elif whence == 1:
+            if offset + self.current_position > self.nbytes or offset + self.current_position < 0:
+                raise IOException("Can't seek beyond stream length") 
+            self.current_position = self.current_position + offset
+        else:
+            if offset > 0 or self.nbytes + offset < 0:
+                raise IOException("Can't seek beyond stream length")
+            self.current_position = self.nbytes + offset
+             
+    def name(self):
+        return self._mod_wsgi_input.name()
