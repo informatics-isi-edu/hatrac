@@ -20,9 +20,6 @@ from boto.s3.connection import S3Connection
 from hatrac.core import BadRequest, coalesce
 import binascii
 import base64
-import logging
-
-logger = logging.getLogger('hatrac')
 
 class PooledS3BucketConnection (PooledConnection):
 
@@ -127,7 +124,7 @@ class HatracStorage (PooledS3BucketConnection):
         if content_type is not None:
             headers['Content-Type'] = content_type
         if content_md5 is not None:
-            md5 = (content_md5.strip(), base64.b64encode(binascii.unhexlify(content_md5.strip())))
+            md5 = (binascii.hexlify(content_md5), base64.b64encode(content_md5))
             input = InputWrapper(input, nbytes)
         else:
             # let S3 backend use a temporary file to rewind and calculate MD5 if needed
@@ -277,4 +274,4 @@ class InputWrapper():
             self.current_position = self.nbytes + offset
              
     def name(self):
-        return self._mod.wsgi_input.name()
+        return self._mod_wsgi_input.name()

@@ -11,11 +11,7 @@
 import base64
 from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, LengthRequired
 import web
-import base64
 
-import logging
-
-logger = logging.getLogger("hatrac")
 @web_url([
      # path, name, version
     '/((?:[^/:;]+/)*)([^/:;]+):([^/:;]+)'
