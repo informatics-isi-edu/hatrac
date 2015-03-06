@@ -283,7 +283,9 @@ class HatracObjectVersion (HatracName):
         self.version = args['version']
         self.nbytes = args['nbytes']
         self.content_type = args['content_type']
-        self.content_md5 = binascii.unhexlify(args['content_md5'])
+        self.content_md5 = None
+        if args['content_md5']:
+            self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
         return '%s:%s' % (self.name, self.version)

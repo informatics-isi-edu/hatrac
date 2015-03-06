@@ -18,7 +18,6 @@ import boto.s3
 import boto.s3.key
 from boto.s3.connection import S3Connection
 from hatrac.core import BadRequest, coalesce
-from input_wrapper import InputWrapper
 import binascii
 import base64
 import logging
@@ -77,7 +76,6 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
                 try:             
                     return orig_method(*args, s3_conn=conn, s3_bucket=bucket)
                 except Exception, ev:
-                    logger.info(ev)
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
                     conn_tuple = None
             finally:
@@ -119,12 +117,8 @@ class HatracStorage (PooledS3BucketConnection):
         """Create an entire file-version object from input content, returning version ID."""
         s3_key = boto.s3.key.Key(s3_bucket, name)
         def helper(input, headers, nbytes, md5):
-            try:
-                s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
-            except Exception, ex:
-                logger.info(ev)
+            s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
             return s3_key.version_id
-        
         return self._send_content_from_stream(input, nbytes, content_type, content_md5, helper)
 
     def _send_content_from_stream(self, input, nbytes, content_type, content_md5, sendfunc):
@@ -133,11 +127,8 @@ class HatracStorage (PooledS3BucketConnection):
         if content_type is not None:
             headers['Content-Type'] = content_type
         if content_md5 is not None:
-            base64_digest = base64.b64encode(binascii.unhexlify(content_md5.strip()))
-            if base64_digest[-1] == '\n':
-                base64_digest = base64_digest[0:-1]
-            md5 = (content_md5.strip(), base64_digest)
-            input = InputWrapper(input)           
+            md5 = (content_md5.strip(), base64.b64encode(binascii.unhexlify(content_md5.strip())))
+            input = InputWrapper(input, nbytes)
         else:
             # let S3 backend use a temporary file to rewind and calculate MD5 if needed
             tmpf = tempfile.TemporaryFile()
@@ -241,3 +232,49 @@ class HatracStorage (PooledS3BucketConnection):
         """Tidy up after an empty namespace that has been deleted."""
         # nothing to do for S3 since namespaces are not explicit resources in bucket
         pass
+
+class InputWrapper():
+    """Input stream file-like wrapper for uploading data to S3. 
+
+    This module wraps mod_wsgi_input providing implementations of
+    seek and tell that are used by boto (but not relied upon)
+
+    """
+
+    def __init__(self, ip, nbytes):
+        self._mod_wsgi_input = ip
+        self.nbytes = nbytes
+        self.reading_started = False
+        self.current_position = 0
+
+    def read(self, size=None):
+        if self.current_position != 0:
+            raise Exception("Stream seek position not at 0")
+        self.reading_started = True
+        return self._mod_wsgi_input.read(size)
+
+    def tell(self):
+        if self.reading_started: 
+            raise Exception("Stream reading started")
+        
+        return self.current_position
+
+    def seek(self, offset, whence=0):
+        if self.reading_started: 
+            raise Exception("Stream reading started")
+        
+        if whence == 0:
+            if offset > self.nbytes or offset < 0:
+                raise IOException("Can't seek beyond stream lenght")
+            self.current_position = offset
+        elif whence == 1:
+            if offset + self.current_position > self.nbytes or offset + self.current_position < 0:
+                raise IOException("Can't seek beyond stream length") 
+            self.current_position = self.current_position + offset
+        else:
+            if offset > 0 or self.nbytes + offset < 0:
+                raise IOException("Can't seek beyond stream length")
+            self.current_position = self.nbytes + offset
+             
+    def name(self):
+        return self._mod.wsgi_input.name()
