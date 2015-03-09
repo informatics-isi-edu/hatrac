@@ -2,8 +2,6 @@
 
 # Run basic Hatrac REST API tests 
 
-COOKIES=${COOKIES:-cookie}
-
 usage()
 {
     cat <<EOF
@@ -37,7 +35,16 @@ EOF
     exit 1
 }
 
-[[ -r "$COOKIES" ]] || error 
+[[ -z $GOAUTH  && -z $COOKIES ]] && COOKIES=${COOKIES:-cookie}
+[[ -n $COOKIES && ! -r $COOKIES ]] && error
+
+#Supported deployments: amazons3 or filesystem
+if [[ -z $DEPLOYMENT ]]
+then
+    DEPLOYMENT="filesystem"
+fi
+
+echo "Using $DEPLOYMENT deployment"
 
 RUNKEY=smoketest-$RANDOM
 RESPONSE_HEADERS=/tmp/${RUNKEY}-response-headers
@@ -48,6 +55,7 @@ cleanup()
 {
     rm -f ${RESPONSE_HEADERS} ${RESPONSE_CONTENT} ${TEST_DATA}
     rm -f /tmp/parts-${RUNKEY}*
+    rm -f /tmp/dummy-${RUNKEY}
 }
 
 trap cleanup 0
@@ -58,12 +66,22 @@ mycurl()
     touch ${RESPONSE_CONTENT}
     truncate -s 0 ${RESPONSE_HEADERS}
     truncate -s 0 ${RESPONSE_CONTENT}
-    curl -D ${RESPONSE_HEADERS} \
+    if [[ -n $GOAUTH ]]
+    then
+        curl -D ${RESPONSE_HEADERS} \
+        -o ${RESPONSE_CONTENT} \
+        -s \
+        -k -H "Authorization: Globus-Goauthtoken $GOAUTH" \
+        -w "%{http_code}::%{content_type}::%{size_download}\n" \
+        "$@"
+    else
+        curl -D ${RESPONSE_HEADERS} \
 	-o ${RESPONSE_CONTENT} \
 	-s \
 	-k -b "$COOKIES" -c "$COOKIES" \
 	-w "%{http_code}::%{content_type}::%{size_download}\n" \
 	"$@"
+    fi
 }
 
 hex2base64()
@@ -81,7 +99,7 @@ mymd5sum()
 NUM_FAILURES=0
 NUM_TESTS=0
 
-BASE_URL="https://$(hostname)/hatrac"
+BASE_URL=${BASE_URL:-https://$(hostname)/hatrac}
 
 dotest()
 {
@@ -128,7 +146,7 @@ ${md5_mismatch}
 Response headers:
 $(cat ${RESPONSE_HEADERS})
 Response body:
-$(cat ${RESPONSE_CONTENT})
+$(head -c 500 ${RESPONSE_CONTENT})
 
 EOF
 	NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
@@ -165,7 +183,6 @@ dotest "200::application/json::0" /ns-${RUNKEY}/foo --head
 dotest "405::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
 
 # test objects
-
 md5=$(mymd5sum < $0)
 script_size=$(stat -c "%s" $0)
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
@@ -200,13 +217,28 @@ dotest "204::*::*" "${obj1_vers1}" -X DELETE
 dotest "404::*::*" "${obj1_vers1}"
 dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
 
-# test chunk upload
-cat > ${TEST_DATA} <<EOF
-{"chunk_bytes": 1024,
- "total_bytes": ${script_size},
- "content_type": "application/x-bash",
- "content_md5": "$md5"}
+# test chunk upload (S3 requires at least 5MB chunks)
+if [[ $DEPLOYMENT == "amazons3" ]]
+then
+    # generate 5MB + file
+    dd if=/dev/urandom bs=6291456 count=1 of=/tmp/dummy-${RUNKEY}
+    md5=$(mymd5sum < /tmp/dummy-${RUNKEY})
+
+    cat > ${TEST_DATA} <<EOF
+{"chunk_bytes": 5242881,
+"total_bytes": 6291456,
+"content_type": "application/x-bash",
+"content_md5": "$md5"}
 EOF
+else
+    cat > ${TEST_DATA} <<EOF
+{"chunk_bytes": 1024,
+"total_bytes": ${script_size},
+"content_type": "application/x-bash",
+"content_md5": "$md5"}
+EOF
+fi
+
 dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
     -T "${TEST_DATA}" \
     -X POST \
@@ -219,13 +251,26 @@ dotest "200::*::*" "/ns-${RUNKEY}/foo2/obj1;upload" --head
 dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
 dotest "405::*::*" "${upload}/0"
 dotest "405::*::*" "${upload}/0" --head
-split -b 1024 -d "$0" /tmp/parts-${RUNKEY}-
-for part in /tmp/parts-${RUNKEY}-*
-do
-    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-    md5=$(mymd5sum < "$part")
-    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
-done
+
+if [[ $DEPLOYMENT == "amazons3" ]] 
+then 
+    split -b 5242881 -d /tmp/dummy-${RUNKEY} /tmp/parts-${RUNKEY}-
+        for part in /tmp/parts-${RUNKEY}-*
+        do
+            pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
+            md5=$(mymd5sum < "$part")
+            dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
+    done
+else
+    split -b 1024 -d "$0" /tmp/parts-${RUNKEY}-
+        for part in /tmp/parts-${RUNKEY}-*
+        do
+            pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
+            md5=$(mymd5sum < "$part")
+            dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
+    done
+fi
+
 dotest "201::*::*" "${upload}" -X POST
 dotest "404::*::*" "${upload}" -X POST
 dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1

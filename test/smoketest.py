@@ -11,7 +11,14 @@ import hashlib
 
 web.config.debug = False
 
-if True:
+FILESYSTEM = "filesystem"
+AMAZON_S3 = "s3"
+
+deployment =  os.environ.get("HATRAC_DEPLOYMENT", FILESYSTEM)
+
+print "Using %s deployment" % deployment
+
+if deployment == FILESYSTEM:
     # do normal testing with filesystem backend
     test_config = web.storage(
         {
@@ -32,6 +39,7 @@ else:
             "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
             "database_schema": "hatrac",
             "database_max_retries": 5,
+            "s3_bucket" : os.environ.get("HATRAC_TEST_BUCKET", "hatractest"),
             "s3_connection": {
                 "aws_access_key_id": os.environ["AWS_ACCESS_KEY"],
                 "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"]
@@ -39,7 +47,9 @@ else:
         }
     )
 
-os.mkdir(test_config.storage_path)
+if deployment == FILESYSTEM:
+    os.mkdir(test_config.storage_path)
+
 test_directory = hatrac.instantiate(test_config)
 
 test_directory.deploy_db(["testroot"])
@@ -105,8 +115,12 @@ obj1.create_version_from_file(
     StringIO(content1), root_context, nbytes1, 'text/plain', content1_md5
 )
 
+# Amazon multipart uploads must be at least 5MB
 contentJ = 'test data that will be sent in multiple parts'
 chunksize = 10
+if deployment == AMAZON_S3:
+    contentJ = "".join(map(chr, (ord('a')+(y%26) for y in range(6000000))))
+    chunksize = 5242881
 nbytesJ = len(contentJ)
 contentJ_md5 = hashlib.md5(contentJ).digest()
 
@@ -169,13 +183,14 @@ assert rbytes2 == nbytes2
 assert ''.join(data2) == content2
 
 # tamper with storage to simulate storage corruption
-f = open("%s/%s:%s" % (test_config.storage_path, vers2.name, vers2.version), "ab")
-f.write("this is broken")
-f.close()
-expect(
-    IOError,
-    lambda: ''.join(vers2.get_content(root_context)[3])
-)
+if deployment == FILESYSTEM:
+    f = open("%s/%s:%s" % (test_config.storage_path, vers2.name, vers2.version), "ab")
+    f.write("this is broken")
+    f.close()
+    expect(
+        IOError,
+        lambda: ''.join(vers2.get_content(root_context)[3])
+    )
 
 vers2.delete(root_context)
 
