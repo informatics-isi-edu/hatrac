@@ -16,8 +16,6 @@ AMAZON_S3 = "amazons3"
 
 deployment =  os.environ.get("HATRAC_DEPLOYMENT", FILESYSTEM)
 
-print "Using %s deployment" % deployment
-
 if deployment == FILESYSTEM:
     # do normal testing with filesystem backend
     test_config = web.storage(
