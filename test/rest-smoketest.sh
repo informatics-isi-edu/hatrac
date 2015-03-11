@@ -214,16 +214,19 @@ dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
 
 total_bytes=${script_size}
 chunk_bytes=1024
+upload_file_name="$0"
+
 # test chunk upload (S3 requires at least 5MB chunks)
 if [[ $DEPLOYMENT == "amazons3" ]]
 then
+    upload_file_name="/tmp/dummy-${RUNKEY}"
     chunk_bytes=5242881
     # generate 5MB + file
-    dd if=/dev/urandom bs=${chunk_bytes} count=1 2>/dev/null | base64 > /tmp/dummy-${RUNKEY}
-    md5=$(mymd5sum < /tmp/dummy-${RUNKEY})
-    total_bytes=$(stat -c "%s" /tmp/dummy-${RUNKEY})
+    dd if=/dev/urandom bs=${chunk_bytes} count=1 2>/dev/null | base64 > ${upload_file_name}
+    md5=$(mymd5sum < ${upload_file_name})
+    total_bytes=$(stat -c "%s" ${upload_file_name})
 fi
-echo "SIZE $total_bytes"
+
     cat > ${TEST_DATA} <<EOF
 {"chunk_bytes": ${chunk_bytes},
 "total_bytes": ${total_bytes},
@@ -244,7 +247,7 @@ dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
 dotest "405::*::*" "${upload}/0"
 dotest "405::*::*" "${upload}/0" --head
 
-split -b ${chunk_bytes} -d /tmp/dummy-${RUNKEY} /tmp/parts-${RUNKEY}-
+split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
     for part in /tmp/parts-${RUNKEY}-*
     do
         pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")

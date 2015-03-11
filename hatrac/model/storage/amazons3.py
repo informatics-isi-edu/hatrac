@@ -163,27 +163,20 @@ class HatracStorage (PooledS3BucketConnection):
         s3_key = boto.s3.key.Key(s3_bucket, name)
         s3_key.version_id = version.strip()
         
-        first = 0
-        if get_slice is None or (get_slice.start == 0 and get_slice.stop is None):
+        if get_slice is None:
             headers = None
             rbytes = None
         else:
             first = get_slice.start
-            if get_slice.stop:
-                last = get_slice.stop - 1
-                headers = {'Range':'bytes=%d-%d' % (first, last)}
-                rbytes = last - first + 1
-            else: 
-                headers = {'Range':'bytes=%d-' % (first)}
-                rbytes = None
-        
-        # Note: version ID is not being set on the key, this forces the right version  
+            last = get_slice.stop - 1
+            headers = {'Range':'bytes=%d-%d' % (first, last)}
+            rbytes = last - first + 1
+            
+        # Note: version ID is not being set on the key, this forces the right version
         s3_key.open_read(headers=headers,query_args='versionId=%s' % version)
-
+       
         md5 = s3_key.md5
-        if rbytes is None and first > 0:
-            rbytes = s3_key.size - first
-        elif rbytes is None:
+        if rbytes is None:
             rbytes = s3_key.size
             md5 = content_md5
 
