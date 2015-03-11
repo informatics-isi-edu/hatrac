@@ -2,8 +2,6 @@
 
 # Run basic Hatrac REST API tests 
 
-COOKIES=${COOKIES:-cookie}
-
 usage()
 {
     cat <<EOF
@@ -37,7 +35,13 @@ EOF
     exit 1
 }
 
-[[ -r "$COOKIES" ]] || error 
+[[ -z $GOAUTH  && -z $COOKIES ]] && error
+[[ -n $COOKIES && ! -r $COOKIES ]] && error
+
+#Supported deployments: amazons3 or filesystem
+[[ -z $DEPLOYMENT ]] && DEPLOYMENT="filesystem"
+
+echo "Using $DEPLOYMENT deployment" >&2
 
 RUNKEY=smoketest-$RANDOM
 RESPONSE_HEADERS=/tmp/${RUNKEY}-response-headers
@@ -48,6 +52,7 @@ cleanup()
 {
     rm -f ${RESPONSE_HEADERS} ${RESPONSE_CONTENT} ${TEST_DATA}
     rm -f /tmp/parts-${RUNKEY}*
+    rm -f /tmp/dummy-${RUNKEY}
 }
 
 trap cleanup 0
@@ -58,12 +63,20 @@ mycurl()
     touch ${RESPONSE_CONTENT}
     truncate -s 0 ${RESPONSE_HEADERS}
     truncate -s 0 ${RESPONSE_CONTENT}
-    curl -D ${RESPONSE_HEADERS} \
-	-o ${RESPONSE_CONTENT} \
-	-s \
-	-k -b "$COOKIES" -c "$COOKIES" \
-	-w "%{http_code}::%{content_type}::%{size_download}\n" \
-	"$@"
+    
+    curl_options=(
+      -D ${RESPONSE_HEADERS}
+      -o ${RESPONSE_CONTENT}
+      -s -k
+      -w "%{http_code}::%{content_type}::%{size_download}\n"
+    )
+    if [[ -n $GOAUTH ]] 
+    then
+        curl_options+=( -H "Authorization: Globus-Goauthtoken $GOAUTH" )
+    else
+	curl_options+=( -b "$COOKIES" -c "$COOKIES" )
+    fi
+    curl "${curl_options[@]}" "$@"
 }
 
 hex2base64()
@@ -81,7 +94,7 @@ mymd5sum()
 NUM_FAILURES=0
 NUM_TESTS=0
 
-BASE_URL="https://$(hostname)/hatrac"
+BASE_URL=${BASE_URL:-https://$(hostname)/hatrac}
 
 dotest()
 {
@@ -128,7 +141,7 @@ ${md5_mismatch}
 Response headers:
 $(cat ${RESPONSE_HEADERS})
 Response body:
-$(cat ${RESPONSE_CONTENT})
+$(head -c 500 ${RESPONSE_CONTENT})
 
 EOF
 	NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
@@ -165,7 +178,6 @@ dotest "200::application/json::0" /ns-${RUNKEY}/foo --head
 dotest "405::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
 
 # test objects
-
 md5=$(mymd5sum < $0)
 script_size=$(stat -c "%s" $0)
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
@@ -201,13 +213,28 @@ dotest "204::*::*" "${obj1_vers1}" -X DELETE
 dotest "404::*::*" "${obj1_vers1}"
 dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
 
-# test chunk upload
-cat > ${TEST_DATA} <<EOF
-{"chunk_bytes": 1024,
- "total_bytes": ${script_size},
- "content_type": "application/x-bash",
- "content_md5": "$md5"}
+total_bytes=${script_size}
+chunk_bytes=1024
+upload_file_name="$0"
+
+# test chunk upload (S3 requires at least 5MB chunks)
+if [[ $DEPLOYMENT == "amazons3" ]]
+then
+    upload_file_name="/tmp/dummy-${RUNKEY}"
+    chunk_bytes=5242881
+    # generate 5MB + file
+    dd if=/dev/urandom bs=${chunk_bytes} count=1 2>/dev/null | base64 > ${upload_file_name}
+    md5=$(mymd5sum < ${upload_file_name})
+    total_bytes=$(stat -c "%s" ${upload_file_name})
+fi
+
+    cat > ${TEST_DATA} <<EOF
+{"chunk_bytes": ${chunk_bytes},
+"total_bytes": ${total_bytes},
+"content_type": "application/x-bash",
+"content_md5": "$md5"}
 EOF
+
 dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
     -T "${TEST_DATA}" \
     -X POST \
@@ -221,13 +248,15 @@ dotest "200::*::*" "/ns-${RUNKEY}/foo2/obj1;upload" --head
 dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
 dotest "405::*::*" "${upload}/0"
 dotest "405::*::*" "${upload}/0" --head
-split -b 1024 -d "$0" /tmp/parts-${RUNKEY}-
-for part in /tmp/parts-${RUNKEY}-*
-do
-    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-    md5=$(mymd5sum < "$part")
-    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
+
+split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
+    for part in /tmp/parts-${RUNKEY}-*
+    do
+        pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
+        md5=$(mymd5sum < "$part")
+        dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
 done
+
 dotest "201::*::*" "${upload}" -X POST
 dotest "404::*::*" "${upload}" -X POST
 dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1

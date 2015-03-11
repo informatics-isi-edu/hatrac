@@ -17,6 +17,7 @@ import boto
 import boto.s3
 import boto.s3.key
 from boto.s3.connection import S3Connection
+from boto.exception import S3ResponseError
 from hatrac.core import BadRequest, coalesce
 import binascii
 import base64
@@ -72,6 +73,8 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
                 conn, bucket = conn_tuple
                 try:             
                     return orig_method(*args, s3_conn=conn, s3_bucket=bucket)
+                except S3ResponseError, s3_error:
+                    raise BadRequest(s3_error.message)
                 except Exception, ev:
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
                     conn_tuple = None
@@ -158,21 +161,22 @@ class HatracStorage (PooledS3BucketConnection):
     @s3_bucket_wrap(deferred_conn_reuse=True)
     def get_content_range(self, name, version, content_md5=None, get_slice=None, s3_conn=None, s3_bucket=None):
         s3_key = boto.s3.key.Key(s3_bucket, name)
-        s3_key.version_id = version
-
-        if get_slice:
-            first = get_slice.start
-            last = get_slice.stop - 1
-            headers = {'Range':'bytes=%d-%d' % (first, last)}
-            rbytes = last - first + 1
-        else:
+        s3_key.version_id = version.strip()
+        
+        if get_slice is None:
             headers = None
             rbytes = None
-
-        s3_key.open_read(headers=headers)
-
+        else:
+            headers = {'Range':'bytes=%d-%d' % (get_slice.start, get_slice.stop-1)}
+            rbytes = get_slice.stop - get_slice.start
+            
+        # Note: version ID is not being set on the key, this forces the right version
+        s3_key.open_read(headers=headers,query_args='versionId=%s' % version)
+       
+        md5 = s3_key.md5
         if rbytes is None:
             rbytes = s3_key.size
+            md5 = content_md5
 
         def data_generator():
             conn_tuple = (s3_conn, s3_bucket)
@@ -186,7 +190,7 @@ class HatracStorage (PooledS3BucketConnection):
                 if conn_tuple:
                     self._put_pooled_connection(conn_tuple)
 
-        return rbytes, s3_key.content_type, s3_key.md5, data_generator()
+        return rbytes, s3_key.content_type, md5, data_generator()
 
     @s3_bucket_wrap()
     def delete(self, name, version, s3_conn=None, s3_bucket=None):
@@ -203,23 +207,31 @@ class HatracStorage (PooledS3BucketConnection):
     @s3_bucket_wrap()
     def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, content_md5=None, s3_conn=None, s3_bucket=None):
         upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
+        upload.key_name = name
         upload.id = upload_id
 
         def helper(input, headers, nbytes, md5):
-            s3_key = upload.upload_part_from_file(input, position, md5=(content_md5, content_md5_b64), size=nbytes)
+            # We have to set content-type to None to avoid boto trying to work out type
+            if headers is None or 'Content-Type' not in headers:
+                headers['Content-Type'] = None
+            s3_key = upload.upload_part_from_file(input, position + 1, headers=headers, md5=md5, size=nbytes)
+           
             return dict(etag=s3_key.etag)
-
         return self._send_content_from_stream(input, nbytes, None, content_md5, helper)
-               
+
+              
     @s3_bucket_wrap()
-    def cancel_upload(self, upload_id, s3_conn=None, s3_bucket=None):
+    def cancel_upload(self, name, upload_id, s3_conn=None, s3_bucket=None):
         upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
+        upload.key_name = name
         upload.id = upload_id
         upload.cancel_upload()
+        return None
 
     @s3_bucket_wrap()
     def finalize_upload(self, name, upload_id, chunk_data, s3_conn=None, s3_bucket=None):
         upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
+        upload.key_name = name
         upload.id = upload_id
         # TODO: is chunk_data even necessary...?
         upload = upload.complete_upload()

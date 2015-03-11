@@ -47,11 +47,26 @@ directory prior to each run of the test.
 
 ## Example hatrac_config.json
 
-This configuration works on a Fedora host:
+This configuration works on a Fedora and Ubuntu host for a filesystem deployment:
 
     {
         "storage_backend": "filesystem",
         "storage_path": "/var/www/hatrac",
+        "database_type": "postgres",
+        "database_name": "",
+        "database_schema": "hatrac",
+        "database_max_retries": 5
+    }
+
+This configuration works for an Amazon AWS S3 deployment:
+   
+    {
+        "backend": "amazons3",
+        "s3_bucket" : <S3_BUCKET_NAME>,
+        "s3_connection": {
+	    "aws_access_key_id" : <AWS_ACCESS_KEY_ID>,
+    	    "aws_secret_access_key": <AWS_SECRET_ACCESS_KEY>
+        },
         "database_type": "postgres",
         "database_name": "",
         "database_schema": "hatrac",
