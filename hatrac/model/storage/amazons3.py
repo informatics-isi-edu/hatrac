@@ -120,7 +120,6 @@ class HatracStorage (PooledS3BucketConnection):
             s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
             return s3_key.version_id
         return self._send_content_from_stream(input, nbytes, content_type, content_md5, helper)
-        
 
     def _send_content_from_stream(self, input, nbytes, content_type, content_md5, sendfunc):
         """Common file-sending logic to talk to S3."""
@@ -199,7 +198,6 @@ class HatracStorage (PooledS3BucketConnection):
             finally:
                 if conn_tuple:
                     self._put_pooled_connection(conn_tuple)
-                    
 
         return rbytes, s3_key.content_type, md5, data_generator()
 
@@ -220,7 +218,7 @@ class HatracStorage (PooledS3BucketConnection):
         upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
         upload.key_name = name
         upload.id = upload_id
-        
+
         def helper(input, headers, nbytes, md5):
             # We have to set content-type to None to avoid boto trying to work out type
             if headers is None or 'Content-Type' not in headers:

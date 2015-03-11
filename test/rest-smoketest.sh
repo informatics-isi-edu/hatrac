@@ -35,16 +35,13 @@ EOF
     exit 1
 }
 
-[[ -z $GOAUTH  && -z $COOKIES ]] && COOKIES=${COOKIES:-cookie}
+[[ -z $GOAUTH  && -z $COOKIES ]] && error
 [[ -n $COOKIES && ! -r $COOKIES ]] && error
 
 #Supported deployments: amazons3 or filesystem
-if [[ -z $DEPLOYMENT ]]
-then
-    DEPLOYMENT="filesystem"
-fi
+[[ -z $DEPLOYMENT ]] && DEPLOYMENT="filesystem"
 
-echo "Using $DEPLOYMENT deployment"
+echo "Using $DEPLOYMENT deployment" >&2
 
 RUNKEY=smoketest-$RANDOM
 RESPONSE_HEADERS=/tmp/${RUNKEY}-response-headers
@@ -66,22 +63,20 @@ mycurl()
     touch ${RESPONSE_CONTENT}
     truncate -s 0 ${RESPONSE_HEADERS}
     truncate -s 0 ${RESPONSE_CONTENT}
-    if [[ -n $GOAUTH ]]
+    
+    curl_options=(
+      -D ${RESPONSE_HEADERS}
+      -o ${RESPONSE_CONTENT}
+      -s -k
+      -w "%{http_code}::%{content_type}::%{size_download}\n"
+    )
+    if [[ -n $GOAUTH ]] 
     then
-        curl -D ${RESPONSE_HEADERS} \
-        -o ${RESPONSE_CONTENT} \
-        -s \
-        -k -H "Authorization: Globus-Goauthtoken $GOAUTH" \
-        -w "%{http_code}::%{content_type}::%{size_download}\n" \
-        "$@"
+        curl_options+=( -H "Authorization: Globus-Goauthtoken $GOAUTH" )
     else
-        curl -D ${RESPONSE_HEADERS} \
-	-o ${RESPONSE_CONTENT} \
-	-s \
-	-k -b "$COOKIES" -c "$COOKIES" \
-	-w "%{http_code}::%{content_type}::%{size_download}\n" \
-	"$@"
+	curl_options+=( -b "$COOKIES" -c "$COOKIES" )
     fi
+    curl "${curl_options[@]}" "$@"
 }
 
 hex2base64()
@@ -217,27 +212,24 @@ dotest "204::*::*" "${obj1_vers1}" -X DELETE
 dotest "404::*::*" "${obj1_vers1}"
 dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
 
+total_bytes=${script_size}
+chunk_bytes=1024
 # test chunk upload (S3 requires at least 5MB chunks)
 if [[ $DEPLOYMENT == "amazons3" ]]
 then
+    chunk_bytes=5242881
     # generate 5MB + file
-    dd if=/dev/urandom bs=6291456 count=1 of=/tmp/dummy-${RUNKEY}
+    dd if=/dev/urandom bs=${chunk_bytes} count=1 2>/dev/null | base64 > /tmp/dummy-${RUNKEY}
     md5=$(mymd5sum < /tmp/dummy-${RUNKEY})
-
-    cat > ${TEST_DATA} <<EOF
-{"chunk_bytes": 5242881,
-"total_bytes": 6291456,
-"content_type": "application/x-bash",
-"content_md5": "$md5"}
-EOF
-else
-    cat > ${TEST_DATA} <<EOF
-{"chunk_bytes": 1024,
-"total_bytes": ${script_size},
-"content_type": "application/x-bash",
-"content_md5": "$md5"}
-EOF
+    total_bytes=$(stat -c "%s" /tmp/dummy-${RUNKEY})
 fi
+echo "SIZE $total_bytes"
+    cat > ${TEST_DATA} <<EOF
+{"chunk_bytes": ${chunk_bytes},
+"total_bytes": ${total_bytes},
+"content_type": "application/x-bash",
+"content_md5": "$md5"}
+EOF
 
 dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
     -T "${TEST_DATA}" \
@@ -252,24 +244,13 @@ dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
 dotest "405::*::*" "${upload}/0"
 dotest "405::*::*" "${upload}/0" --head
 
-if [[ $DEPLOYMENT == "amazons3" ]] 
-then 
-    split -b 5242881 -d /tmp/dummy-${RUNKEY} /tmp/parts-${RUNKEY}-
-        for part in /tmp/parts-${RUNKEY}-*
-        do
-            pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-            md5=$(mymd5sum < "$part")
-            dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
-    done
-else
-    split -b 1024 -d "$0" /tmp/parts-${RUNKEY}-
-        for part in /tmp/parts-${RUNKEY}-*
-        do
-            pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-            md5=$(mymd5sum < "$part")
-            dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
-    done
-fi
+split -b ${chunk_bytes} -d /tmp/dummy-${RUNKEY} /tmp/parts-${RUNKEY}-
+    for part in /tmp/parts-${RUNKEY}-*
+    do
+        pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
+        md5=$(mymd5sum < "$part")
+        dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
+done
 
 dotest "201::*::*" "${upload}" -X POST
 dotest "404::*::*" "${upload}" -X POST
