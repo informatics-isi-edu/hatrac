@@ -167,10 +167,8 @@ class HatracStorage (PooledS3BucketConnection):
             headers = None
             rbytes = None
         else:
-            first = get_slice.start
-            last = get_slice.stop - 1
-            headers = {'Range':'bytes=%d-%d' % (first, last)}
-            rbytes = last - first + 1
+            headers = {'Range':'bytes=%d-%d' % (get_slice.start, get_slice.stop-1)}
+            rbytes = get_slice.stop - get_slice.start
             
         # Note: version ID is not being set on the key, this forces the right version
         s3_key.open_read(headers=headers,query_args='versionId=%s' % version)
