@@ -41,6 +41,8 @@ class NameVersion (RestHandler):
         resource = self.resolve_version(
             path, name, version
         )
+        self.set_http_etag(resource.version)
+        self.http_is_cached()
         return self.get_content(
             resource,
             web.ctx.webauthn2_context
@@ -51,7 +53,7 @@ class NameVersion (RestHandler):
     '/((?:[^/:;]+/)*)([^/:;]+);versions?'
 ])
 class NameVersions (RestHandler):
-    """Represent Hatrac resources addressed by bare names.
+    """Represent Hatrac resources addressed by name and versions sub-resource.
 
     """
     _namespace_content_type = 'application/x-hatrac-namespace'
@@ -141,6 +143,10 @@ class Name (RestHandler):
         resource = self.resolve(
             path, name
         )
+        if resource.is_object():
+            resource = resource.get_current_version()
+            self.set_http_etag(resource.version)
+            self.http_is_cached()
         return self.get_content(
             resource,
             web.ctx.webauthn2_context

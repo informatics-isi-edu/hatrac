@@ -187,6 +187,10 @@ dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
 obj1_vers1="$(cat ${RESPONSE_CONTENT})"
 obj1_vers1="${obj1_vers1#/hatrac}"
 dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1
+obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
+dotest "304::*::*" /ns-${RUNKEY}/foo2/obj1 -H "If-None-Match: ${obj1_etag}"
+dotest "304::*::*" "${obj1_vers1}" -H "If-None-Match: ${obj1_etag}"
+dotest "200::application/x-bash::${script_size}" "${obj1_vers1}" -H "If-None-Match: \"wrongetag\""
 dotest "200::application/x-bash::0" /ns-${RUNKEY}/foo2/obj1 --head
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
 dotest "200::application/x-bash::0" "${obj1_vers1}" --head

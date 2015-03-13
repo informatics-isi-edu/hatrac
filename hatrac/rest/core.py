@@ -8,6 +8,7 @@
 
 """
 
+import re
 import logging
 from logging.handlers import SysLogHandler
 import web
@@ -99,6 +100,10 @@ class RestException (web.HTTPError):
             hdr = self.headers
         msg = message or self.message
         web.HTTPError.__init__(self, self.status, hdr, msg + '\n')
+
+class NotModified (RestException):
+    status = '304 Not Modified'
+    message = 'Resource not modified.'
 
 class BadRequest (RestException):
     status = '400 Bad Request'
@@ -196,6 +201,8 @@ class RestHandler (object):
     """
     def __init__(self):
         self.get_body = True
+        self.http_etag = None
+        self.http_vary = _webauthn2_manager.get_http_vary()
 
     def _fullname(self, path, name):
         nameparts = [ n for n in ((path or '') + (name or '')).split('/') if n ]
@@ -227,6 +234,50 @@ class RestHandler (object):
         else:
             return None
 
+    def set_http_etag(self, version):
+        """Set an ETag from version key.
+
+        """
+        etag = []
+        etag.append( '%s' % version )
+
+        self.http_etag = '"%s"' % ';'.join(etag).replace('"', '\\"')
+
+    def http_is_cached(self):
+        """Determine whether a request is cached and raise 304 Not Modified.
+           Currently only considers ETags via HTTP "If-None-Match" header, if caller set self.http_etag.
+        """
+        def etag_parse(s):
+            strong = True
+            if s[0:2] == 'W/':
+                strong = False
+                s = s[2:]
+            return (s, strong)
+
+        def etags_parse(s):
+            etags = []
+            s, strong = etag_parse(s)
+            while s:
+                s = s.strip()
+                m = re.match('^,? *(?P<first>(W/)?"(.|\\")*")(?P<rest>.*)', s)
+                if m:
+                    g = m.groupdict()
+                    etags.append(etag_parse(g['first']))
+                    s = g['rest']
+                else:
+                    s = None
+            return dict(etags)
+        
+        client_etags = etags_parse( web.ctx.env.get('HTTP_IF_NONE_MATCH', ''))
+        
+        if self.http_etag is not None and client_etags.has_key('%s' % self.http_etag):
+            raise NotModified(
+                headers={ 
+                    "ETag": self.http_etag, 
+                    "Vary": ", ".join(self.http_vary)
+                }
+            )
+
     def get_content(self, resource, client_context, get_body=True):
         """Form response w/ bulk resource content."""
         get_range = web.ctx.env.get('HTTP_RANGE')
@@ -235,7 +286,7 @@ class RestHandler (object):
             # parse HTTP Range header which can encode a set of ranges
             get_slices = []
 
-            if resource.is_object():
+            if resource.is_object() and not resource.is_version():
                 # lookup version so we can get at nbytes
                 resource = resource.get_current_version()
 
@@ -330,6 +381,10 @@ class RestHandler (object):
             web.header('Content-Type', content_type)
         if content_md5:
             web.header('Content-MD5', base64.b64encode(content_md5.strip()))
+        if self.http_etag:
+            web.header('ETag', self.http_etag)
+        if self.http_vary:
+            web.header('Vary', ', '.join(self.http_vary))
 
         if self.get_body:
             for buf in data_generator:
