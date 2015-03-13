@@ -28,9 +28,12 @@ class NameVersion (RestHandler):
     @web_method()
     def DELETE(self, path, name, version):
         """Destroy object version."""
-        self.resolve_version(
+        resource = self.resolve_version(
             path, name, version
-        ).delete(
+        )
+        self.set_http_etag(resource.version)
+        self.http_check_preconditions('DELETE')
+        resource.delete(
             web.ctx.webauthn2_context
         )
         return self.delete_response()
@@ -42,7 +45,7 @@ class NameVersion (RestHandler):
             path, name, version
         )
         self.set_http_etag(resource.version)
-        self.http_is_cached()
+        self.http_check_preconditions()
         return self.get_content(
             resource,
             web.ctx.webauthn2_context
@@ -67,6 +70,7 @@ class NameVersions (RestHandler):
         resource = self.resolve(
             path, name
         ).get_versions()
+        self.http_check_preconditions()
         return self.get_content(
             resource,
             web.ctx.webauthn2_context
@@ -99,6 +103,8 @@ class Name (RestHandler):
             else:
                 is_object = True
 
+            # check precondition for current state of resource not existing
+            self.http_check_preconditions('PUT', False)
             resource = web.ctx.hatrac_directory.create_name(
                 self._fullname(path, name),
                 is_object,
@@ -106,6 +112,15 @@ class Name (RestHandler):
             )
         elif not resource.is_object():
             raise NoMethod('Namespace %s does not support PUT requests.' % resource)
+        else:
+            try:
+                # check preconditions for current state of version existing
+                version = resource.get_current_version()
+                self.set_http_etag(version.version)
+                self.http_check_preconditions('PUT')
+            except Conflict:
+                # check precondition for current state of version not existing
+                self.http_check_preconditions('PUT', False)
 
         # covers update of existing object or first version of new object
         if resource.is_object():
@@ -130,9 +145,22 @@ class Name (RestHandler):
     @web_method()
     def DELETE(self, path, name):
         """Destroy all object versions or empty zone."""
-        self.resolve(
+        resource = self.resolve(
             path, name
-        ).delete(
+        )
+        if resource.is_object():
+            try:
+                # check preconditions against current version
+                version = resource.get_current_version()
+                self.set_http_etag(version.version)
+                self.http_check_preconditions('DELETE')
+            except Conflict:
+                # check preconditions with no version existing
+                self.http_check_preconditions('DELETE', False)
+        else:
+            # check preconditions on namespace
+            self.http_check_preconditions('DELETE')
+        resource.delete(
             web.ctx.webauthn2_context
         )
         return self.delete_response()
@@ -146,7 +174,7 @@ class Name (RestHandler):
         if resource.is_object():
             resource = resource.get_current_version()
             self.set_http_etag(resource.version)
-            self.http_is_cached()
+        self.http_check_preconditions()
         return self.get_content(
             resource,
             web.ctx.webauthn2_context

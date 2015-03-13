@@ -23,6 +23,7 @@ import hatrac
 import hatrac.core
 import sys
 import traceback
+import hashlib
 
 try:
     _webauthn2_config = webauthn2.merge_config(jsonFileName='webauthn2_config.json')
@@ -30,6 +31,16 @@ except:
     _webauthn2_config = webauthn2.merge_config()
 
 _webauthn2_manager = webauthn2.Manager(overrides=_webauthn2_config)
+
+def hash_list(l):
+    copy = [ s.replace(';', ';;') for s in l ]
+    copy.sort()
+    return base64.b64encode(hashlib.md5(';'.join(copy)).digest())
+
+def hash_dict(d):
+    copy = [ (k, hash_list(v)) for k, v in d.items() ]
+    copy.sort(key=lambda p: p[0])
+    return ";".join([ v for k, v in copy ])
 
 # map URL pattern (regexp) to handler class
 dispatch_rules = dict()
@@ -132,6 +143,10 @@ class Conflict (RestException):
 class LengthRequired (RestException):
     status = '411 Length Required'
     message = 'Content-Length header is required for this request.'
+
+class PreconditionFailed (RestException):
+    status = '412 Precondition Failed'
+    message = 'Resource state does not match requested preconditions.'
 
 class BadRange (RestException):
     status = '416 Requested Range Not Satisfiable'
@@ -243,9 +258,15 @@ class RestHandler (object):
 
         self.http_etag = '"%s"' % ';'.join(etag).replace('"', '\\"')
 
-    def http_is_cached(self):
-        """Determine whether a request is cached and raise 304 Not Modified.
-           Currently only considers ETags via HTTP "If-None-Match" header, if caller set self.http_etag.
+    def parse_client_etags(self, header):
+        """Parse header string for ETag-related preconditions.
+
+           Returns dict mapping ETag -> boolean indicating strong
+           (true) or weak (false).
+
+           The special key True means the '*' precondition was
+           encountered which matches any representation.
+
         """
         def etag_parse(s):
             strong = True
@@ -264,19 +285,47 @@ class RestHandler (object):
                     g = m.groupdict()
                     etags.append(etag_parse(g['first']))
                     s = g['rest']
-                else:
-                    s = None
+                    continue
+                m = re.match('^,? *[*](?P<rest>.*)', s)
+                if m:
+                    g = m.groupdict()
+                    etags.append((True, True))
+                    s = g['rest']
+                    continue
+                s = None
+
             return dict(etags)
         
-        client_etags = etags_parse( web.ctx.env.get('HTTP_IF_NONE_MATCH', ''))
+        return etags_parse(header)
         
-        if self.http_etag is not None and client_etags.has_key('%s' % self.http_etag):
-            raise NotModified(
-                headers={ 
-                    "ETag": self.http_etag, 
-                    "Vary": ", ".join(self.http_vary)
-                }
-            )
+    def http_check_preconditions(self, method='GET', resource_exists=True):
+        failed = False
+
+        match_etags = self.parse_client_etags(web.ctx.env.get('HTTP_IF_MATCH', ''))
+        if match_etags:
+            if resource_exists:
+                if self.http_etag and self.http_etag not in match_etags \
+                   and (True not in match_etags):
+                    failed = True
+            else:
+                failed = True
+        
+        nomatch_etags = self.parse_client_etags(web.ctx.env.get('HTTP_IF_NONE_MATCH', ''))
+        if nomatch_etags:
+            if resource_exists:
+                if self.http_etag and self.http_etag in nomatch_etags \
+                   or (True in nomatch_etags):
+                    failed = True
+
+        if failed:
+            headers={ 
+                "ETag": self.http_etag, 
+                "Vary": ", ".join(self.http_vary)
+            }
+            if method == 'GET':
+                raise NotModified(headers=headers)
+            else:
+                raise PreconditionFailed(headers=headers)
 
     def get_content(self, resource, client_context, get_body=True):
         """Form response w/ bulk resource content."""

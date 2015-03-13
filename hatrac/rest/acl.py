@@ -4,7 +4,7 @@
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest
+from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, hash_list, hash_dict
 from webauthn2.util import jsonWriterRaw, jsonReader
 import web
 
@@ -22,9 +22,12 @@ class ACLEntry (RestHandler):
     @web_method()
     def PUT(self, path, name, version, access, role):
         """Add entry to ACL."""
-        self.resolve_name_or_version(
+        resource = self.resolve_name_or_version(
             path, name, version
-        ).set_acl_role(
+        )
+        self.set_http_etag(hash_list(resource.acls[access]))
+        self.http_check_preconditions('PUT', role in resource.acls[access])
+        resource.set_acl_role(
             access, 
             role, 
             web.ctx.webauthn2_context
@@ -34,9 +37,12 @@ class ACLEntry (RestHandler):
     @web_method()
     def DELETE(self, path, name, version, access, role):
         """Remove entry from ACL."""
-        self.resolve_name_or_version(
+        resource = self.resolve_name_or_version(
             path, name, version
-        ).drop_acl_role(
+        )
+        self.set_http_etag(hash_list(resource.acls[access]))
+        self.http_check_preconditions('DELETE', role in resource.acls[access])
+        resource.drop_acl_role(
             access, 
             role, 
             web.ctx.webauthn2_context
@@ -45,7 +51,10 @@ class ACLEntry (RestHandler):
 
     def _GET(self, path, name, version, access, role):
         """Get entry from ACL."""
-        resource = self.resolve_name_or_version(path, name, version).acls[access][role]
+        resource = self.resolve_name_or_version(path, name, version).acls[access]
+        self.set_http_etag(hash_list(resource))
+        resource = resource[role]
+        self.http_check_preconditions()
         return self.get_content(resource, web.ctx.webauthn2_context)
 
 @web_url([
@@ -74,9 +83,12 @@ class ACL (RestHandler):
         for entry in acl:
             if type(acl) != str:
                 raise BadRequest('ACL entry "%s" is not a string.' % entry)
-        self.resolve_name_or_version(
+        resource = self.resolve_name_or_version(
             path, name, version
-        ).set_acl(
+        )
+        self.set_http_etag(hash_list(resource.acls[access]))
+        self.http_check_preconditions('PUT')
+        resource.set_acl(
             access,
             acl,
             web.ctx.webauthn2_context
@@ -86,9 +98,12 @@ class ACL (RestHandler):
     @web_method()
     def DELETE(self, path, name, version, access):
         """Clear ACL."""
-        self.resolve_name_or_version(
+        resource = self.resolve_name_or_version(
             path, name, version
-        ).clear_acl(
+        )
+        self.set_http_etag(hash_list(resource.acls[access]))
+        self.http_check_preconditions('DELETE')
+        resource.clear_acl(
             access,
             web.ctx.webauthn2_context
         )
@@ -97,6 +112,8 @@ class ACL (RestHandler):
     def _GET(self, path, name, version, access):
         """Get ACL."""
         resource = self.resolve_name_or_version(path, name, version).acls[access]
+        self.set_http_etag(hash_list(resource))
+        self.http_check_preconditions()
         return self.get_content(resource, web.ctx.webauthn2_context)
         
 
@@ -114,5 +131,7 @@ class ACLs (RestHandler):
     def _GET(self, path, name, version):
         """Get ACLs."""
         resource = self.resolve_name_or_version(path, name, version).acls
+        self.set_http_etag(hash_dict(resource))
+        self.http_check_preconditions()
         return self.get_content(resource, web.ctx.webauthn2_context)
 

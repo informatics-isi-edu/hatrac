@@ -37,6 +37,7 @@ class ObjectTransferChunk (RestHandler):
             content_md5 = None
         upload = self.resolve_upload(path, name, job)
         upload.enforce_acl(['owner'], web.ctx.webauthn2_context)
+        self.http_check_preconditions('PUT')
         upload.upload_chunk_from_file(
             chunk, 
             web.ctx.env['wsgi.input'],
@@ -59,6 +60,7 @@ class ObjectTransfer (RestHandler):
     def POST(self, path, name, job):
         """Update status of transfer job to finalize."""
         upload = self.resolve_upload(path, name, job)
+        self.http_check_preconditions('POST')
         version = upload.finalize(web.ctx.webauthn2_context)
         return self.create_response(version)
 
@@ -66,12 +68,14 @@ class ObjectTransfer (RestHandler):
     def DELETE(self, path, name, job):
         """Cancel existing transfer job."""
         upload = self.resolve_upload(path, name, job)
+        self.http_check_preconditions('DELETE')
         upload.cancel(web.ctx.webauthn2_context)
         return self.update_response(version)
 
     def _GET(self, path, name, job):
         """Get status of transfer job."""
         upload = self.resolve_upload(path, name, job)
+        self.http_check_preconditions()
         return self.get_content(upload, web.ctx.webauthn2_context)
 
 @web_url([
@@ -124,6 +128,8 @@ class ObjectTransfers (RestHandler):
             raise BadRequest('Invalid content_md5 "%s" is neither 32-byte hex or 24-byte base64 string.' % content_md5)
 
         resource = self.resolve(path, name).get_uploads()
+        # say resource_exists=False as we always create a new one...
+        self.http_check_preconditions('POST', False)
         upload = resource.create_version_upload_job(
             chunksize, web.ctx.webauthn2_context, nbytes, content_type, content_md5
         )
@@ -132,6 +138,7 @@ class ObjectTransfers (RestHandler):
     def _GET(self, path, name):
         """List outstanding chunked transfer jobs."""
         resource = self.resolve(path, name).get_uploads()
+        self.http_check_preconditions()
         return self.get_content(resource, web.ctx.webauthn2_context)
     
 

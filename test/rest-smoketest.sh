@@ -189,8 +189,11 @@ obj1_vers1="${obj1_vers1#/hatrac}"
 dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1
 obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
 dotest "304::*::*" /ns-${RUNKEY}/foo2/obj1 -H "If-None-Match: ${obj1_etag}"
+dotest "200::*::*" /ns-${RUNKEY}/foo2/obj1 -H "If-Match: ${obj1_etag}"
+dotest "304::*::*" /ns-${RUNKEY}/foo2/obj1 -H "If-None-Match: *"
 dotest "304::*::*" "${obj1_vers1}" -H "If-None-Match: ${obj1_etag}"
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}" -H "If-None-Match: \"wrongetag\""
+dotest "304::*::*" "${obj1_vers1}" -H "If-Match: \"wrongetag\""
 dotest "200::application/x-bash::0" /ns-${RUNKEY}/foo2/obj1 --head
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
 dotest "200::application/x-bash::0" "${obj1_vers1}" --head
@@ -213,6 +216,8 @@ dotest "416::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=900000-"
 dotest "200::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=900000-5,1-2"
 
 # test deletion
+dotest "412::*::*" "${obj1_vers1}" -X DELETE -H "If-None-Match: *"
+dotest "412::*::*" "${obj1_vers1}" -X DELETE -H "If-None-Match: ${obj1_etag}"
 dotest "204::*::*" "${obj1_vers1}" -X DELETE
 dotest "404::*::*" "${obj1_vers1}"
 dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
@@ -264,9 +269,29 @@ done
 dotest "201::*::*" "${upload}" -X POST
 dotest "404::*::*" "${upload}" -X POST
 dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
+obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
+
+# check object conditional updates
+dotest "412::*::*" /ns-${RUNKEY}/foo2/obj1 \
+    -X PUT -T $0 \
+    -H "Content-Type: application/x-bash" \
+    -H "If-Match: \"wrongetag\""
+dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
+    -X PUT -T $0 \
+    -H "Content-Type: application/x-bash" \
+    -H "If-Match: %{obj1_etag}"
+obj1_vers2="$(cat ${RESPONSE_CONTENT})"
+obj1_vers2="${obj1_vers2#/hatrac}"
+dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
+vers2_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
+dotest "412::*::*" /ns-${RUNKEY}/foo2/obj1 -X DELETE -H "If-Match: ${obj1_etag}"
+dotest "204::*::*" "${obj1_vers2}" -X DELETE -H "If-Match: ${vers2_etag}"
+dotest "204::*::*" /ns-${RUNKEY}/foo2/obj1 -X DELETE -H "If-Match: ${obj1_etag}"
 
 # check ACL API
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl"
+acl_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
+dotest "304::*::*" "/ns-${RUNKEY}/foo;acl" -H "If-None-Match: ${acl_etag}"
 dotest "200::application/json::0" "/ns-${RUNKEY}/foo;acl" --head
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/owner"
@@ -275,7 +300,12 @@ dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/create"
 dotest "404::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X PUT
 dotest "200::text/plain*::0" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" --head
-dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE
+dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE -H "If-Match: *"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X PUT
+dotest "200::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
+acl_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
+dotest "412::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE -H "If-None-Match: ${acl_etag}"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE -H "If-Match: ${acl_etag}"
 dotest "404::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
 
 # check safety features
