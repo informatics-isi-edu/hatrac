@@ -316,14 +316,14 @@ class RestHandler (object):
 
         if get_slice is not None:
             nbytes, content_type, content_md5, data_generator \
-                = resource.get_content_range(client_context, get_slice)
+                = resource.get_content_range(client_context, get_slice, get_data=self.get_body)
             web.ctx.status = '206 Partial Content'
             web.header(
                 'Content-Range', 'bytes %d-%d/%d' 
                 % (get_slice.start, get_slice.stop - 1, resource.nbytes)
             )
         else:
-            nbytes, content_type, content_md5, data_generator = resource.get_content(client_context)
+            nbytes, content_type, content_md5, data_generator = resource.get_content(client_context, get_data=self.get_body)
             web.ctx.status = '200 OK'
         web.header('Content-Length', nbytes)
         if content_type:

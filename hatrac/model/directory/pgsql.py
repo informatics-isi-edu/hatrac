@@ -72,12 +72,12 @@ def regexp_escape(s):
     return ''.join([ remap(c) for c in s ])
 
 class ACLEntry (str):
-    def get_content(self, client_context):
+    def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner'], client_context)
         return len(self), 'text/plain', None, [self]
 
 class ACL (set):
-    def get_content(self, client_context):
+    def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner'], client_context)
         body = jsonWriterRaw(list(self)) + '\n'
         nbytes = len(body)
@@ -93,7 +93,7 @@ class ACL (set):
         return entry
 
 class ACLs (dict):
-    def get_content(self, client_context):
+    def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner'], client_context)
         body = jsonWriterRaw(self.resource.get_acls()) + '\n'
         nbytes = len(body)
@@ -206,7 +206,7 @@ class HatracNamespace (HatracName):
         """
         return self.directory.create_name(name, is_object, client_context)
 
-    def get_content(self, client_context):
+    def get_content(self, client_context, get_data=True):
         """Return (nbytes, content_type, content_md5, data_generator) for namespace."""
         body = [ str(r) for r in self.directory.namespace_enumerate_names(self, False) ]
         body = jsonWriterRaw(body) + '\n'
@@ -240,14 +240,14 @@ class HatracObject (HatracName):
     def create_version_upload_job(self, chunksize, client_context, nbytes=None, content_type=None, content_md5=None):
         return self.directory.create_version_upload_job(self, chunksize, client_context, nbytes, content_type, content_md5)
 
-    def get_content_range(self, client_context, get_slice=None):
+    def get_content_range(self, client_context, get_slice=None, get_data=True):
         """Return (nbytes, content_type, content_md5, data_generator) for current version.
         """
         resource = self.get_current_version()
-        return resource.get_content_range(client_context, get_slice)
+        return resource.get_content_range(client_context, get_slice, get_data=get_data)
 
-    def get_content(self, client_context):
-        return self.get_content_range(client_context)
+    def get_content(self, client_context, get_data=True):
+        return self.get_content_range(client_context, get_data=get_data)
 
     def get_current_version(self):
         """Return HatracObjectVersion instance corresponding to current state.
@@ -266,7 +266,7 @@ class HatracVersions (object):
     def __init__(self, objresource):
         self.object = objresource
 
-    def get_content(self, client_context):
+    def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner'], client_context)
         body = jsonWriterRaw(self.object.directory.object_enumerate_versions(self.object)) + '\n'
         return len(body), 'application/json', None, [body]
@@ -301,11 +301,11 @@ class HatracObjectVersion (HatracName):
     def is_version(self):
         return True
 
-    def get_content(self, client_context):
-        return self.directory.get_version_content(self.object, self, client_context)
+    def get_content(self, client_context, get_data=True):
+        return self.directory.get_version_content(self.object, self, client_context, get_data)
 
-    def get_content_range(self, client_context, get_slice=None):
-        return self.directory.get_version_content_range(self.object, self, get_slice, client_context)
+    def get_content_range(self, client_context, get_slice=None, get_data=True):
+        return self.directory.get_version_content_range(self.object, self, get_slice, client_context, get_data)
 
     def delete(self, client_context):
         """Delete resource and its children."""
@@ -318,7 +318,7 @@ class HatracUploads (object):
     def create_version_upload_job(self, *args):
         return self.object.create_version_upload_job(*args)
 
-    def get_content(self, client_context):
+    def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner'], client_context)
         body = jsonWriterRaw(self.object.directory.namespace_enumerate_uploads(self.object)) + '\n'
         return len(body), 'application/json', None, [body]
@@ -348,7 +348,7 @@ class HatracUpload (HatracName):
     def upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5=None):
         return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5)
 
-    def get_content(self, client_context):
+    def get_content(self, client_context, get_data=True):
         self.enforce_acl(['owner'], client_context)
         body = jsonWriterRaw(dict(
             url=str(self), 
@@ -623,16 +623,22 @@ class HatracDirectory (DatabaseConnection):
         return lambda : self.storage.cancel_upload(upload.name, upload.job)
 
     @db_wrap(reload_pos=2, enforce_acl=(2, 4, ['owner', 'read']))
-    def get_version_content_range(self, object, objversion, get_slice, client_context, db=None):
+    def get_version_content_range(self, object, objversion, get_slice, client_context, get_data=True, db=None):
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
             raise hatrac.core.NotFound('Resource %s is not available.' % objversion)
-        nbytes, content_type, content_md5, data = self.storage.get_content_range(object.name, objversion.version, objversion.content_md5, get_slice)
+        if get_data:
+            nbytes, content_type, content_md5, data = self.storage.get_content_range(object.name, objversion.version, objversion.content_md5, get_slice)
+        else:
+            nbytes = objversion.nbytes
+            content_type = objversion.content_type
+            content_md5 = objversion.content_md5
+            data = None
         return nbytes, objversion.content_type, content_md5, data
 
-    def get_version_content(self, object, objversion, client_context):
+    def get_version_content(self, object, objversion, client_context, get_data=True):
         """Return (nbytes, data_generator) pair for specific version."""
-        return self.get_version_content_range(object, objversion, None, client_context)
+        return self.get_version_content_range(object, objversion, None, client_context, get_data)
 
     @db_wrap()
     def name_resolve(self, name, raise_notfound=True, db=None):
