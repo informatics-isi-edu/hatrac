@@ -150,6 +150,7 @@ The GET operation is used to list direct children of a namespace:
 
     GET /parent_path/namespace_id
     Host: authority_name
+    If-None-Match: etag_value
 
 for which a successful response is:
 
@@ -157,6 +158,7 @@ for which a successful response is:
     Location: /parent_path/namespace_id
     Content-Type: application/json
     Content-Length: N
+    ETag: etag_value
     
     ["/parent_path/namespace_id/child1", "/parent_path/namespace_id/child2", ...]
     
@@ -214,7 +216,9 @@ for which a successful response is:
     Content-Length: N
 
     /parent_path/namespace_id
-    
+
+This request MAY also return `204 No Content` if an idempotent request is resubmitted after the namespace already exists.
+
 **Note**: see related object resource interface for pragmatic
 discussion of the use of Content-Type to disambiguate namespace and
 object creation requests.
@@ -223,11 +227,11 @@ Typical PUT error responses would be:
 - **401 Unauthorized**: the client is not authenticated and
   anonymous creation of such a namespace is not supported.
 - **403 Forbidden**: the client is authenticated but does not have
-  sufficient privilege to create the namespace.
-- **409 Conflict**: the namespace cannot be created due to a
+  sufficient privilege to create or update the namespace.
+- **409 Conflict**: the namespace cannot be created or updated due to a
   conflict with existing state of the service:
   - The _parent path_ does not denote a namespace
-  - The namespace already exists
+  - The namespace already exists and the request had the wrong `Content-Type`
 
 ### Namespace Listing Retrieval
 
