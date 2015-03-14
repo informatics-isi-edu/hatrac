@@ -9,7 +9,7 @@
 """
 
 import base64
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, LengthRequired
+from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, LengthRequired, hash_list
 import web
 
 @web_url([
@@ -70,6 +70,10 @@ class NameVersions (RestHandler):
         resource = self.resolve(
             path, name
         ).get_versions()
+        # ugly but safe: hash the ordered list of versions as content ETag 
+        self.set_http_etag(
+            hash_list(resource.object.directory.object_enumerate_versions(resource.object))
+        )
         self.http_check_preconditions()
         return self.get_content(
             resource,
@@ -111,7 +115,16 @@ class Name (RestHandler):
                 web.ctx.webauthn2_context
             )
         elif not resource.is_object():
-            raise NoMethod('Namespace %s does not support PUT requests.' % resource)
+            self.set_http_etag(
+                hash_list(map(str, resource.directory.namespace_enumerate_names(resource, False)))
+            )
+            self.http_check_preconditions('PUT')
+            if in_content_type == self._namespace_content_type \
+               and web.ctx.webauthn2_context.client in resource.acls['owner']:
+                # treat this like idempotent create or update?
+                return self.update_response(resource)
+            else:
+                raise Conflict('Namespace %s does not support update.' % resource)
         else:
             try:
                 # check preconditions for current state of version existing
@@ -159,6 +172,9 @@ class Name (RestHandler):
                 self.http_check_preconditions('DELETE', False)
         else:
             # check preconditions on namespace
+            self.set_http_etag(
+                hash_list(map(str, resource.directory.namespace_enumerate_names(resource, False)))
+            )
             self.http_check_preconditions('DELETE')
         resource.delete(
             web.ctx.webauthn2_context
@@ -174,6 +190,10 @@ class Name (RestHandler):
         if resource.is_object():
             resource = resource.get_current_version()
             self.set_http_etag(resource.version)
+        else:
+            self.set_http_etag(
+                hash_list(map(str, resource.directory.namespace_enumerate_names(resource, False)))
+            )
         self.http_check_preconditions()
         return self.get_content(
             resource,

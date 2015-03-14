@@ -175,7 +175,7 @@ dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/bar -X PUT -H "Content-Type: ap
 # status of test namespaces
 dotest "200::application/json::*" /ns-${RUNKEY}/foo
 dotest "200::application/json::0" /ns-${RUNKEY}/foo --head
-dotest "405::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "409::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/json"
 
 # test objects
 md5=$(mymd5sum < $0)
@@ -307,11 +307,6 @@ acl_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]
 dotest "412::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE -H "If-None-Match: ${acl_etag}"
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE -H "If-Match: ${acl_etag}"
 dotest "404::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
-
-# check safety features
-dotest "[45]??::*::*" "/ns-${RUNKEY}/" -X PUT -H "Content-Type: application/x-hatrac-namespace"
-dotest "[45]??::*::*" "/ns-${RUNKEY}/." -X PUT -H "Content-Type: application/x-hatrac-namespace"
-dotest "[45]??::*::*" "/ns-${RUNKEY}/.." -X PUT -H "Content-Type: application/x-hatrac-namespace"
 
 # cleanup
 dotest "204::*::*" /ns-${RUNKEY} -X DELETE
