@@ -16,6 +16,10 @@ The current status is that basic APIs seem to work:
 1. chunked upload cancel via DELETE
 1. partial download via GET with Range header
 1. storage using filesystem or S3 versioned bucket
+1. ETag, If-Match, If-None-Match concurrency control
+  - useful for object, object version, ACL management
+  - supported on all methods
+  - allows GET caching and precondition protection on PUT/DELETE
 
 This includes the specified immutable/stable reference semantics from 
 the REST-API.md doc, i.e. deletion leaves breadcrumbs in the database 
@@ -38,7 +42,6 @@ Missing specification and implementation:
 1. any URL-based third-party PUT 
 1. any timeout/garbage collection for jobs 
 1. any HTTP OPTIONS operations 
-1. any HTTP cache-control features 
 
 Additional TODO considerations:
 

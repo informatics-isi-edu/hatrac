@@ -293,10 +293,18 @@ configuration is provided as input:
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
+	If-Match: etag_value
+	If-None-Match: *
     
     ...content...
 
-for which a successful response is:
+The optional `If-Match` and `If-None-Match` headers MAY be specified to limit object update to specific scenarios. In a normal situation, only one of these two headers is specified in a single request:
+  - An _etag value_ with the `If-Match` header requires that the current version of the object on the server match the version indicated by the _etag value_ in order for the object to be updated as per the request _content_.
+  - An `*` with the `If-None-Match` header requires that the object lack a current version on the server in order for the object to be created or updated as per the request _content_.
+
+Without either `If-Match` or `If-None-Match` headers in the request, the update will be unconditionally applied if allowed by policy and the current state of the server.
+
+A successful response is:
 
     201 Created
     Location: /namespace_path/object_name:version_id
@@ -323,6 +331,7 @@ Typical PUT error responses would be:
     - The _namespace path_ may not denote a namespace
     - The _object name_ may already be in use as a namespace,
       therefore preventing its use as an object.
+  - **412 Precondition Failed**: the object cannot be created or updated due to its current state on the server not meeting the requirements indicated by the `If-Match` and/or `If-None-Match` request headers.
 
 **Note**: There is ambiguity in the meaning of a URL when creating a
 new object or nested namespace because they have the same syntactic
@@ -350,7 +359,13 @@ The GET operation is used to retrieve the current version of an object:
     GET /namespace_path/object_name
     Host: authority_name
     Accept: *
-    
+    If-None-Match: etag_value
+
+The optional `If-None-Match` header MAY supply an `ETag` value
+obtained from a previous retrieval operation, to inform the server
+that the client already has a copy of a particular version of the
+object.
+
 for which a successful response is:
 
     200 OK
@@ -358,14 +373,18 @@ for which a successful response is:
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
+    ETag: etag_value
     
     ...content...
 
 The optional `Content-MD5` header MUST be present if it was supplied
 during object creation and MAY be present if the service computes
 missing checksums in other cases.
+
+It is RECOMMENDED that a Hatrac server return an `ETag` indicating the version of the _content_ returned to the client.
     
 Typical GET error responses would be:
+  - **304 Not Modified**: the _etag value_ supplied in the `If-None-Match` header matches the current object version on the server.
   - **401 Unauthorized**: the client is not authenticated and
       anonymous retrieval of such an object is not supported.
   - **403 Forbidden**: the client is authenticated but does not have
@@ -417,6 +436,9 @@ The DELETE operation is used to delete an object
 
     DELETE /namespace_path/object_name
     Host: authority_name
+    If-Match: etag_value
+
+The optional `If-Match` header MAY be specified to prevent object deletion unless the current object version on the server matches the version indicated by the _etag value_.
 
 for which a successful response is:
 
@@ -440,6 +462,7 @@ Typical DELETE error responses would be:
 - **404 Not Found**: the name does not denote an existing resource.
 - **409 Conflict**: the resource cannot be deleted at this time,
     i.e. because object versions still exist.
+- **412 Precondition Failed**: the deletion was aborted because the current object version on the server does not match the version indicated by the `If-Match` request header.
 
 ## Object Version Resources
 
@@ -463,6 +486,7 @@ operation whether or not it is the current version of the object:
 
     GET /namespace_path/object_name:version_id
     Host: authority_name
+	If-None-Match: etag_value
 
 for which the successful response is:
 
@@ -471,10 +495,13 @@ for which the successful response is:
     Content-Type: content_type
     Content-MD5: hash_value
     Content-Length: N
+	ETag: etag_value
     
     ...content...
     
 with the same interpretation as documented for Object Retrieval above.
+
+The `ETag` and `If-None-Match` headers allow client-side caching of object versions. Because a Hatrac object version is immutable, the _etag value_ for a given object version SHOULD NOT change over its lifetime.
 
 ### Object Version Metadata Retrieval
 
@@ -506,13 +533,16 @@ The DELETE operation is used to delete an object version
 for which a successful response is:
 
     204 No Content
-    
+
+For completeness in the protocol, an `If-Match` header MAY be specified to control deletion of object versions, but it is redundant since object versions are immutable and their content cannot be in a different state than observed on a previous access.
+
 Typical DELETE error responses would be:
 - **401 Unauthorized**: the client is not authenticated and
   anonymous deletion of such a resource is not supported.
 - **403 Forbidden**: the client is authenticated but does not have
   sufficient privilege to delete the resource.
 - **404 Not Found**: the name does not denote an existing resource.
+- **412 Precondition Failed**: the `If-Match` request header was specified with an _etag value_ which does not match this object version.
 
 Versions of objects can be deleted whether or not they are the current
 version:
@@ -579,6 +609,7 @@ The GET operation is used to retrieve ACL settings en masse:
     GET /resource_name;acl
     Host: authority_name
     Accept: application/json
+	If-None-Match: etag_value
     
 for which the successful response is:
 
@@ -586,6 +617,7 @@ for which the successful response is:
     Location: https://authority_name/resource_name;acl
     Content-Type: application/json
     Content-Length: N
+	ETag: etag_value
     
     {"access": ["role", ...], ...}
     
@@ -595,7 +627,7 @@ list.
 
 The HEAD operation can likewise retrieve en masse ACL metadata:
 
-    GET /resource_name;acl
+    HEAD /resource_name;acl
     Host: authority_name
     Accept: application/json
     
@@ -613,6 +645,7 @@ The GET operation is also used to retrieve a specific ACL:
     GET /resource_name;acl/access
     Host: authority_name
     Accept: application/json
+	If-None-Match: etag_value
     
 for which the successful response is:
 
@@ -620,6 +653,7 @@ for which the successful response is:
     Location: https://authority_name/resource_name;acl/access
     Content-Type: application/json
     Content-Length: N
+	ETag: etag_value
     
     ["role",...]
 
@@ -628,7 +662,7 @@ wildcard.
 
 The HEAD operation can likewise retrieve individual ACL metadata:
 
-    GET /resource_name;acl/access
+    HEAD /resource_name;acl/access
     Host: authority_name
     Accept: application/json
     
@@ -643,7 +677,27 @@ for which the successful response is:
 
 The GET operation is also used to retrieve a specific ACL entry:
 
-    GET /resource_name;acl/access/entry
+    GET /resource_name;acl/access/role
+    Host: authority_name
+    Accept: application/json
+	If-None-Match: etag_value
+    
+for which the successful response is:
+
+    200 OK
+    Location: https://authority_name/resource_name;acl/access/entry
+    Content-Type: text/plain
+    Content-Length: N
+	ETag: etag_value
+    
+    role
+
+where the response contains just one _role_ name or `*` wildcard entry.
+
+The HEAD operation is also used to retrieve metadata for a specific
+ACL entry:
+
+    HEAD /resource_name;acl/access/entry
     Host: authority_name
     Accept: application/json
     
@@ -653,10 +707,8 @@ for which the successful response is:
     Location: https://authority_name/resource_name;acl/access/entry
     Content-Type: text/plain
     Content-Length: N
-    
-    role
 
-where the response contains just one _role_ name or `*` wildcard entry.
+For all of the ACL sub-resource retrieval operations, an `If-None-Match` header MAY be specified with an _etag value_ to indicate that the client already possesses a copy of the sub-resource which was returned with an `ETag` header containing that same _etag value_. This is useful for cache control. The _etag value_, if returned by the server, MUST indicate a specific configuration of the ACL sub-resource such that proper caching and precondition-protected updates are possible using the related HTTP protocol features.
 
 Typical GET error responses would be:
   - **401 Unauthorized**: the client is not authenticated and
@@ -665,20 +717,7 @@ Typical GET error responses would be:
       sufficient privilege to retrieve the policy.
   - **404 Not Found**: the namespace or object resource or ACL
       subresource is not found.
-
-The HEAD operation is also used to retrieve metadata for a specific
-ACL entry:
-
-    GET /resource_name;acl/access/entry
-    Host: authority_name
-    Accept: application/json
-    
-for which the successful response is:
-
-    200 OK
-    Location: https://authority_name/resource_name;acl/access/entry
-    Content-Type: text/plain
-    Content-Length: N
+  - **304 Not Modified**: the current state of the ACL sub-resource matches the _etag value_ specified in the `If-None-Match` request header.
 
 ### Access Control List Update
 
@@ -687,10 +726,13 @@ The PUT operation is used to rewrite a specific ACL:
     PUT /resource_name;acl/access
     Host: authority_name
     Content-Type: application/json
+    If-Match: etag_value
     
     ["role", ...]
-    
-for which the successful response is:
+
+The optional `If-Match` header MAY be specified with the _etag value_ corresponding to the last retrieved ACL sub-resource configuration, in order to prevent update in the case that another client has simultaneously updated the same ACL sub-resource while this request was being prepared and submitted.
+
+The successful response is:
 
     204 No Content
 
@@ -699,8 +741,6 @@ where the input JSON array completely replaces the existing ACL.
 It is RECOMMENDED that the implementation reject changes
 which would strip too many permissions, e.g. leaving a resource with
 no `owner`.
-
-### Access Control List Entry Creation
 
 The PUT operation is also used to add one entry to a specific ACL:
 
@@ -721,6 +761,7 @@ Typical PUT error responses would be:
 - **403 Forbidden**: the client is authenticated but does not have
   sufficient privilege to update the resource.
 - **404 Not Found**: the name does not denote an existing resource.
+- **412 Precondition Failed**: the update was aborted because the ACL sub-resource state on the server did not match the _etag value_ present in an `If-Match` request header.
 
 ### Access Control List Deletion
 
@@ -728,8 +769,11 @@ The DELETE operation is used to clear a specific ACL:
 
     DELETE /resource_name;acl/access
     Host: authority_name
+    If-Match: etag_value
+
+The optional `If-Match` header MAY be specified with the _etag value_ corresponding to the last retrieved ACL sub-resource configuration, in order to prevent deletion in the case that anohter client has simultaneously updated the same ACL sub-resource while this request was being prepared and submitted.
     
-for which the successful response is:
+The successful response is:
 
     204 No Content
 
@@ -737,8 +781,6 @@ where the ACL is now empty.
 
 It is RECOMMENDED that the implementation reject changes which would
 strip too many permissions, e.g. leaving a resource with no `owner`.
-
-### Access Control List Entry Deletion
 
 The DELETE operation is also used to remove one entry from a specific ACL:
 
@@ -760,6 +802,7 @@ Typical DELETE error responses would be:
 - **403 Forbidden**: the client is authenticated but does not have
   sufficient privilege to update the resource.
 - **404 Not Found**: the name does not denote an existing resource.
+- **412 Precondition Failed**: the deletion was aborted because the ACL sub-resource state on the server did not match the _etag value_ present in an `If-Match` request header.
 
 ## Chunked Upload Resources
 
