@@ -4,28 +4,23 @@
 "hat rack") is a simple object storage service for web-based,
 data-oriented collaboration.
 
-## Summary
+## Install code
 
-1. Install prerequisites
+1. Check out the development code from GitHub.
+1. Install prerequisites:
   - Apache HTTPD
   - PostgreSQL
   - Python
   - web.py
   - webauthn2
-1. Install hatrac Python package
+1. Install hatrac Python package from top-level of development code.
   - `python setup.py install`
-1. Create `hatrac` daemon account
-1. Create `hatrac` PostgreSQL role
-1. Create and initialize `hatrac` database
-1. Create file storage directory under Apache
-1. Configure `~hatrac/hatrac_config.json`
-1. Configure `~hatrac/webauthn2_config.json`
-1. Configure `mod_wsgi` to run Hatrac
+1. Run [basic tests](#basic-testing) or continue to [configure the web stack](#configure-web-stack).
 
 ## Basic testing
 
 You can perform some local testing of Hatrac without configuring the
-whole web service stack:
+whole web service stack, daemon account, nor daemon account configuration data:
 
     # make sure Hatrac is installed
     % python setup.py install
@@ -45,7 +40,33 @@ it encounters errors, diagnostics will be printed and the script will
 exit.  You MUST start with an empty test database and empty test data
 directory prior to each run of the test.
 
-## Example hatrac_config.json
+## Configure web stack
+
+These steps continue following the basic
+[code installation](#install-code). For installations using SE-Linux,
+please see [working with SE-Linux](#working-with-selinux) below.
+
+1. Create `hatrac` daemon account.
+  - E.g. `useradd --create-home --system hatrac` (as root)
+1. Create `hatrac` PostgreSQL role.
+  - E.g. `createuser hatrac` (as PostgreSQL superuser)
+1. Configure `~hatrac/hatrac_config.json`
+  - See [example Hatrac configuration](#example-hatrac-configuration) below.
+1. Create and initialize `hatrac` database.
+  - E.g. `createdb hatrac` (as `hatrac` user)
+  - E.g. `hatrac-deploy` (as `hatrac` user)
+1. Create file storage directory under Apache
+  - E.g. `mkdir /var/www/hatrac && chown hatrac /var/www/hatrac` (as root)
+1. Configure `~hatrac/webauthn2_config.json`
+  - See [example Webauthn2 configuration](#example-webauthn2-configuration) below.
+1. Configure `mod_wsgi` to run Hatrac
+  - See [example Apache configuration](#example-apache-configuration) below.
+
+The `hatrac-deploy` step above depends on having a proper
+`~hatrac/hatrac_config.json` file already populated and an empty
+database already created. It simply initializes the database schema.
+
+## Example Hatrac configuration
 
 This configuration works on a Fedora and Ubuntu host for a filesystem deployment:
 

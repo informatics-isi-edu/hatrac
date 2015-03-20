@@ -47,10 +47,7 @@ distribution with Python 2.6. It has a conventional web service stack:
 
 ### Installation
 
-1. Obtain, install, and configure all prerequisites.
-1. Check out the development code from GitHub.
-1. Install with `python setup.py install` (as root).
-1. Initialize deployment with `hatrac-deploy` (as root).
+There is not much installation automation yet. Please see our [detailed installation instructions](INSTALL.md)
 
 ### Operational Model
 
