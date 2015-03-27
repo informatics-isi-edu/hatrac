@@ -13,6 +13,7 @@ data-oriented collaboration.
   - Python
   - web.py
   - webauthn2
+  - vim-common
 1. Install hatrac Python package from top-level of development code.
   - `python setup.py install`
 1. Run [basic tests](#basic-testing) or continue to [configure the web stack](#configure-web-stack).
@@ -54,7 +55,7 @@ please see [working with SE-Linux](#working-with-selinux) below.
   - See [example Hatrac configuration](#example-hatrac-configuration) below.
 1. Create and initialize `hatrac` database.
   - E.g. `createdb hatrac` (as `hatrac` user)
-  - E.g. `hatrac-deploy` (as `hatrac` user)
+  - E.g. `hatrac-deploy your_username ` (as `hatrac` user)
 1. Create file storage directory under Apache
   - E.g. `mkdir /var/www/hatrac && chown hatrac /var/www/hatrac` (as root)
 1. Configure `~hatrac/webauthn2_config.json`
@@ -65,6 +66,9 @@ please see [working with SE-Linux](#working-with-selinux) below.
 The `hatrac-deploy` step above depends on having a proper
 `~hatrac/hatrac_config.json` file already populated and an empty
 database already created. It simply initializes the database schema.
+
+If working in a SELinux environment see section below to SELinux specific additional steps needed before running the tests
+
 
 ## Example Hatrac configuration
 
@@ -145,6 +149,10 @@ the same cookie name and path settings):
           "database_max_retries": 5
     }
 
+You will also have to grant ermrest permissions to the hatrac role:
+GRANT ermrest TO hatrac ; (as postgres user)
+
+
 **Note**: at present, Hatrac does not expose any Webauthn2 REST APIs
 so you MUST share an existing deployment as above if you want to use a
 local account and session-based login for testing.  Additionally, you
@@ -183,4 +191,5 @@ the appropriate path and SE-Linux contexts might vary slightly:
     setsebool -P httpd_can_network_connect_db on
     semanage fcontext --add --type httpd_sys_rw_content_t "/var/www/hatrac(/.*)?"
     restorecon -rv /var/www/hatrac
-
+    semanage fcontext --add --type httpd_sys_content_t "/home/hatrac(/.*)?"
+    restorecon -rv /home/hatrac
