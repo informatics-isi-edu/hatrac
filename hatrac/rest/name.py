@@ -124,7 +124,7 @@ class Name (RestHandler):
                 resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
                 return self.update_response(resource)
             else:
-                raise Conflict('Namespace %s does not support update with content-type %s.' % (resource, in_content_type)
+                raise Conflict('Namespace %s does not support update with content-type %s.' % (resource, in_content_type))
         else:
             try:
                 # check preconditions for current state of version existing
