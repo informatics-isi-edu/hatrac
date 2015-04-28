@@ -376,6 +376,7 @@ CREATE TABLE hatrac.name (
   is_deleted bool NOT NULL,
   owner text[],
   "create" text[],
+  "update" text[],
   read text[]
 );
 
