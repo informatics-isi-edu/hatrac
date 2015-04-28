@@ -583,8 +583,7 @@ each resource type is:
     namespace.
 - Object
   - `owner`: lists roles considered to be owners of the object.
-  - `create`: lists roles permitted to create new versions of the
-    object.
+  - `update`: lists roles permitted to update object with new versions.
 - Object Version
   - `owner`: lists roles considered to be owners of the object
     version.

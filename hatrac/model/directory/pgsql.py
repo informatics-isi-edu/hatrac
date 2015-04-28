@@ -214,7 +214,7 @@ class HatracNamespace (HatracName):
 
 class HatracObject (HatracName):
     """Represent a bound object."""
-    _acl_names = ['owner', 'create', 'read']
+    _acl_names = ['owner', 'update', 'read']
 
     def __init__(self, directory, **args):
         HatracName.__init__(self, directory, **args)
@@ -553,7 +553,7 @@ class HatracDirectory (DatabaseConnection):
         self._delete_version(db, resource)
         return lambda : self.storage.delete(resource.name, resource.version)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'create']))
+    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'update']))
     def create_version(self, object, client_context, nbytes=None, content_type=None, content_md5=None, db=None):
         """Create, persist, and return a HatracObjectVersion instance.
 
