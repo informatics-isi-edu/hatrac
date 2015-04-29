@@ -24,7 +24,7 @@ if deployment == FILESYSTEM:
             "storage_backend": "filesystem",
             "storage_path": os.getcwd() + "/hatrac_test_data",
             "database_type": "postgres",
-            "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
+            "database_dsn": "dbname=" + os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
             "database_schema": "hatrac",
             "database_max_retries": 5
         }
@@ -36,7 +36,7 @@ else:
             "service_prefix": "/hatrac",
             "storage_backend": "amazons3",
             "database_type": "postgres",
-            "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
+            "database_dsn": "dbname=" + os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
             "database_schema": "hatrac",
             "database_max_retries": 5,
             "s3_bucket" : os.environ.get("HATRAC_TEST_BUCKET", "hatractest"),
