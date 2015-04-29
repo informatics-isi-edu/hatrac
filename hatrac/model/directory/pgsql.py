@@ -73,12 +73,12 @@ def regexp_escape(s):
 
 class ACLEntry (str):
     def get_content(self, client_context, get_data=True):
-        self.resource.enforce_acl(['owner'], client_context)
+        self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         return len(self), 'text/plain', None, [self]
 
 class ACL (set):
     def get_content(self, client_context, get_data=True):
-        self.resource.enforce_acl(['owner'], client_context)
+        self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(list(self)) + '\n'
         nbytes = len(body)
         return nbytes, 'application/json', None, [body]
@@ -94,7 +94,7 @@ class ACL (set):
 
 class ACLs (dict):
     def get_content(self, client_context, get_data=True):
-        self.resource.enforce_acl(['owner'], client_context)
+        self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(self.resource.get_acls()) + '\n'
         nbytes = len(body)
         return nbytes, 'application/json', None, [body]
@@ -113,6 +113,7 @@ class ACLs (dict):
 class HatracName (object):
     """Represent a bound name."""
     _acl_names = []
+    _ancestor_acl_names = []
     _table_name = 'name'
 
     def __init__(self, directory, **args):
@@ -142,6 +143,8 @@ class HatracName (object):
     def _acl_load(self, **args):
         for an in self._acl_names:
             self.acls[an] = ACL(coalesce(args.get('%s' % an), []))
+        for an in self._ancestor_acl_names:
+            self.acls[an] = ACL(coalesce(args.get('%s' % an), []))
 
     def get_acl(self, access):
         return list(self.acls[access])
@@ -149,7 +152,7 @@ class HatracName (object):
     def get_acls(self):
         return dict([
             (k, self.get_acl(k))
-            for k in self.acls
+            for k in self.acls if k in self._acl_names
         ])
 
     def get_uploads(self):
@@ -164,7 +167,7 @@ class HatracName (object):
     def enforce_acl(self, accesses, client_context):
         acl = set()
         for access in accesses:
-            acl.update( self.acls[access])
+            acl.update( self.acls.get(access, ACL()))
         if '*' in acl \
            or client_context.client and client_context.client in acl \
            or acl.intersection(client_context.attributes):
@@ -192,7 +195,8 @@ class HatracName (object):
 
 class HatracNamespace (HatracName):
     """Represent a bound namespace."""
-    _acl_names = ['owner', 'create']
+    _acl_names = ['owner', 'create', 'subtree-owner', 'subtree-create', 'subtree-read', 'subtree-update']
+    _ancestor_acl_names = ['ancestor_owner', 'ancestor_create']
 
     def __init__(self, directory, **args):
         HatracName.__init__(self, directory, **args)
@@ -214,7 +218,8 @@ class HatracNamespace (HatracName):
 
 class HatracObject (HatracName):
     """Represent a bound object."""
-    _acl_names = ['owner', 'update', 'read']
+    _acl_names = ['owner', 'update', 'read', 'subtree-owner', 'subtree-read']
+    _ancestor_acl_names = ['ancestor_owner', 'ancestor_update']
 
     def __init__(self, directory, **args):
         HatracName.__init__(self, directory, **args)
@@ -267,13 +272,14 @@ class HatracVersions (object):
         self.object = objresource
 
     def get_content(self, client_context, get_data=True):
-        self.object.enforce_acl(['owner'], client_context)
+        self.object.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(self.object.directory.object_enumerate_versions(self.object)) + '\n'
         return len(body), 'application/json', None, [body]
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
     _acl_names = ['owner', 'read']
+    _ancestor_acl_names = ['ancestor_owner', 'ancestor_read']
     _table_name = 'version'
 
     def __init__(self, directory, object, **args):
@@ -326,6 +332,7 @@ class HatracUploads (object):
 class HatracUpload (HatracName):
     """Represent an upload job."""
     _acl_names = ['owner']
+    _ancestor_acl_names = ['ancestor_owner']
     _table_name = 'upload'
 
     def __init__(self, directory, object, **args):
@@ -377,7 +384,11 @@ CREATE TABLE hatrac.name (
   owner text[],
   "create" text[],
   "update" text[],
-  read text[]
+  read text[],
+  "subtree-owner" text[],
+  "subtree-create" text[],
+  "subtree-update" text[],
+  "subtree-read" text[]
 );
 
 INSERT INTO hatrac.name 
@@ -455,6 +466,34 @@ def db_wrap(reload_pos=None, transform=None, enforce_acl=None):
         return wrapper
     return helper
 
+def ancestor_names(name):
+    """Generate a sequence of names for each ancestor namespace."""
+    nameparts = [ n for n in name.split('/') if n ]
+    for i in range(0, len(nameparts)):
+        yield '/' + '/'.join(nameparts[0:i])
+
+def ancestor_acl_sql(name, accesses):
+    """Generate SQL subqueries to compute ancestor ACL arrays for listed accesses.
+  
+       The SQL fragments are scalar subqueries with an alias:
+
+         (SELECT array_agg(...) ...) AS "ancestor_access"  
+
+       suitable for inclusion in a SQL SELECT clause.
+    """
+    ancestors = ",".join(map(sql_literal, ancestor_names(name)))
+    for access in accesses:
+        yield '''
+(SELECT array_agg(DISTINCT s.r)
+ FROM (SELECT unnest(%(aclcol)s) AS r
+       FROM hatrac.name a
+ WHERE a.name = ANY (ARRAY[%(ancestors)s]::text[])) s
+) AS %(acl)s''' % dict(
+    aclcol=sql_identifier('subtree-%s' % access),
+    ancestors=ancestors,
+    acl=sql_identifier('ancestor_%s' % access)
+)
+        
 class HatracDirectory (DatabaseConnection):
     """Stateful Hatrac Directory tracks bound names and object versions.
 
@@ -508,12 +547,12 @@ class HatracDirectory (DatabaseConnection):
         if parent.is_object():
             raise hatrac.core.Conflict('Parent %s is not a namespace.' % (self.prefix + parname))
 
-        parent.enforce_acl(['owner', 'create'], client_context)
+        parent.enforce_acl(['owner', 'create', 'ancestor_owner', 'ancestor_create'], client_context)
         resource = HatracName.construct(self, **self._create_name(db, name, is_object))
         self._set_resource_acl_role(db, resource, 'owner', client_context.client)
         return resource
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner']), transform=lambda thunk: thunk())
+    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
     def delete_name(self, resource, client_context, db=None):
         """Delete an existing namespace or object resource."""
         if resource.name == '/':
@@ -524,11 +563,11 @@ class HatracDirectory (DatabaseConnection):
         deleted_names = []
 
         for row in self._namespace_enumerate_versions(db, resource):
-            HatracObjectVersion(self, None, **row).enforce_acl(['owner'], client_context)
+            HatracObjectVersion(self, None, **row).enforce_acl(['owner', 'ancestor_owner'], client_context)
             deleted_versions.append( row )
 
         for row in self._namespace_enumerate_names(db, resource):
-            HatracName.construct(self, **row).enforce_acl(['owner'], client_context)
+            HatracName.construct(self, **row).enforce_acl(['owner', 'ancestor_owner'], client_context)
             deleted_names.append( row )
 
         # we only get here if no ACL raised an exception above
@@ -548,13 +587,13 @@ class HatracDirectory (DatabaseConnection):
 
         return cleanup
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner']), transform=lambda thunk: thunk())
+    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
     def delete_version(self, resource, client_context, db=None):
         """Delete an existing version."""
         self._delete_version(db, resource)
         return lambda : self.storage.delete(resource.name, resource.version)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'update']))
+    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version(self, object, client_context, nbytes=None, content_type=None, content_md5=None, db=None):
         """Create, persist, and return a HatracObjectVersion instance.
 
@@ -573,7 +612,7 @@ class HatracDirectory (DatabaseConnection):
         self._db_wrapper(lambda db: self._complete_version(db, resource, version))
         return self.version_resolve(object, version)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner']))
+    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, content_type=None, content_md5=None, db=None):
         job = self.storage.create_upload(object.name, nbytes, content_type, content_md5)
         resource = HatracUpload(self, object, **self._create_upload(db, object, job, chunksize, nbytes, content_type, content_md5))
@@ -618,12 +657,12 @@ class HatracDirectory (DatabaseConnection):
         version.version = version_id
         return version
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner']), transform=lambda thunk: thunk())
+    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
     def upload_cancel(self, upload, client_context, db=None):
         self._delete_upload(db, upload)
         return lambda : self.storage.cancel_upload(upload.name, upload.job)
 
-    @db_wrap(reload_pos=2, enforce_acl=(2, 4, ['owner', 'read']))
+    @db_wrap(reload_pos=2, enforce_acl=(2, 4, ['owner', 'read', 'ancestor_owner', 'ancestor_read']))
     def get_version_content_range(self, object, objversion, get_slice, client_context, get_data=True, db=None):
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
@@ -677,21 +716,21 @@ class HatracDirectory (DatabaseConnection):
         else:
             raise hatrac.core.Conflict('Object %s currently has no content.' % object)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner']))
+    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def set_resource_acl_role(self, resource, access, role, client_context, db=None):
         self._set_resource_acl_role(db, resource, access, role)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner']))
+    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def drop_resource_acl_role(self, resource, access, role, client_context, db=None):
         if role not in resource.acls[access]:
             raise hatrac.core.NotFound('Resource %s;acl/%s/%s not found.' % (resource, access, role))
         self._drop_resource_acl_role(db, resource, access, role)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner']))
+    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def set_resource_acl(self, resource, access, acl, client_context, db=None):
         self._set_resource_acl(db, resource, access, acl)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner']))
+    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
     def clear_resource_acl(self, resource, access, client_context, db=None):
         self._set_resource_acl(db, resource, access, [])
 
@@ -870,6 +909,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             wheres.append("NOT n.is_deleted")
         results = db.select(
             ['hatrac.name n'],
+            what=','.join(['n.*'] + list(ancestor_acl_sql(name, ['owner', 'update', 'read', 'create']))),
             where=' AND '.join(wheres)
         )
         if not results:
@@ -879,7 +919,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
     def _version_lookup(self, db, object, version, allow_deleted=True):
         result = db.select(
             ["hatrac.name n", "hatrac.version v"],
-            what="v.*, n.name",
+            what=','.join(["v.*" , "n.name"] + list(ancestor_acl_sql(object.name, ['owner', 'read']))),
             where=' AND '.join([
                 "v.nameid = n.id",
                 "v.nameid = %s" % sql_literal(int(object.id)),
@@ -896,7 +936,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
     def _upload_lookup(self, db, object, job):
         result = db.select(
             ["hatrac.upload u", "hatrac.name n"],
-            what="u.*, n.name",
+            what=','.join(["u.*", "n.name"] + list(ancestor_acl_sql(object.name, ['owner']))),
             where=' AND '.join([
                 "u.nameid = %s" % sql_literal(int(object.id)),
                 "u.nameid = n.id",
