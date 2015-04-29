@@ -466,31 +466,26 @@ def db_wrap(reload_pos=None, transform=None, enforce_acl=None):
         return wrapper
     return helper
 
-def ancestor_names(name):
-    """Generate a sequence of names for each ancestor namespace."""
-    nameparts = [ n for n in name.split('/') if n ]
-    for i in range(0, len(nameparts)):
-        yield '/' + '/'.join(nameparts[0:i])
-
-def ancestor_acl_sql(name, accesses):
+def ancestor_acl_sql(accesses):
     """Generate SQL subqueries to compute ancestor ACL arrays for listed accesses.
   
        The SQL fragments are scalar subqueries with an alias:
 
-         (SELECT array_agg(...) ...) AS "ancestor_access"  
+         (SELECT array_agg(...) ... WHERE n.name = ...) AS "ancestor_access"  
 
-       suitable for inclusion in a SQL SELECT clause.
+       suitable for inclusion in a SQL SELECT clause.  This SQL
+       expects the table alias "n" to be bound to the "name" table
+       instance for which ancestor ACLs are being constructed.
+
     """
-    ancestors = ",".join(map(sql_literal, ancestor_names(name)))
     for access in accesses:
         yield '''
 (SELECT array_agg(DISTINCT s.r)
  FROM (SELECT unnest(%(aclcol)s) AS r
        FROM hatrac.name a
- WHERE a.name = ANY (ARRAY[%(ancestors)s]::text[])) s
+       WHERE a.name = '/' OR substring(n.name from 1 for char_length(a.name) + 1) = (a.name || '/') ) s
 ) AS %(acl)s''' % dict(
     aclcol=sql_identifier('subtree-%s' % access),
-    ancestors=ancestors,
     acl=sql_identifier('ancestor_%s' % access)
 )
         
@@ -909,7 +904,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             wheres.append("NOT n.is_deleted")
         results = db.select(
             ['hatrac.name n'],
-            what=','.join(['n.*'] + list(ancestor_acl_sql(name, ['owner', 'update', 'read', 'create']))),
+            what=','.join(['n.*'] + list(ancestor_acl_sql(['owner', 'update', 'read', 'create']))),
             where=' AND '.join(wheres)
         )
         if not results:
@@ -919,7 +914,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
     def _version_lookup(self, db, object, version, allow_deleted=True):
         result = db.select(
             ["hatrac.name n", "hatrac.version v"],
-            what=','.join(["v.*" , "n.name"] + list(ancestor_acl_sql(object.name, ['owner', 'read']))),
+            what=','.join(["v.*" , "n.name"] + list(ancestor_acl_sql(['owner', 'read']))),
             where=' AND '.join([
                 "v.nameid = n.id",
                 "v.nameid = %s" % sql_literal(int(object.id)),
@@ -936,7 +931,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
     def _upload_lookup(self, db, object, job):
         result = db.select(
             ["hatrac.upload u", "hatrac.name n"],
-            what=','.join(["u.*", "n.name"] + list(ancestor_acl_sql(object.name, ['owner']))),
+            what=','.join(["u.*", "n.name"] + list(ancestor_acl_sql(['owner']))),
             where=' AND '.join([
                 "u.nameid = %s" % sql_literal(int(object.id)),
                 "u.nameid = n.id",
