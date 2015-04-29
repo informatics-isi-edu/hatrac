@@ -982,7 +982,8 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
         else:
             pattern = "n.name ~ %s" % sql_literal("^" + regexp_escape(resource.name) + '/')
         return db.select(
-            ['hatrac.name n', 'hatrac.version v'], 
+            ['hatrac.name n', 'hatrac.version v'],
+            what=','.join(['n.name', 'v.*'] + list(ancestor_acl_sql(['owner', 'read']))),
             where=' AND '.join([
                 "v.nameid = n.id",
                 pattern,
@@ -999,7 +1000,8 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
         if not recursive:
             pattern += '[^/]+$'
         return db.select(
-            ['hatrac.name n'], 
+            ['hatrac.name n'],
+            what=','.join(['n.*'] + list(ancestor_acl_sql(['owner', 'update', 'read', 'create']))),
             where=' AND '.join([
                 "n.name ~ %s" % sql_literal(pattern),
                 "NOT n.is_deleted"
@@ -1014,7 +1016,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             pattern = "n.name ~ %s" % sql_literal("^" + regexp_escape(resource.name) + '/')
         return db.select(
             ['hatrac.name n', 'hatrac.upload u'], 
-            what="u.*, n.name",
+            what=','.join(["u.*", "n.name"] + list(ancestor_acl_sql(['owner']))),
             where=' AND '.join([
                 "u.nameid = n.id",
                 pattern
