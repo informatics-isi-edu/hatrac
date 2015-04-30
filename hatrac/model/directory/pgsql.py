@@ -279,7 +279,9 @@ class HatracVersions (object):
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
     _acl_names = ['owner', 'read']
-    _ancestor_acl_names = ['ancestor_owner', 'ancestor_read']
+    # we pull in the object's subtree-* ACLs and treat them like ancestor ACLs
+    # since ancestor ACLs only roll up the ancestor namespaces but not the object itself
+    _ancestor_acl_names = ['ancestor_owner', 'ancestor_read', 'subtree-owner', 'subtree-read']
     _table_name = 'version'
 
     def __init__(self, directory, object, **args):
@@ -558,7 +560,8 @@ class HatracDirectory (DatabaseConnection):
         deleted_names = []
 
         for row in self._namespace_enumerate_versions(db, resource):
-            HatracObjectVersion(self, None, **row).enforce_acl(['owner', 'ancestor_owner'], client_context)
+            obj = HatracObject(self, **row)
+            HatracObjectVersion(self, obj, **row).enforce_acl(['owner', 'subtree-owner', 'ancestor_owner'], client_context)
             deleted_versions.append( row )
 
         for row in self._namespace_enumerate_names(db, resource):
@@ -983,7 +986,13 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             pattern = "n.name ~ %s" % sql_literal("^" + regexp_escape(resource.name) + '/')
         return db.select(
             ['hatrac.name n', 'hatrac.version v'],
-            what=','.join(['n.name', 'v.*'] + list(ancestor_acl_sql(['owner', 'read']))),
+            what=','.join([
+                # name stuff needed to fluff up a partial object record
+                'n.name', 'n.subtype', 'n.update',
+                # ACLs needed for version authz
+                'n."subtree-owner"', 'n."subtree-read"',
+                'v.*' # and finally... version fields
+            ] + list(ancestor_acl_sql(['owner', 'read']))),
             where=' AND '.join([
                 "v.nameid = n.id",
                 pattern,
