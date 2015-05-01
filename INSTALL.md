@@ -78,7 +78,7 @@ This configuration works on a Fedora and Ubuntu host for a filesystem deployment
         "storage_backend": "filesystem",
         "storage_path": "/var/www/hatrac",
         "database_type": "postgres",
-        "database_name": "",
+        "database_dsn": "dbname=hatrac",
         "database_schema": "hatrac",
         "database_max_retries": 5
     }
@@ -93,7 +93,7 @@ This configuration works for an Amazon AWS S3 deployment:
     	    "aws_secret_access_key": <AWS_SECRET_ACCESS_KEY>
         },
         "database_type": "postgres",
-        "database_name": "",
+        "database_dsb": "dbname=hatrac",
         "database_schema": "hatrac",
         "database_max_retries": 5
     }
@@ -145,7 +145,7 @@ the same cookie name and path settings):
     
           "database_schema": "webauthn2", 
           "database_type": "postgres", 
-          "database_name": "ermrest", 
+          "database_dsn": "dname=ermrest", 
           "database_max_retries": 5
     }
 

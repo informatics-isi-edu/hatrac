@@ -24,7 +24,7 @@ if deployment == FILESYSTEM:
             "storage_backend": "filesystem",
             "storage_path": os.getcwd() + "/hatrac_test_data",
             "database_type": "postgres",
-            "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
+            "database_dsn": "dbname=" + os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
             "database_schema": "hatrac",
             "database_max_retries": 5
         }
@@ -36,7 +36,7 @@ else:
             "service_prefix": "/hatrac",
             "storage_backend": "amazons3",
             "database_type": "postgres",
-            "database_name": os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
+            "database_dsn": "dbname=" + os.environ.get("HATRAC_TEST_DB", "hatrac_test"),
             "database_schema": "hatrac",
             "database_max_retries": 5,
             "s3_bucket" : os.environ.get("HATRAC_TEST_BUCKET", "hatractest"),
@@ -61,6 +61,9 @@ anon_context = Context()
 
 foo_context = Context()
 foo_context.client = 'foo'
+
+foo2_context = Context()
+foo2_context.client = 'foo2'
 
 def expect(cls, thunk):
     got_expected = False
@@ -92,6 +95,7 @@ test_directory.create_name("/foo", False, root_context)
 test_directory.create_name("/foo/bar", False, root_context)
 test_directory.create_name("/foo/obj1", True, root_context)
 test_directory.create_name("/foo/objJ", True, root_context)
+rootns = test_directory.name_resolve("/")
 obj1 = test_directory.name_resolve("/foo/obj1")
 objJ = test_directory.name_resolve("/foo/objJ")
 
@@ -212,8 +216,24 @@ vers1.set_acl('read', ['foo', 'bar'], root_context)
 
 ''.join(obj1.get_content(foo_context)[3])
 
+expect(
+    hatrac.core.Forbidden,
+    lambda : ''.join(obj1.get_content(foo2_context)[3])
+)   
+
+rootns.set_acl_role('subtree-read', 'foo2', root_context)
+
+''.join(obj1.get_content(foo2_context)[3])
+
 vers1.set_acl_role('read', 'baz', root_context)    
 vers1.drop_acl_role('read', 'bar', root_context)
+
+obj1.set_acl_role('owner', 'foo2', root_context)
+
+expect(
+    hatrac.core.Forbidden,
+    lambda : obj1.delete(foo2_context)
+)
 
 expect(
     hatrac.core.NotFound,
@@ -222,5 +242,8 @@ expect(
 
 obj1.clear_acl('read', root_context)
 
-obj1.delete(root_context)
+obj1.set_acl_role('subtree-owner', 'foo2', foo2_context)
+
+obj1.delete(foo2_context)
+
 
