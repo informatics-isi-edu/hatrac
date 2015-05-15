@@ -425,6 +425,10 @@ class RestHandler (object):
         else:
             nbytes, content_type, content_md5, data_generator = resource.get_content(client_context, get_data=self.get_body)
             web.ctx.status = '200 OK'
+
+        if resource.is_object() and resource.is_version():
+            web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.quote(str(resource.object)))
+            
         web.header('Content-Length', nbytes)
         if content_type:
             web.header('Content-Type', content_type)
