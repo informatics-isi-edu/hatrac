@@ -427,7 +427,7 @@ class RestHandler (object):
             web.ctx.status = '200 OK'
 
         if resource.is_object() and resource.is_version():
-            web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.quote(str(resource.object)))
+            web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.quote(str(resource.object).split("/")[-1]))
             
         web.header('Content-Length', nbytes)
         if content_type:
