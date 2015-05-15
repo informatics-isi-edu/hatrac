@@ -10,6 +10,7 @@
 
 import base64
 from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, LengthRequired, hash_list
+import hatrac.core
 import web
 
 @web_url([
@@ -131,7 +132,7 @@ class Name (RestHandler):
                 version = resource.get_current_version()
                 self.set_http_etag(version.version)
                 self.http_check_preconditions('PUT')
-            except Conflict:
+            except hatrac.core.Conflict:
                 # check precondition for current state of version not existing
                 self.http_check_preconditions('PUT', False)
 
