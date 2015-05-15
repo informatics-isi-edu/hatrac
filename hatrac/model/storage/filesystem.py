@@ -146,10 +146,10 @@ class HatracStorage (object):
             if nbytes is not None:
                 if rbytes >= nbytes:
                     eof = True
-                elif buflen == 0:
+                elif bufsize == 0:
                     f.close()
                     raise BadRequest('Only received %s of %s expected bytes.' % (rbytes, nbytes))
-            elif buflen == 0:
+            elif bufsize == 0:
                 eof = True
 
         if hasher:
