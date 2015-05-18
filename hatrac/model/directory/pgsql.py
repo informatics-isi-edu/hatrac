@@ -72,11 +72,17 @@ def regexp_escape(s):
     return ''.join([ remap(c) for c in s ])
 
 class ACLEntry (str):
+    def is_object(self):
+        return False
+
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         return len(self), 'text/plain', None, [self]
 
 class ACL (set):
+    def is_object(self):
+        return False
+
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(list(self)) + '\n'
@@ -93,6 +99,9 @@ class ACL (set):
         return entry
 
 class ACLs (dict):
+    def is_object(self):
+        return False
+
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(self.resource.get_acls()) + '\n'
