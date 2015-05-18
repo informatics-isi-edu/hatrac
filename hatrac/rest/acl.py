@@ -75,7 +75,7 @@ class ACL (RestHandler):
         if in_content_type != 'application/json':
             raise BadRequest('Only application/json input is accepted for ACLs.')
         try:
-            acl = jsonReader(web.ctx.env['wsgi.input'])
+            acl = jsonReader(web.ctx.env['wsgi.input'].read())
         except:
             raise BadRequest('Error reading JSON input.')
         if type(acl) != list:
