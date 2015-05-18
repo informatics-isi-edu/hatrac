@@ -822,10 +822,16 @@ WHERE n.id = %(id)s
     def _set_resource_acl(self, db, resource, access, acl):
         if access not in resource._acl_names:
             raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
-        db.update(
-            "hatrac.%s r" % sql_identifier(resource._table_name),
-            where="r.id = %s" % sql_literal(resource.id),
-            **{access: acl}
+        db.query("""
+UPDATE hatrac.%(table)s r 
+SET %(acl)s = ARRAY[%(roles)s] 
+WHERE r.id = %(id)s 
+""" % dict(
+    table=sql_identifier(resource._table_name),
+    id=sql_literal(resource.id),
+    acl=sql_identifier(access),
+    roles=','.join(map(sql_literal, acl))
+)
         )
         resource.acls[access] = ACL(acl)
 
