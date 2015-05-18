@@ -4,6 +4,10 @@
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
+import re
+import itertools
+import web
+
 import core
 
 # these modify core.dispatch_rules
@@ -11,13 +15,65 @@ import acl
 import name
 import transfer
 
-urls = list(core.dispatch_rules.items())
+rules = list(core.dispatch_rules.items())
 
 # sort longest patterns first where prefixes match
-urls.sort(reverse=True)
+rules.sort(reverse=True)
 
 # flatten list of pairs into one long tuple for web.py
-urls = tuple(
-    [ item for rule in urls for item in rule ]
-)
+rules = [
+    # anchor pattern to end of string too for full matching
+    (re.compile(pattern + (pattern[-1] != '$' and '$' or '')), handler)
+    for pattern, handler in rules
+]
+
+class Dispatcher (object):
+    """Helper class to handle parser-based URL dispatch
+
+       Does what mod_wsgi + web.py should do if the standards around
+       url-escaping weren't horribly broken.
+
+    """
+
+    def prepare_dispatch(self):
+        """computes web dispatch from REQUEST_URI
+        """
+        uri = web.ctx.env['REQUEST_URI']
+        uribase = web.ctx.env['SCRIPT_NAME']
+        assert uri[0:len(uribase)] == uribase
+        uri = uri[len(uribase):]
+
+        for pattern, handler in rules:
+            m = pattern.match(uri)
+            if m:
+                return handler(), m.groups()
+        raise core.NotFound('%s does not map to any REST API.' % uri)
+
+    def METHOD(self, methodname):
+        handler, matchgroups = self.prepare_dispatch()
+
+        if not hasattr(handler, methodname):
+            raise rest.NoMethod()
+
+        method = getattr(handler, methodname)
+        return method(*matchgroups)
+
+    def HEAD(self):
+        return self.METHOD('HEAD')
+
+    def GET(self):
+        return self.METHOD('GET')
+        
+    def PUT(self):
+        return self.METHOD('PUT')
+
+    def DELETE(self):
+        return self.METHOD('DELETE')
+
+    def POST(self):
+        return self.METHOD('POST')
+
+
+# bypass web.py URI-dispatching because of broken handling of url-escapes!
+urls = ('.*', Dispatcher)
 
