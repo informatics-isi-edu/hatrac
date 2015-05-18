@@ -55,7 +55,7 @@ class Dispatcher (object):
         matchgroups = map(urllib.unquote, matchgroups)
 
         if not hasattr(handler, methodname):
-            raise rest.NoMethod()
+            raise core.NoMethod()
 
         method = getattr(handler, methodname)
         return method(*matchgroups)
