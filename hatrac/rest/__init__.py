@@ -7,6 +7,7 @@
 import re
 import itertools
 import web
+import urllib
 
 import core
 
@@ -51,6 +52,7 @@ class Dispatcher (object):
 
     def METHOD(self, methodname):
         handler, matchgroups = self.prepare_dispatch()
+        matchgroups = map(urllib.unquote, matchgroups)
 
         if not hasattr(handler, methodname):
             raise rest.NoMethod()
