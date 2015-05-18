@@ -277,6 +277,9 @@ class HatracObject (HatracName):
         return self.directory.upload_resolve(self, upload)
 
 class HatracVersions (object):
+    def is_object(self):
+        return False
+
     def __init__(self, objresource):
         self.object = objresource
 
@@ -329,6 +332,9 @@ class HatracObjectVersion (HatracName):
         return self.directory.delete_version(self, client_context)
 
 class HatracUploads (object):
+    def is_object(self):
+        return False
+
     def __init__(self, objresource):
         self.object = objresource
 
@@ -345,6 +351,9 @@ class HatracUpload (HatracName):
     _acl_names = ['owner']
     _ancestor_acl_names = ['ancestor_owner']
     _table_name = 'upload'
+
+    def is_object(self):
+        return False
 
     def __init__(self, directory, object, **args):
         HatracName.__init__(self, directory, **args)
