@@ -174,6 +174,10 @@ def web_method():
             web.ctx.hatrac_request_trace = request_trace
             web.ctx.hatrac_directory = hatrac.directory
 
+            if hatrac.directory.prefix is None:
+                # set once from web context if administrator did not specify in config
+                hatrac.directory.prefix = web.ctx.env['SCRIPT_NAME']
+            
             try:
                 # get client authentication context
                 web.ctx.webauthn2_context = _webauthn2_manager.get_request_context()

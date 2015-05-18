@@ -532,7 +532,7 @@ class HatracDirectory (DatabaseConnection):
             ]
         )
         self.storage = storage
-        self.prefix = config.get('service_prefix', '')
+        self.prefix = config.get('service_prefix')
 
     @db_wrap()
     def deploy_db(self, admin_roles, db=None):
