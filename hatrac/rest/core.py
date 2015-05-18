@@ -446,9 +446,9 @@ class RestHandler (object):
     def create_response(self, resource):
         """Form response for resource creation request."""
         web.ctx.status = '201 Created'
-        web.header('Location', str(resource))
+        web.header('Location', resource.asurl())
         web.header('Content-Type', 'text/uri-list')
-        body = str(resource) + '\n'
+        body = resource.asurl() + '\n'
         web.header('Content-Length', len(body))
         return body
 

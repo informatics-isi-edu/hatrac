@@ -39,6 +39,7 @@ version of any particular object.
 """
 
 import web
+import urllib
 import binascii
 import base64
 import random
@@ -144,6 +145,9 @@ class HatracName (object):
 
     def __str__(self):
         return self.directory.prefix + self.name
+
+    def asurl(self):
+        return self.directory.prefix + '/'.join(map(lambda s: urllib.quote(s, ''), self.name.split('/')))
 
     def _reload(self, db, raise_notfound=True):
         result = self.directory._name_lookup(db, self.name, raise_notfound)
@@ -310,6 +314,9 @@ class HatracObjectVersion (HatracName):
     def __str__(self):
         return '%s:%s' % (self.object, self.version)
 
+    def asurl(self):
+        return '%s:%s' % (self.object.asurl(), urllib.quote(self.version, ''))
+
     def _reload(self, db):
         object1 = self.object._reload(db)
         result = self.directory._version_lookup(db, object1, self.version)
@@ -367,6 +374,9 @@ class HatracUpload (HatracName):
 
     def __str__(self):
         return "%s;upload/%s" % (self.object, self.job)
+
+    def asurl(self):
+        return self.directory.prefix + '/'.join(map(lambda s: urllib.quote(s, ''), self.name.split('/')))
 
     def _reload(self, db):
         object = self.object._reload(db)
