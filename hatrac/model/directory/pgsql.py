@@ -376,7 +376,7 @@ class HatracUpload (HatracName):
         return "%s;upload/%s" % (self.object, self.job)
 
     def asurl(self):
-        return self.directory.prefix + '/'.join(map(lambda s: urllib.quote(s, ''), self.name.split('/')))
+        return '%s;upload/%s' % (self.object.asurl(), urllib.quote(self.job, ''))
 
     def _reload(self, db):
         object = self.object._reload(db)
