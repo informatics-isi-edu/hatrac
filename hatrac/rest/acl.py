@@ -81,7 +81,7 @@ class ACL (RestHandler):
         if type(acl) != list:
             raise BadRequest('ACL input must be a flat JSON array.')
         for entry in acl:
-            if type(acl) != str:
+            if type(acl) in [str, unicode]:
                 raise BadRequest('ACL entry "%s" is not a string.' % entry)
         resource = self.resolve_name_or_version(
             path, name, version
