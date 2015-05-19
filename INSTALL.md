@@ -80,7 +80,9 @@ This configuration works on a Fedora and Ubuntu host for a filesystem deployment
         "database_type": "postgres",
         "database_dsn": "dbname=hatrac",
         "database_schema": "hatrac",
-        "database_max_retries": 5
+        "database_max_retries": 5,
+		"403_html": "<html><body><h1>Access Forbidden</h1><p>%(message)s</p></body></html>",
+		"401_html": "<html><body><h1>Authentication Required</h1><p>%(message)s</p></body></html>"
     }
 
 This configuration works for an Amazon AWS S3 deployment:

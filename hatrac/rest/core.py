@@ -120,11 +120,32 @@ class BadRequest (RestException):
     status = '400 Bad Request'
     message = 'Request malformed.'
 
-class Unauthorized (RestException):
+class TemplatedRestException (RestException):
+    error_type = ''
+    supported_content_types = ['text/plain', 'text/html']
+    def __init__(self, message=None, headers=None):
+        # filter types to those for which we have a response template, or text/plain which we always support
+        supported_content_types = [
+            content_type for content_type in self.supported_content_types
+            if "%s_%s" % (self.error_type, content_type.split('/')[-1]) in hatrac.core.config or content_type == 'text/plain'
+        ]
+        default_content_type = supported_content_types[0]
+        # find client's preferred type
+        content_type = webauthn2.util.negotiated_content_type(supported_content_types, default_content_type)
+        # lookup template and use it if available
+        template_key = '%s_%s' % (self.error_type, content_type.split('/')[-1])
+        if template_key in hatrac.core.config:
+            message = hatrac.core.config[template_key] % dict(message=message)
+        RestException.__init__(self, message, headers)
+        web.header('Content-Type', content_type)
+        
+class Unauthorized (TemplatedRestException):
+    error_type = '401'
     status = '401 Unauthorized'
     message = 'Access requires authentication.'
 
-class Forbidden (RestException):
+class Forbidden (TemplatedRestException):
+    error_type = '403'
     status = '403 Forbidden'
     message = 'Access forbidden.'
 

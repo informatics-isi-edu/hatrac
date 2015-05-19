@@ -20,6 +20,9 @@ The current status is that basic APIs seem to work:
   - useful for object, object version, ACL management
   - supported on all methods
   - allows GET caching and precondition protection on PUT/DELETE
+1. custom error messages for 401 or 403 responses supported with trivial templating
+  - set 401_html and/or 403_html config values in hatrac_config.json
+  - use `%(message)s` Python string-interpolation reference to embed service-generated text string into 
 
 This includes the specified immutable/stable reference semantics from 
 the REST-API.md doc, i.e. deletion leaves breadcrumbs in the database 
