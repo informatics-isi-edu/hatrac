@@ -13,7 +13,6 @@ data-oriented collaboration.
   - Python
   - web.py
   - webauthn2
-  - vim-common
 1. Install hatrac Python package from top-level of development code.
   - `python setup.py install`
 1. Run [basic tests](#basic-testing) or continue to [configure the web stack](#configure-web-stack).
