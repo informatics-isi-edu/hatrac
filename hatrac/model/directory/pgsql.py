@@ -824,7 +824,7 @@ WHERE n.id = %(id)s
             raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
         db.query("""
 UPDATE hatrac.%(table)s r 
-SET %(acl)s = ARRAY[%(roles)s] 
+SET %(acl)s = ARRAY[%(roles)s]::text[]
 WHERE r.id = %(id)s 
 """ % dict(
     table=sql_identifier(resource._table_name),
