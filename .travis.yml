@@ -22,5 +22,5 @@ before_script:
   - createdb hatrac_test
 
 script:
-  - python test/smoketest.py
+  - sudo -u $USER python test/smoketest.py
 
