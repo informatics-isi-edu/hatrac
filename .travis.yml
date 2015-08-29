@@ -20,6 +20,7 @@ install:
 
 before_script:
   - createdb hatrac_test
+  - cp test/hatrac_config.json ~/
 
 script:
   - sudo -u $USER python test/smoketest.py
