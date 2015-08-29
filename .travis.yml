@@ -2,13 +2,13 @@
 language: python
 
 addons:
-  postgresq: "9.2"
+  postgresq: "9.4"
 
 before_install:
   - sudo apt-get update
-  - sudo apt-get -y install chkconfig apache2 postgresql-9.4 ssl-cert libapache2-mod-wsgi python python-psycopg2 python-dateutil python-webpy python-tz
   - sudo service postgresql stop
-  - sudo service postgresql start 9.2
+  - sudo service postgresql start 9.4
+  - sudo apt-get -y install chkconfig apache2 postgresql-9.4 ssl-cert libapache2-mod-wsgi python python-psycopg2 python-dateutil python-webpy python-tz
   - git clone https://github.com/informatics-isi-edu/webauthn.git
   - cd webauthn
   - sudo make install PLATFORM=ubuntu1204

@@ -13,6 +13,8 @@ model with:
 
 ## Status
 
+[![Build Status](https://travis-ci.org/informatics-isi-edu/hatrac.svg)](https://travis-ci.org/informatics-isi-edu/hatrac)
+
 Hatrac is currently under rapid development, with an expectation to
 have a stable release sometime in 2015.
 
