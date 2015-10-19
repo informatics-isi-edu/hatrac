@@ -300,28 +300,30 @@ class RestHandler (object):
                 s = s[2:]
             return (s, strong)
 
-        def etags_parse(s):
-            etags = []
-            s, strong = etag_parse(s)
-            while s:
-                s = s.strip()
-                m = re.match('^,? *(?P<first>(W/)?"(.|\\")*")(?P<rest>.*)', s)
-                if m:
-                    g = m.groupdict()
-                    etags.append(etag_parse(g['first']))
-                    s = g['rest']
-                    continue
-                m = re.match('^,? *[*](?P<rest>.*)', s)
-                if m:
-                    g = m.groupdict()
-                    etags.append((True, True))
-                    s = g['rest']
-                    continue
-                s = None
+        s = header
+        etags = []
+        # pick off one ETag prefix at a time, consuming comma-separated list
+        while s:
+            s = s.strip()
+            # accept leading comma that isn't really valid by spec...
+            m = re.match('^,? *(?P<first>(W/)?"(.|\\")*")(?P<rest>.*)', s)
+            if m:
+                # found 'W/"tag"' or '"tag"'
+                g = m.groupdict()
+                etags.append(etag_parse(g['first']))
+                s = g['rest']
+                continue
+            m = re.match('^,? *[*](?P<rest>.*)', s)
+            if m:
+                # found '*'
+                # accept anywhere in list even though spec is more strict...
+                g = m.groupdict()
+                etags.append((True, True))
+                s = g['rest']
+                continue
+            s = None
 
-            return dict(etags)
-        
-        return etags_parse(header)
+        return dict(etags)
         
     def http_check_preconditions(self, method='GET', resource_exists=True):
         failed = False
