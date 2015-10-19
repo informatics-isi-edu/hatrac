@@ -194,3 +194,16 @@ the appropriate path and SE-Linux contexts might vary slightly:
     restorecon -rv /var/www/hatrac
     semanage fcontext --add --type httpd_sys_content_t "/home/hatrac(/.*)?"
     restorecon -rv /home/hatrac
+
+### Errors regarding WSGI socket
+
+On some versions of Fedora and CentOS, you may encounter errors in the
+Apache SSL server log similar to `Unable to connect to WSGI daemon
+process on '/var/run/wsgi/wsgi.1331.1.1.sock'`.
+
+A workaround is to configure the SE-Linux context:
+
+    semanage fcontext --add --type httpd_var_run_t "/var/run/wsgi"
+    restorecon -rv /var/run/wsgi
+
+
