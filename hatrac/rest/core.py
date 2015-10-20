@@ -306,7 +306,7 @@ class RestHandler (object):
         while s:
             s = s.strip()
             # accept leading comma that isn't really valid by spec...
-            m = re.match('^,? *(?P<first>(W/)?"(.|\\")*")(?P<rest>.*)', s)
+            m = re.match('^,? *(?P<first>(W/)?"([^"]|\\\\")*")(?P<rest>.*)', s)
             if m:
                 # found 'W/"tag"' or '"tag"'
                 g = m.groupdict()
