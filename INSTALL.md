@@ -146,7 +146,7 @@ the same cookie name and path settings):
     
           "database_schema": "webauthn2", 
           "database_type": "postgres", 
-          "database_dsn": "dname=ermrest", 
+          "database_dsn": "dbname=ermrest", 
           "database_max_retries": 5
     }
 
