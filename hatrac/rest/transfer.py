@@ -8,6 +8,7 @@ import re
 import binascii
 import base64
 import web
+import hatrac.core
 from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest
 from webauthn2.util import jsonReader
 
@@ -127,7 +128,16 @@ class ObjectTransfers (RestHandler):
         else:
             raise BadRequest('Invalid content_md5 "%s" is neither 32-byte hex or 24-byte base64 string.' % content_md5)
 
-        resource = self.resolve(path, name).get_uploads()
+        # create object implicitly or reuse existing object...
+        try:
+            resource = web.ctx.hatrac_directory.create_name(
+                self._fullname(path, name),
+                True,
+                web.ctx.webauthn2_context
+            )
+        except hatrac.core.Conflict, ev:
+            resource = self.resolve(path, name, raise_notfound=False).get_uploads()
+            
         # say resource_exists=False as we always create a new one...
         self.http_check_preconditions('POST', False)
         upload = resource.create_version_upload_job(
