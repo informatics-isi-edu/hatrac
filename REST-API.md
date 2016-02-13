@@ -941,7 +941,7 @@ Typical PUT error responses would be:
 
 ### Chunked Upload Job Finalization
 
-The PUT operation is used to signal completion of an upload job:
+The POST operation is used to signal completion of an upload job:
 
     POST /namespace_path/object_name;upload/job_id
     Host: authority_name
