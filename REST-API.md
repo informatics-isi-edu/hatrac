@@ -821,17 +821,18 @@ form:
   - (the set of upload jobs for a given object)
 - https:// _authority_ / _namespace path_ / _object name_ ;upload / _job id_
   - (a single upload job)
-- https:// _authority_ / _namespace path_ / _object name_ ;upload / _job id_ / _position_
+- https:// _authority_ / _namespace path_ / _object name_ ;upload / _job id_ / _chunk number_
   - (a single chunk of data)
 
 where _job id_ is a service-issued identifier for one transfer job,
-and _position_ is a zero-based ordinal for the chunk within the
-overall transfer.
+and _chunk number_ is a zero-based ordinal for the chunk within the
+series of chunks where chunk number _n_ starts at byte-offset _n_ \*
+_K_ for a job using _K_ byte chunk size.
 
 To allow different implementations, the upload job processes a set of
-chunks of equal size determined at the time the job is created. The
-final chunk may be less than the chunk size to account for arbitrary
-length jobs.
+chunks of equal size determined at the time the job is
+created. Arbitrary byte offsets are *not* allowed. The final chunk may
+be less than the chunk size to account for arbitrary length jobs.
 
 The three-phase chunked upload job has an effect equivalent to a
 single PUT request on an object:
@@ -853,14 +854,14 @@ implementation strategies:
   filesystem.  The chunks are non-overlapping byte ranges at fixed
   offsets. Idempotent retransmission of chunks is permitted, but a
   client SHOULD NOT send different content for multiple requests using
-  the same _position_. An implementation MAY mix content of multiple
-  transmissions for the same _position_.  An implementation MAY accept
+  the same _chunk number_. An implementation MAY mix content of multiple
+  transmissions for the same _chunk number_.  An implementation MAY accept
   completion of an upload job that has missing chunks.
 - The individual requests easily map to similar chunked upload
   interfaced in object systems such as Amazon S3, allowing a thin
   proxy to implement Hatrac on top of such services. Retransmission or
   out-of-order transmission of chunks is permitted, but a client
-  SHOULD NOT skip ordinal _positions_. An implementation MAY reject
+  SHOULD NOT skip any chunks. An implementation MAY reject
   completion of an upload job that has missing chunks.
 
 Hence, it is the client's responsibility to track acknowledged of
@@ -917,7 +918,7 @@ representing the list of upload jobs for the given object.
 
 The PUT operation is used to send data chunks for an existing job:
 
-    PUT /namespace_path/object_name;upload/job_id/position
+    PUT /namespace_path/object_name;upload/job_id/chunknumber
     Host: authority_name
     Content-Type: application/octet-stream
     Content-Length: K
