@@ -649,10 +649,13 @@ class HatracDirectory (DatabaseConnection):
         upload.enforce_acl(['owner'], client_context)
         nchunks = upload.nbytes / upload.chunksize
         remainder = upload.nbytes % upload.chunksize
+        assert position >= 0
         if position < (nchunks - 1) and nbytes != upload.chunksize:
             raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match job chunk size %s.' % (nbytes, upload.chunksize))
         if remainder and position == nchunks and nbytes != remainder:
             raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match final chunk size %s.' % (nbytes, remainder))
+        if position > nchunks or position == nchunks and remainder == 0:
+            raise hatrac.core.Conflict('Uploaded chunk number %s out of range.' % position)
         aux = self.storage.upload_chunk_from_file(
             upload.object.name, 
             upload.job, 

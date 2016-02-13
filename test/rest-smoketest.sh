@@ -267,6 +267,9 @@ do
     dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
 done
 
+dotest "409::*::*" "${upload}/$(( ${total_bytes} / ${chunk_bytes} + 2 ))" -T "$part"
+dotest "400::*::*" "${upload}/-1" -T "$part"
+
 dotest "201::*::*" "${upload}" -X POST
 dotest "404::*::*" "${upload}" -X POST
 dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1

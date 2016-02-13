@@ -28,6 +28,10 @@ class ObjectTransferChunk (RestHandler):
             chunk = int(chunk)
         except ValueError:
             raise BadRequest('Invalid chunk number %s.' % chunk)
+
+        if chunk < 0:
+            raise BadRequest('Invalid chunk number %s.' % chunk)
+        
         try:
             nbytes = int(web.ctx.env['CONTENT_LENGTH'])
         except:
