@@ -931,6 +931,14 @@ for which the successful response is:
     
 where the data was received and stored.
 
+Typical PUT error responses would be:
+  - **401 Unauthorized**: the client is not authenticated and
+      anonymous retrieval of such an object is not supported.
+  - **403 Forbidden**: the client is authenticated but does not have
+      sufficient privilege to retrieve the object.
+  - **400 Bad Request**: the chunk number is not a non-negative integer.
+  - **409 Conflict**: the chunk number is too large for the defined job.
+
 ### Chunked Upload Job Finalization
 
 The PUT operation is used to signal completion of an upload job:
