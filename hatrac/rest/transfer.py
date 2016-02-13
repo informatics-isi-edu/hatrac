@@ -140,8 +140,11 @@ class ObjectTransfers (RestHandler):
                 web.ctx.webauthn2_context
             )
         except hatrac.core.Conflict, ev:
-            resource = self.resolve(path, name, raise_notfound=False).get_uploads()
-            
+            try:
+                resource = self.resolve(path, name).get_uploads()
+            except hatrac.core.NotFound, ev:
+                raise Conflict('Name %s is not available for use.' % self._fullname(path, name))
+                
         # say resource_exists=False as we always create a new one...
         self.http_check_preconditions('POST', False)
         upload = resource.create_version_upload_job(

@@ -897,6 +897,13 @@ for which the successful response is:
 
 where the new job is ready to receive data chunks.
 
+Typical PUT error responses would be:
+  - **401 Unauthorized**: the client is not authenticated and
+      anonymous creation of a job is not supported.
+  - **403 Forbidden**: the client is authenticated but does not have
+      sufficient privilege to create the job.
+  - **409 Conflict**: the object name is unavailable for such use.
+
 ### Chunked Upload Job Listing Retrieval
 
 The GET operation is used to list pending upload jobs on an object:
@@ -933,9 +940,9 @@ where the data was received and stored.
 
 Typical PUT error responses would be:
   - **401 Unauthorized**: the client is not authenticated and
-      anonymous retrieval of such an object is not supported.
+      anonymous upload of the chunk is not supported.
   - **403 Forbidden**: the client is authenticated but does not have
-      sufficient privilege to retrieve the object.
+      sufficient privilege to upload the chunk.
   - **400 Bad Request**: the chunk number is not a non-negative integer.
   - **409 Conflict**: the chunk number is too large for the defined job.
 

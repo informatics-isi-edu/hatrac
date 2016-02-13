@@ -563,8 +563,11 @@ class HatracDirectory (DatabaseConnection):
             raise hatrac.core.BadRequest('Illegal name "%s".' % relname)
 
         try:
-            resource = HatracName.construct(self, **self._name_lookup(db, name))
-            raise hatrac.core.Conflict('Name %s already in use.' % resource)
+            resource = HatracName.construct(self, **self._name_lookup(db, name, False))
+            if resource.is_deleted:
+                raise hatrac.core.Conflict('Name %s not available.' % resource)
+            else:
+                raise hatrac.core.Conflict('Name %s already in use.' % resource)
         except hatrac.core.NotFound, ev:
             pass
             

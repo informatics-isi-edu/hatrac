@@ -180,6 +180,9 @@ dotest "409::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/json"
 # test objects
 md5=$(mymd5sum < $0)
 script_size=$(stat -c "%s" $0)
+dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
+dotest "204::*::*" /ns-${RUNKEY}/foo/obj1 -X DELETE
+dotest "409::*::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
     -H "Content-Type: application/x-bash" \
@@ -276,6 +279,7 @@ dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
 obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
 
 # check upload job for brand new object
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
 dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj2;upload"  \
     -T "${TEST_DATA}" \
     -X POST \
