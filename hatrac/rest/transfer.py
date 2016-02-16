@@ -75,7 +75,7 @@ class ObjectTransfer (RestHandler):
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions('DELETE')
         upload.cancel(web.ctx.webauthn2_context)
-        return self.update_response(version)
+        return self.update_response()
 
     def _GET(self, path, name, job):
         """Get status of transfer job."""
