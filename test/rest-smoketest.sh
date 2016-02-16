@@ -258,6 +258,9 @@ fi
 "content_md5": "$md5"}
 EOF
 
+# cannot upload to a deleted object
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
+
 # check upload job for new version of existing test object
 dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
     -T "${TEST_DATA}" \
@@ -309,7 +312,6 @@ done
 dotest "204::*::*" "${upload}" -X DELETE
 
 # check upload job for brand new object
-dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
 dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj2;upload"  \
     -T "${TEST_DATA}" \
     -X POST \
