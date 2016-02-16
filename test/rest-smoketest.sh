@@ -326,7 +326,7 @@ dotest "412::*::*" /ns-${RUNKEY}/foo2/obj1 \
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
     -H "Content-Type: application/x-bash" \
-    -H "If-Match: %{obj1_etag}"
+    -H "If-Match: ${obj1_etag}"
 obj1_vers2="$(cat ${RESPONSE_CONTENT})"
 obj1_vers2="${obj1_vers2#/hatrac}"
 dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
