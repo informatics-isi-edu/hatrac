@@ -329,6 +329,17 @@ done
 dotest "201::*::*" "${upload}" -X POST
 dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj2
 
+# check upload job for brand new object canceled implicitly by object deletion
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/obj4;upload"  \
+    -T "${TEST_DATA}" \
+    -X POST \
+    -H "Content-Type: application/json"
+upload="$(cat ${RESPONSE_CONTENT})"
+upload="${upload#/hatrac}"
+dotest "200::application/json::*" "${upload}"
+dotest "204::*::*" /ns-${RUNKEY}/foo/obj4 -X DELETE
+dotest "404::*::*" "${upload}"
+
 # check object conditional updates
 dotest "412::*::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
