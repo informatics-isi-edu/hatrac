@@ -278,6 +278,25 @@ dotest "404::*::*" "${upload}" -X POST
 dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
 obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
 
+# check upload job deletion
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
+upload="$(cat ${RESPONSE_CONTENT})"
+upload="${upload#/hatrac}"
+dotest "204::*::*" "${upload}" -X DELETE
+
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
+upload="$(cat ${RESPONSE_CONTENT})"
+upload="${upload#/hatrac}"
+split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
+for part in /tmp/parts-${RUNKEY}-*
+do
+    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
+    md5=$(mymd5sum < "$part")
+    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
+    break
+done
+dotest "204::*::*" "${upload}" -X DELETE
+
 # check upload job for brand new object
 dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
 dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj2;upload"  \
