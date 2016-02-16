@@ -225,6 +225,17 @@ dotest "204::*::*" "${obj1_vers1}" -X DELETE
 dotest "404::*::*" "${obj1_vers1}"
 dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
 
+# test deletion for objects with no current version
+dotest "201::*::*" /ns-${RUNKEY}/foo/obj3 -X PUT -T $0 -H "Content-Type: application/x-bash"
+obj3_vers1="$(cat ${RESPONSE_CONTENT})"
+obj3_vers1="${obj3_vers1#/hatrac}"
+dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo/obj3
+dotest "204::*::*" "${obj3_vers1}" -X DELETE
+dotest "404::*::*" "${obj3_vers1}"
+dotest "409::*::*" /ns-${RUNKEY}/foo/obj3
+dotest "204::*::*" /ns-${RUNKEY}/foo/obj3 -X DELETE
+dotest "404::*::*" /ns-${RUNKEY}/foo/obj3
+
 total_bytes=${script_size}
 chunk_bytes=1024
 upload_file_name="$0"
