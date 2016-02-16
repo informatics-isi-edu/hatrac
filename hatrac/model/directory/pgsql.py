@@ -587,8 +587,12 @@ class HatracDirectory (DatabaseConnection):
             raise hatrac.core.Forbidden('Root service namespace %s cannot be deleted.' % resource)
 
         # test ACLs and map out recursive delete
+        deleted_uploads = []
         deleted_versions = []
         deleted_names = []
+
+        for row in self._namespace_enumerate_uploads(db, resource):
+            deleted_uploads.append( row )
 
         for row in self._namespace_enumerate_versions(db, resource):
             obj = HatracObject(self, **row)
@@ -602,6 +606,8 @@ class HatracDirectory (DatabaseConnection):
         # we only get here if no ACL raised an exception above
         deleted_names.append(resource)
 
+        for row in deleted_uploads:
+            self._delete_upload(db, row)
         for row in deleted_versions:
             self._delete_version(db, row)
         for row in deleted_names:
@@ -609,6 +615,8 @@ class HatracDirectory (DatabaseConnection):
 
         def cleanup():
             # tell storage system to clean up after deletes were committed to DB
+            for row in deleted_uploads:
+                self.storage.cancel_upload(row.name, row.job)
             for row in deleted_versions:
                 self.storage.delete(row.name, row.version)
             for row in deleted_names:
