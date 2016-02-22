@@ -155,7 +155,6 @@ The GET operation is used to list direct children of a namespace:
 for which a successful response is:
 
     200 OK
-    Location: /parent_path/namespace_id
     Content-Type: application/json
     Content-Length: N
     ETag: etag_value
@@ -175,7 +174,6 @@ The HEAD operation is used to get basic status information:
 for which a successful response is:
 
     200 OK
-    Location: /parent_path/namespace_id
     Content-Type: application/json
     Content-Length: N
     
@@ -373,7 +371,6 @@ object.
 for which a successful response is:
 
     200 OK
-    Location: https://authority_name/namespace_path/object_name:version_id
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
@@ -409,7 +406,6 @@ version of an object:
 for which a successful response is:
 
     200 OK
-    Location: https://authority_name/namespace_path/object_name:version_id
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
@@ -495,7 +491,6 @@ operation whether or not it is the current version of the object:
 for which the successful response is:
 
     200 OK
-    Location: /namespace_path/object_name:version_id
     Content-Type: content_type
     Content-MD5: hash_value
     Content-Length: N
@@ -519,7 +514,6 @@ object:
 for which the successful response is:
 
     200 OK
-    Location: /namespace_path/object_name:version_id
     Content-Type: content_type
     Content-MD5: hash_value
     Content-Length: N
@@ -621,7 +615,6 @@ The GET operation is used to retrieve ACL settings en masse:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl
     Content-Type: application/json
     Content-Length: N
 	ETag: etag_value
@@ -641,7 +634,6 @@ The HEAD operation can likewise retrieve en masse ACL metadata:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl
     Content-Type: application/json
     Content-Length: N
 
@@ -657,7 +649,6 @@ The GET operation is also used to retrieve a specific ACL:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl/access
     Content-Type: application/json
     Content-Length: N
 	ETag: etag_value
@@ -676,7 +667,6 @@ The HEAD operation can likewise retrieve individual ACL metadata:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl/access
     Content-Type: application/json
     Content-Length: N
 
@@ -692,7 +682,6 @@ The GET operation is also used to retrieve a specific ACL entry:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl/access/entry
     Content-Type: text/plain
     Content-Length: N
 	ETag: etag_value
@@ -711,7 +700,6 @@ ACL entry:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl/access/entry
     Content-Type: text/plain
     Content-Length: N
 
@@ -984,7 +972,6 @@ The GET operation is used to view the status of a pending upload:
 for which the successful response is:
 
     200 OK
-    Location: /namespace_path/object_name;upload/job_id
     Content-Type: application/json
     Content-Length: N
     
