@@ -168,7 +168,7 @@ class Name (RestHandler):
                 version = resource.get_current_version()
                 self.set_http_etag(version.version)
                 self.http_check_preconditions('DELETE')
-            except Conflict:
+            except hatrac.core.Conflict:
                 # check preconditions with no version existing
                 self.http_check_preconditions('DELETE', False)
         else:

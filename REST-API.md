@@ -155,7 +155,6 @@ The GET operation is used to list direct children of a namespace:
 for which a successful response is:
 
     200 OK
-    Location: /parent_path/namespace_id
     Content-Type: application/json
     Content-Length: N
     ETag: etag_value
@@ -175,7 +174,6 @@ The HEAD operation is used to get basic status information:
 for which a successful response is:
 
     200 OK
-    Location: /parent_path/namespace_id
     Content-Type: application/json
     Content-Length: N
     
@@ -373,7 +371,6 @@ object.
 for which a successful response is:
 
     200 OK
-    Location: https://authority_name/namespace_path/object_name:version_id
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
@@ -409,7 +406,6 @@ version of an object:
 for which a successful response is:
 
     200 OK
-    Location: https://authority_name/namespace_path/object_name:version_id
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
@@ -495,7 +491,6 @@ operation whether or not it is the current version of the object:
 for which the successful response is:
 
     200 OK
-    Location: /namespace_path/object_name:version_id
     Content-Type: content_type
     Content-MD5: hash_value
     Content-Length: N
@@ -519,7 +514,6 @@ object:
 for which the successful response is:
 
     200 OK
-    Location: /namespace_path/object_name:version_id
     Content-Type: content_type
     Content-MD5: hash_value
     Content-Length: N
@@ -621,7 +615,6 @@ The GET operation is used to retrieve ACL settings en masse:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl
     Content-Type: application/json
     Content-Length: N
 	ETag: etag_value
@@ -641,7 +634,6 @@ The HEAD operation can likewise retrieve en masse ACL metadata:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl
     Content-Type: application/json
     Content-Length: N
 
@@ -657,7 +649,6 @@ The GET operation is also used to retrieve a specific ACL:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl/access
     Content-Type: application/json
     Content-Length: N
 	ETag: etag_value
@@ -676,7 +667,6 @@ The HEAD operation can likewise retrieve individual ACL metadata:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl/access
     Content-Type: application/json
     Content-Length: N
 
@@ -692,7 +682,6 @@ The GET operation is also used to retrieve a specific ACL entry:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl/access/entry
     Content-Type: text/plain
     Content-Length: N
 	ETag: etag_value
@@ -711,7 +700,6 @@ ACL entry:
 for which the successful response is:
 
     200 OK
-    Location: https://authority_name/resource_name;acl/access/entry
     Content-Type: text/plain
     Content-Length: N
 
@@ -821,17 +809,18 @@ form:
   - (the set of upload jobs for a given object)
 - https:// _authority_ / _namespace path_ / _object name_ ;upload / _job id_
   - (a single upload job)
-- https:// _authority_ / _namespace path_ / _object name_ ;upload / _job id_ / _position_
+- https:// _authority_ / _namespace path_ / _object name_ ;upload / _job id_ / _chunk number_
   - (a single chunk of data)
 
 where _job id_ is a service-issued identifier for one transfer job,
-and _position_ is a zero-based ordinal for the chunk within the
-overall transfer.
+and _chunk number_ is a zero-based ordinal for the chunk within the
+series of chunks where chunk number _n_ starts at byte-offset _n_ \*
+_K_ for a job using _K_ byte chunk size.
 
 To allow different implementations, the upload job processes a set of
-chunks of equal size determined at the time the job is created. The
-final chunk may be less than the chunk size to account for arbitrary
-length jobs.
+chunks of equal size determined at the time the job is
+created. Arbitrary byte offsets are *not* allowed. The final chunk may
+be less than the chunk size to account for arbitrary length jobs.
 
 The three-phase chunked upload job has an effect equivalent to a
 single PUT request on an object:
@@ -853,14 +842,14 @@ implementation strategies:
   filesystem.  The chunks are non-overlapping byte ranges at fixed
   offsets. Idempotent retransmission of chunks is permitted, but a
   client SHOULD NOT send different content for multiple requests using
-  the same _position_. An implementation MAY mix content of multiple
-  transmissions for the same _position_.  An implementation MAY accept
+  the same _chunk number_. An implementation MAY mix content of multiple
+  transmissions for the same _chunk number_.  An implementation MAY accept
   completion of an upload job that has missing chunks.
 - The individual requests easily map to similar chunked upload
   interfaced in object systems such as Amazon S3, allowing a thin
   proxy to implement Hatrac on top of such services. Retransmission or
   out-of-order transmission of chunks is permitted, but a client
-  SHOULD NOT skip ordinal _positions_. An implementation MAY reject
+  SHOULD NOT skip any chunks. An implementation MAY reject
   completion of an upload job that has missing chunks.
 
 Hence, it is the client's responsibility to track acknowledged of
@@ -896,6 +885,13 @@ for which the successful response is:
 
 where the new job is ready to receive data chunks.
 
+Typical PUT error responses would be:
+  - **401 Unauthorized**: the client is not authenticated and
+      anonymous creation of a job is not supported.
+  - **403 Forbidden**: the client is authenticated but does not have
+      sufficient privilege to create the job.
+  - **409 Conflict**: the object name is unavailable for such use.
+
 ### Chunked Upload Job Listing Retrieval
 
 The GET operation is used to list pending upload jobs on an object:
@@ -917,7 +913,7 @@ representing the list of upload jobs for the given object.
 
 The PUT operation is used to send data chunks for an existing job:
 
-    PUT /namespace_path/object_name;upload/job_id/position
+    PUT /namespace_path/object_name;upload/job_id/chunknumber
     Host: authority_name
     Content-Type: application/octet-stream
     Content-Length: K
@@ -930,9 +926,17 @@ for which the successful response is:
     
 where the data was received and stored.
 
+Typical PUT error responses would be:
+  - **401 Unauthorized**: the client is not authenticated and
+      anonymous upload of the chunk is not supported.
+  - **403 Forbidden**: the client is authenticated but does not have
+      sufficient privilege to upload the chunk.
+  - **400 Bad Request**: the chunk number is not a non-negative integer.
+  - **409 Conflict**: the chunk number is too large for the defined job.
+
 ### Chunked Upload Job Finalization
 
-The PUT operation is used to signal completion of an upload job:
+The POST operation is used to signal completion of an upload job:
 
     POST /namespace_path/object_name;upload/job_id
     Host: authority_name
@@ -968,7 +972,6 @@ The GET operation is used to view the status of a pending upload:
 for which the successful response is:
 
     200 OK
-    Location: /namespace_path/object_name;upload/job_id
     Content-Type: application/json
     Content-Length: N
     

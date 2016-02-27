@@ -563,8 +563,11 @@ class HatracDirectory (DatabaseConnection):
             raise hatrac.core.BadRequest('Illegal name "%s".' % relname)
 
         try:
-            resource = HatracName.construct(self, **self._name_lookup(db, name))
-            raise hatrac.core.Conflict('Name %s already in use.' % resource)
+            resource = HatracName.construct(self, **self._name_lookup(db, name, False))
+            if resource.is_deleted:
+                raise hatrac.core.Conflict('Name %s not available.' % resource)
+            else:
+                raise hatrac.core.Conflict('Name %s already in use.' % resource)
         except hatrac.core.NotFound, ev:
             pass
             
@@ -584,8 +587,12 @@ class HatracDirectory (DatabaseConnection):
             raise hatrac.core.Forbidden('Root service namespace %s cannot be deleted.' % resource)
 
         # test ACLs and map out recursive delete
+        deleted_uploads = []
         deleted_versions = []
         deleted_names = []
+
+        for row in self._namespace_enumerate_uploads(db, resource):
+            deleted_uploads.append( row )
 
         for row in self._namespace_enumerate_versions(db, resource):
             obj = HatracObject(self, **row)
@@ -599,6 +606,8 @@ class HatracDirectory (DatabaseConnection):
         # we only get here if no ACL raised an exception above
         deleted_names.append(resource)
 
+        for row in deleted_uploads:
+            self._delete_upload(db, row)
         for row in deleted_versions:
             self._delete_version(db, row)
         for row in deleted_names:
@@ -606,6 +615,8 @@ class HatracDirectory (DatabaseConnection):
 
         def cleanup():
             # tell storage system to clean up after deletes were committed to DB
+            for row in deleted_uploads:
+                self.storage.cancel_upload(row.name, row.job)
             for row in deleted_versions:
                 self.storage.delete(row.name, row.version)
             for row in deleted_names:
@@ -649,10 +660,13 @@ class HatracDirectory (DatabaseConnection):
         upload.enforce_acl(['owner'], client_context)
         nchunks = upload.nbytes / upload.chunksize
         remainder = upload.nbytes % upload.chunksize
+        assert position >= 0
         if position < (nchunks - 1) and nbytes != upload.chunksize:
             raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match job chunk size %s.' % (nbytes, upload.chunksize))
         if remainder and position == nchunks and nbytes != remainder:
             raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match final chunk size %s.' % (nbytes, remainder))
+        if position > nchunks or position == nchunks and remainder == 0:
+            raise hatrac.core.Conflict('Uploaded chunk number %s out of range.' % position)
         aux = self.storage.upload_chunk_from_file(
             upload.object.name, 
             upload.job, 
