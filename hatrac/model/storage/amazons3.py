@@ -229,7 +229,7 @@ class HatracStorage (PooledS3BucketConnection):
         return None
 
     @s3_bucket_wrap()
-    def finalize_upload(self, name, upload_id, chunk_data, s3_conn=None, s3_bucket=None):
+    def finalize_upload(self, name, upload_id, chunk_data, s3_conn=None, s3_bucket=None, content_md5=None):
         upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
         upload.key_name = name
         upload.id = upload_id

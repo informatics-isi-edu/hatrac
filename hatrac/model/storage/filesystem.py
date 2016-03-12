@@ -18,7 +18,7 @@ import random
 import struct
 from StringIO import StringIO
 
-from hatrac.core import BadRequest, coalesce
+from hatrac.core import BadRequest, Conflict, coalesce
 
 def make_file(dirname, relname, accessmode):
     """Create and open file with accessmode, including missing parents.
@@ -101,10 +101,34 @@ class HatracStorage (object):
         self.delete(name, upload_id)
         return None
 
-    def finalize_upload(self, name, upload_id, chunk_data):
+    def finalize_upload(self, name, upload_id, chunk_data, content_md5=None):
         # nothing changes in storage for this backend strategy
         version_id = upload_id
         assert chunk_data is None
+
+        # aggressively validate uploaded content against pre-defined MD5 if it was given at job start
+        if content_md5 is not None:
+            dirname, relname = self._dirname_relname(name, version_id)
+            fullname = "%s/%s" % (dirname, relname)
+            f = open(fullname, "rb")
+
+            hasher = hashlib.md5()
+
+            eof = False
+            while not eof:
+                buf = f.read(self._bufsize)
+                if len(buf) != 0:
+                    hasher.update(buf)
+                else:
+                    eof = True
+
+            stored_md5 = hasher.digest()
+            if content_md5 != stored_md5:
+                raise Conflict(
+                    'Current uploaded content MD5 %s does not match expected %s.'
+                    % (binascii.hexlify(stored_md5), binascii.hexlify(content_md5))
+                )
+        
         return version_id
 
     def upload_chunk_from_file(self, name, version, position, chunksize, input, nbytes, content_md5=None, f=None):

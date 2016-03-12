@@ -689,7 +689,7 @@ class HatracDirectory (DatabaseConnection):
             chunk_aux = list(self._chunk_list(db, upload))
         else:
             chunk_aux = None
-        version_id = self.storage.finalize_upload(upload.name, upload.job, chunk_aux)
+        version_id = self.storage.finalize_upload(upload.name, upload.job, chunk_aux, content_md5=upload.content_md5)
         version = HatracObjectVersion(self, upload.object, **self._create_version(db, upload.object, upload.nbytes, upload.content_type, upload.content_md5))
         self._set_resource_acl_role(db, version, 'owner', client_context.client)
         self._complete_version(db, version, version_id)

@@ -252,7 +252,7 @@ then
     total_bytes=$(stat -c "%s" ${upload_file_name})
 fi
 
-    cat > ${TEST_DATA} <<EOF
+cat > ${TEST_DATA} <<EOF
 {"chunk_bytes": ${chunk_bytes},
 "total_bytes": ${total_bytes},
 "content_type": "application/x-bash",
@@ -342,6 +342,31 @@ upload="${upload#/hatrac}"
 dotest "200::application/json::*" "${upload}"
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj4 -X DELETE
 dotest "404::*::*" "${upload}"
+
+# check upload job with mismatched MD5
+cat > ${TEST_DATA} <<EOF
+{"chunk_bytes": ${chunk_bytes},
+"total_bytes": ${total_bytes},
+"content_type": "application/x-bash",
+"content_md5": "$(echo "" | mymd5sum)"}
+EOF
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj2bad;upload"  \
+    -T "${TEST_DATA}" \
+    -X POST \
+    -H "Content-Type: application/json"
+upload="$(cat ${RESPONSE_CONTENT})"
+upload="${upload#/hatrac}"
+dotest "200::application/json::*" "${upload}"
+
+split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
+for part in /tmp/parts-${RUNKEY}-*
+do
+    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
+    md5=$(mymd5sum < "$part")
+    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
+done
+
+dotest "409::*::*" "${upload}" -X POST
 
 # check object conditional updates
 dotest "412::*::*" /ns-${RUNKEY}/foo2/obj1 \

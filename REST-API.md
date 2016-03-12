@@ -960,6 +960,15 @@ created by a corresponding PUT request:
     
     ...content...
 
+Typical POST error responses would be:
+  - **401 Unauthorized** the client is not authenticated
+  - **403 Forbidden** the client is authenticated but does not have
+    sufficient privilege to finalize the upload.
+  - **409 Conflict** the currently uploaded content does not match the
+    `Content-MD5` header of the original upload job. An implementation
+    MAY skip this validation but it is RECOMMENDED to perform this
+    validation rather than create broken objects.
+
 ### Chunked Upload Job Status Retrieval
 
 The GET operation is used to view the status of a pending upload:
