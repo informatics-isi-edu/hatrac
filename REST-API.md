@@ -215,8 +215,6 @@ for which a successful response is:
 
     /parent_path/namespace_id
 
-This request MAY also return `204 No Content` if an idempotent request is resubmitted after the namespace already exists.
-
 **Note**: see related object resource interface for pragmatic
 discussion of the use of Content-Type to disambiguate namespace and
 object creation requests.
@@ -226,10 +224,10 @@ Typical PUT error responses would be:
   anonymous creation of such a namespace is not supported.
 - **403 Forbidden**: the client is authenticated but does not have
   sufficient privilege to create or update the namespace.
-- **409 Conflict**: the namespace cannot be created or updated due to a
+- **409 Conflict**: the namespace cannot be created due to a
   conflict with existing state of the service:
   - The _parent path_ does not denote a namespace
-  - The namespace already exists and the request had the wrong `Content-Type`
+  - The namespace already exists
 
 ### Namespace Listing Retrieval
 

@@ -120,12 +120,8 @@ class Name (RestHandler):
                 hash_list(map(str, resource.directory.namespace_enumerate_names(resource, False)))
             )
             self.http_check_preconditions('PUT')
-            if in_content_type == self._namespace_content_type:
-                # treat this like idempotent create or update?
-                resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
-                return self.update_response(resource)
-            else:
-                raise Conflict('Namespace %s does not support update with content-type %s.' % (resource, in_content_type))
+            resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
+            raise Conflict('Namespace %s already exists.' % resource)
         else:
             try:
                 # check preconditions for current state of version existing
