@@ -12,6 +12,7 @@ import re
 import logging
 from logging.handlers import SysLogHandler
 import web
+import json
 import random
 import base64
 import datetime
@@ -78,11 +79,14 @@ def log_parts():
     """Generate a dictionary of interpolation keys used by our logging template."""
     now = datetime.datetime.now(pytz.timezone('UTC'))
     elapsed = (now - web.ctx.hatrac_start_time)
+    client_identity = web.ctx.webauthn2_context.client if web.ctx.webauthn2_context else ''
+    if type(client_identity) is dict:
+        client_identity = json.dumps(client_identity, separators=(',',':'))
     parts = dict(
         elapsed_s = elapsed.seconds, 
         elapsed_ms = elapsed.microseconds/1000,
         client_ip = web.ctx.ip,
-        client_identity = web.ctx.webauthn2_context and urllib.quote(web.ctx.webauthn2_context.client or '') or '',
+        client_identity = urllib.quote(client_identity),
         reqid = web.ctx.hatrac_request_guid
         )
     return parts

@@ -181,9 +181,15 @@ class HatracName (object):
         acl = set()
         for access in accesses:
             acl.update( self.acls.get(access, ACL()))
+        client = client_context.client or None
+        client = client['id'] if type(client) is dict else client
+        attributes = set([
+            attr['id'] if type(attr) is dict else attr
+            for attr in client_context.attributes
+        ])
         if '*' in acl \
-           or client_context.client and client_context.client in acl \
-           or acl.intersection(client_context.attributes):
+           or client in acl \
+           or acl.intersection(attributes):
             return True
         elif client_context.client or client_context.attributes:
             raise hatrac.core.Forbidden('Access to %s forbidden.' % self)
@@ -800,6 +806,7 @@ class HatracDirectory (DatabaseConnection):
     def _set_resource_acl_role(self, db, resource, access, role):
         if access not in resource._acl_names:
             raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
+        role = role['id'] if type(role) is dict else role
         # need to use raw SQL to compute modified array in database
         db.query("""
 UPDATE hatrac.%(table)s n
@@ -818,6 +825,7 @@ WHERE n.id = %(id)s
     def _drop_resource_acl_role(self, db, resource, access, role):
         if access not in resource._acl_names:
             raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
+        role = role['id'] if type(role) is dict else role
         # need to use raw SQL to compute modified array in database
         db.query("""
 UPDATE hatrac.%(table)s n
