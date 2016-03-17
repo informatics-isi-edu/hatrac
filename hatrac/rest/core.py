@@ -464,7 +464,8 @@ class RestHandler (object):
         if content_type:
             web.header('Content-Type', content_type)
         if content_md5:
-            web.header('Content-MD5', base64.b64encode(content_md5.strip()))
+            assert len(content_md5) == 16
+            web.header('Content-MD5', base64.b64encode(content_md5))
         if self.http_etag:
             web.header('ETag', self.http_etag)
         if self.http_vary:
