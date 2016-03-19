@@ -790,10 +790,10 @@ class HatracDirectory (DatabaseConnection):
         ]
 
     @db_wrap(reload_pos=1)
-    def namespace_enumerate_names(self, resource, recursive=True, db=None):
+    def namespace_enumerate_names(self, resource, recursive=True, need_acls=True, db=None):
         return [
             HatracName.construct(self, **row)
-            for row in self._namespace_enumerate_names(db, resource, recursive)
+            for row in self._namespace_enumerate_names(db, resource, recursive, need_acls)
         ]
 
     @db_wrap(reload_pos=1)
@@ -1056,7 +1056,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             ])
         )
         
-    def _namespace_enumerate_names(self, db, resource, recursive=True):
+    def _namespace_enumerate_names(self, db, resource, recursive=True, need_acls=True):
         # return every namespace or object under /name/...
         pattern = "^" + regexp_escape(resource.name)
         if pattern[-1] != '/':
@@ -1064,9 +1064,12 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             pattern += '/'
         if not recursive:
             pattern += '[^/]+$'
+        what=['n.*']
+        if need_acls:
+            what.extend(ancestor_acl_sql(['owner', 'update', 'read', 'create']))
         return db.select(
             ['hatrac.name n'],
-            what=','.join(['n.*'] + list(ancestor_acl_sql(['owner', 'update', 'read', 'create']))),
+            what=','.join(what),
             where=' AND '.join([
                 "n.name ~ %s" % sql_literal(pattern),
                 "NOT n.is_deleted"
