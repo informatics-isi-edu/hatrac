@@ -436,7 +436,7 @@ CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-update" IS NO
 
 INSERT INTO hatrac.name 
 (name, ancestors, subtype, is_deleted)
-VALUES ('/', array[]::int8, 0, False);
+VALUES ('/', array[]::int8[], 0, False);
 """
 
 _version_table_sql = """
