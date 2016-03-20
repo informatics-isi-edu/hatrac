@@ -417,7 +417,7 @@ class HatracUpload (HatracName):
 _name_table_sql = """
 CREATE TABLE hatrac.name (
   id bigserial PRIMARY KEY,
-  pid int8 REFERENCES (id),
+  pid int8 REFERENCES "name" (id),
   ancestors int8[],
   name text NOT NULL UNIQUE,
   subtype int NOT NULL,
