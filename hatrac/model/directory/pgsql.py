@@ -429,10 +429,11 @@ CREATE TABLE hatrac.name (
   "subtree-update" text[],
   "subtree-read" text[]
 );
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-owner" IS NOT NULL;
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-create" IS NOT NULL;
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-read" IS NOT NULL;
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-update" IS NOT NULL;
+
+CREATE INDEX ON hatrac."name" (id) WHERE "subtree-owner" IS NOT NULL;
+CREATE INDEX ON hatrac."name" (id) WHERE "subtree-create" IS NOT NULL;
+CREATE INDEX ON hatrac."name" (id) WHERE "subtree-read" IS NOT NULL;
+CREATE INDEX ON hatrac."name" (id) WHERE "subtree-update" IS NOT NULL;
 
 INSERT INTO hatrac.name 
 (name, ancestors, subtype, is_deleted)
@@ -564,10 +565,10 @@ WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'ancesto
             db.query("""
 ALTER TABLE hatrac."name" ADD COLUMN ancestors int8[];
 UPDATE hatrac."name" SET ancestors = ARRAY[]::int8[];
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-owner" IS NOT NULL;
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-create" IS NOT NULL;
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-read" IS NOT NULL;
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE "subtree-update" IS NOT NULL;
+CREATE INDEX ON hatrac."name" (id) WHERE "subtree-owner" IS NOT NULL;
+CREATE INDEX ON hatrac."name" (id) WHERE "subtree-create" IS NOT NULL;
+CREATE INDEX ON hatrac."name" (id) WHERE "subtree-read" IS NOT NULL;
+CREATE INDEX ON hatrac."name" (id) WHERE "subtree-update" IS NOT NULL;
 """)
             maxdepth = db.query("""
 SELECT max( array_length(regexp_split_to_array(substring(n.name from 2), '/'), 1) ) maxdepth
