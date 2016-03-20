@@ -131,6 +131,7 @@ class HatracName (object):
         self.directory = directory
         self.id = args['id']
         self.ancestors = args['ancestors']
+        self.pid = args['pid']
         self.name = args['name']
         self.is_deleted = args.get('is_deleted')
         self.acls = ACLs()
@@ -416,6 +417,7 @@ class HatracUpload (HatracName):
 _name_table_sql = """
 CREATE TABLE hatrac.name (
   id bigserial PRIMARY KEY,
+  pid int8 REFERENCES (id),
   ancestors int8[],
   name text NOT NULL UNIQUE,
   subtype int NOT NULL,
@@ -430,6 +432,7 @@ CREATE TABLE hatrac.name (
   "subtree-read" text[]
 );
 
+CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE NOT is_deleted;
 CREATE INDEX ON hatrac."name" (id) WHERE "subtree-owner" IS NOT NULL;
 CREATE INDEX ON hatrac."name" (id) WHERE "subtree-create" IS NOT NULL;
 CREATE INDEX ON hatrac."name" (id) WHERE "subtree-read" IS NOT NULL;
@@ -590,6 +593,25 @@ WHERE n.id = n2.id
   AND n.id > 1
 """)
             web.debug('added ancestors column to name table')
+
+        if not db.query("""
+SELECT bool_or(True) AS has_pid FROM information_schema.columns
+WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'pid';
+"""
+        )[0].has_pid:
+            db.query("""
+ALTER TABLE hatrac."name" ADD COLUMN "pid" int8 REFERENCES "name" (id);
+UPDATE hatrac."name" c SET pid = p.id
+FROM (
+  SELECT n2.id, regexp_split_to_array(substring(n2.name from 2), '/') as name_parts
+  FROM name n2
+) c2,
+name p
+WHERE c.id = c2.id
+  AND p.name = ('/' || array_to_string(c2.name_parts[1:array_length(c2.name_parts, 1)-1], '/'))
+;
+""")
+            web.debug('added pid column to name table')
             
     @db_wrap()
     def deploy_db(self, admin_roles, db=None):
@@ -633,7 +655,7 @@ WHERE n.id = n2.id
             raise hatrac.core.Conflict('Parent %s is not a namespace.' % (self.prefix + parname))
 
         parent.enforce_acl(['owner', 'create', 'ancestor_owner', 'ancestor_create'], client_context)
-        resource = HatracName.construct(self, **self._create_name(db, name, parent.ancestors + [parent.id], is_object))
+        resource = HatracName.construct(self, **self._create_name(db, name, parent.id, parent.ancestors + [parent.id], is_object))
         self._set_resource_acl_role(db, resource, 'owner', client_context.client)
         return resource
 
@@ -909,14 +931,15 @@ WHERE r.id = %(id)s
         )
         resource.acls[access] = ACL(acl)
 
-    def _create_name(self, db, name, ancestors, is_object=False):
+    def _create_name(self, db, name, pid, ancestors, is_object=False):
         return db.query("""
 INSERT INTO hatrac.name
-(name, ancestors, subtype, is_deleted)
-VALUES (%(name)s, ARRAY[%(ancestors)s]::int8[], %(isobject)s, False)
+(name, pid, ancestors, subtype, is_deleted)
+VALUES (%(name)s, %(pid)s, ARRAY[%(ancestors)s]::int8[], %(isobject)s, False)
 RETURNING *
 """ % dict(
     name=sql_literal(name),
+    pid=sql_literal(pid),
     ancestors=','.join([ sql_literal(a) for a in ancestors ]),
     isobject=is_object and 1 or 0
 )
@@ -927,10 +950,11 @@ RETURNING *
 INSERT INTO hatrac.version
 (nameid, nbytes, content_type, content_md5, is_deleted)
 VALUES (%(nameid)s, %(nbytes)s, %(type)s, %(md5)s, True)
-RETURNING *, %(name)s AS "name", ARRAY[%(ancestors)s]::int8[] AS "ancestors"
+RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS "ancestors"
 """ % dict(
     name=sql_literal(object.name),
     nameid=sql_literal(object.id),
+    pid=sql_literal(object.pid),
     ancestors=','.join([sql_literal(a) for a in object.ancestors]),
     nbytes=nbytes is not None and sql_literal(int(nbytes)) or 'NULL::int8',
     type=content_type and sql_literal(content_type) or 'NULL::text',
@@ -943,11 +967,12 @@ RETURNING *, %(name)s AS "name", ARRAY[%(ancestors)s]::int8[] AS "ancestors"
 INSERT INTO hatrac.upload 
 (nameid, job, nbytes, chunksize, content_type, content_md5)
 VALUES (%(nameid)s, %(job)s, %(nbytes)s, %(chunksize)s, %(content_type)s, %(content_md5)s)
-RETURNING *, %(name)s AS "name", ARRAY[%(ancestors)s]::int8[] AS "ancestors"
+RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS "ancestors"
 """ % dict(
     name=sql_literal(object.name),
     ancestors=','.join([sql_literal(a) for a in object.ancestors]),
     nameid=sql_literal(object.id),
+    pid=sql_literal(object.pid),
     job=sql_literal(job),
     nbytes=sql_literal(int(nbytes)),
     chunksize=sql_literal(int(chunksize)),
@@ -1028,7 +1053,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
     def _version_lookup(self, db, object, version, allow_deleted=True):
         result = db.select(
             ["hatrac.name n", "hatrac.version v"],
-            what=','.join(["v.*" , "n.name", "n.ancestors"] + list(ancestor_acl_sql(['owner', 'read']))),
+            what=','.join(["v.*" , "n.name", "n.pid", "n.ancestors"] + list(ancestor_acl_sql(['owner', 'read']))),
             where=' AND '.join([
                 "v.nameid = n.id",
                 "v.nameid = %s" % sql_literal(int(object.id)),
@@ -1045,7 +1070,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
     def _upload_lookup(self, db, object, job):
         result = db.select(
             ["hatrac.upload u", "hatrac.name n"],
-            what=','.join(["u.*", "n.name", "n.ancestors"] + list(ancestor_acl_sql(['owner']))),
+            what=','.join(["u.*", "n.name", "n.pid", "n.ancestors"] + list(ancestor_acl_sql(['owner']))),
             where=' AND '.join([
                 "u.nameid = %s" % sql_literal(int(object.id)),
                 "u.nameid = n.id",
@@ -1066,7 +1091,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
         # TODO: add range keying for scrolling enumeration?
         return db.select(
             ["hatrac.name n", "hatrac.version v"],
-            what="v.*, n.name, n.ancestors",
+            what="v.*, n.name, n.pid, n.ancestors",
             where=' AND '.join([
                 "v.nameid = %d" % nameid,
                 "v.nameid = n.id",
@@ -1099,7 +1124,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             ['hatrac.name n', 'hatrac.version v'],
             what=','.join([
                 # name stuff needed to fluff up a partial object record
-                'n.name', 'n.ancestors', 'n.subtype', 'n.update',
+                'n.name', 'n.pid', 'n.ancestors', 'n.subtype', 'n.update',
                 # ACLs needed for version authz
                 'n."subtree-owner"', 'n."subtree-read"',
                 'v.*' # and finally... version fields
@@ -1110,27 +1135,28 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
                 "NOT v.is_deleted"
             ])
         )
-        
+
     def _namespace_enumerate_names(self, db, resource, recursive=True, need_acls=True):
-        # return every namespace or object under /name/...
-        pattern = "^" + regexp_escape(resource.name)
-        if pattern[-1] != '/':
-            # TODO: fix special cases for rootns?
-            pattern += '/'
-        if not recursive:
-            pattern += '[^/]+$'
-        what=['n.*']
+        if recursive:
+            pattern = [
+                'p.id = ANY ( n.ancestors )',
+            ]
+        else:
+            pattern = [
+                'p.id = n.pid'
+            ]
+        what = ['n.*']
         if need_acls:
             what.extend(ancestor_acl_sql(['owner', 'update', 'read', 'create']))
         return db.select(
-            ['hatrac.name n'],
+            ['hatrac.name p', 'hatrac.name n'],
             what=','.join(what),
-            where=' AND '.join([
-                "n.name ~ %s" % sql_literal(pattern),
-                "NOT n.is_deleted"
+            where=' AND '.join(pattern + [
+                'p.id = %s' % sql_literal(resource.id),
+                'NOT n.is_deleted'
             ])
         )
-        
+    
     def _namespace_enumerate_uploads(self, db, resource, recursive=True):
         # return every upload under /name... or /name/
         if resource.is_object():
