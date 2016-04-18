@@ -37,7 +37,10 @@ class ObjectTransferChunk (RestHandler):
         except:
             raise LengthRequired()
         if 'HTTP_CONTENT_MD5' in web.ctx.env:
-            content_md5 = base64.b64decode(web.ctx.env.get('HTTP_CONTENT_MD5').strip())
+            try:
+                content_md5 = base64.b64decode(web.ctx.env.get('HTTP_CONTENT_MD5').strip())
+            except TypeError, e:
+                raise BadRequest('Content-MD5 invalid header "%s": %s' % (web.ctx.env.get('HTTP_CONTENT_MD5').strip(), e))
         else:
             content_md5 = None
         upload = self.resolve_upload(path, name, job)
