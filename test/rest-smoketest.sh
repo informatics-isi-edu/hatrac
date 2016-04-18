@@ -190,6 +190,18 @@ dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -H "Content-MD5: $md5"
 obj1_vers1="$(cat ${RESPONSE_CONTENT})"
 obj1_vers1="${obj1_vers1#/hatrac}"
+dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
+       -X PUT -T $0 \
+       -H "Content-Type: application/x-bash" \
+       -H "Content-MD5: 1B2M2Y8AsgTpgAmY7PhCfg=="  # valid hash of /dev/null will mismatch input data
+dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
+       -X PUT -T $0 \
+       -H "Content-Type: application/x-bash" \
+       -H "Content-MD5: YmFkX21kNQo="  # valid base64 but invalid MD5
+dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
+       -X PUT -T $0 \
+       -H "Content-Type: application/x-bash" \
+       -H "Content-MD5: bad_md5"  # invalid base64
 dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1
 obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
 dotest "304::*::*" /ns-${RUNKEY}/foo2/obj1 -H "If-None-Match: ${obj1_etag}"

@@ -9,7 +9,7 @@
 """
 
 import base64
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, LengthRequired, hash_list
+from core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, hash_list
 import hatrac.core
 import web
 
@@ -139,7 +139,10 @@ class Name (RestHandler):
             except:
                 raise LengthRequired()
             if 'HTTP_CONTENT_MD5' in web.ctx.env:
-                content_md5 = base64.b64decode(web.ctx.env.get('HTTP_CONTENT_MD5').strip())
+                try:
+                    content_md5 = base64.b64decode(web.ctx.env.get('HTTP_CONTENT_MD5').strip())
+                except TypeError, e:
+                    raise BadRequest('Content-MD5 invalid header "%s": %s' % (web.ctx.env.get('HTTP_CONTENT_MD5').strip(), e))
             else:
                 content_md5 = None
             resource = resource.create_version_from_file(
