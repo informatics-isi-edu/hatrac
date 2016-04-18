@@ -249,136 +249,109 @@ dotest "409::*::*" /ns-${RUNKEY}/foo/obj3
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj3 -X DELETE
 dotest "404::*::*" /ns-${RUNKEY}/foo/obj3
 
-total_bytes=${script_size}
-chunk_bytes=1024
-upload_file_name="$0"
-
 # test chunk upload (S3 requires at least 5MB chunks)
-if [[ $DEPLOYMENT == "amazons3" ]]
-then
-    upload_file_name="/tmp/dummy-${RUNKEY}"
-    chunk_bytes=5242881
-    # generate 5MB + file
-    dd if=/dev/urandom bs=${chunk_bytes} count=1 2>/dev/null | base64 > ${upload_file_name}
-    md5=$(mymd5sum < ${upload_file_name})
-    total_bytes=$(stat -c "%s" ${upload_file_name})
-fi
+upload_file_name="/tmp/dummy-${RUNKEY}"
+chunk_bytes=5242889
+# generate 5MB + file
+dd if=/dev/urandom bs=${chunk_bytes} count=1 2>/dev/null | base64 > ${upload_file_name}
+upload_md5=$(mymd5sum < ${upload_file_name})
+upload_total_bytes=$(stat -c "%s" ${upload_file_name})
+split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
 
-cat > ${TEST_DATA} <<EOF
+# namespaces don't have upload resources
+dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
+
+douploadtest()
+{
+    # args: url md5 jobpat chunk0pat chunk1pat finalpat
+    _url="$1"
+    _md5="$2"
+    shift 2
+    cat > ${TEST_DATA} <<EOF
 {"chunk_bytes": ${chunk_bytes},
-"total_bytes": ${total_bytes},
+"total_bytes": ${upload_total_bytes},
 "content_type": "application/x-bash",
-"content_md5": "$md5"}
+"content_md5": "${_md5}"}
 EOF
 
+    dotest "$1" "${_url};upload"  \
+	   -T "${TEST_DATA}" \
+	   -X POST \
+	   -H "Content-Type: application/json"
+
+    upload="$(cat ${RESPONSE_CONTENT})"
+    upload="${upload#/hatrac}"
+
+    case "$1" in
+	201::*)
+	    shift
+
+	    dotest "200::application/json::*" "${upload}"
+	    dotest "200::application/json::*" "${upload}" --head
+	    dotest "200::*::*" "${_url};upload"
+	    dotest "200::*::*" "${_url};upload" --head
+	    dotest "405::*::*" "${upload}/0"
+	    dotest "405::*::*" "${upload}/0" --head
+
+	    for part in /tmp/parts-${RUNKEY}-*
+	    do
+		if [[ $# -gt 0 ]]
+		then
+		    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
+		    dotest "$1" "${upload}/$pos" -T "$part" -H "Content-MD5: $(mymd5sum < "$part")"
+		    shift
+		else
+		    return 0
+		fi
+	    done
+
+	    if [[ $# -gt 0 ]]
+	    then
+		dotest "$1" "${upload}" -X POST
+		shift
+	    fi
+	    ;;
+    esac
+}
+
 # cannot upload to a deleted object
-dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
+douploadtest "/ns-${RUNKEY}/foo/obj1" "${upload_md5}" "409::*::*" 
 
-# check upload job for new version of existing test object
-dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload"  \
-    -T "${TEST_DATA}" \
-    -X POST \
-    -H "Content-Type: application/json"
-upload="$(cat ${RESPONSE_CONTENT})"
-upload="${upload#/hatrac}"
-dotest "200::application/json::*" "${upload}"
-dotest "200::application/json::*" "${upload}" --head
-dotest "200::*::*" "/ns-${RUNKEY}/foo2/obj1;upload"
-dotest "200::*::*" "/ns-${RUNKEY}/foo2/obj1;upload" --head
-dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
-dotest "405::*::*" "${upload}/0"
-dotest "405::*::*" "${upload}/0" --head
+# check upload job for new version of existing test object... omit finalpat so we can intersperse tests
+douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*"
 
-split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
-for part in /tmp/parts-${RUNKEY}-*
-do
-    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-    md5=$(mymd5sum < "$part")
-    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
-done
-
-dotest "409::*::*" "${upload}/$(( ${total_bytes} / ${chunk_bytes} + 2 ))" -T "$part"
+# do some bad chunk upload tests before we finalize
+dotest "409::*::*" "${upload}/$(( ${upload_total_bytes} / ${chunk_bytes} + 2 ))" -T "$part"
 dotest "400::*::*" "${upload}/-1" -T "$part"
 
+# finalize manually and check corner cases
 dotest "201::*::*" "${upload}" -X POST
 dotest "404::*::*" "${upload}" -X POST
-dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj1
+
+# check finalized object
+dotest "200::application/x-bash::${upload_total_bytes}" /ns-${RUNKEY}/foo2/obj1
 obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
 
+
 # check upload job deletion
-dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
-upload="$(cat ${RESPONSE_CONTENT})"
-upload="${upload#/hatrac}"
+douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*"
 dotest "204::*::*" "${upload}" -X DELETE
 
-dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload" -T "${TEST_DATA}" -X POST -H "Content-Type: application/json"
-upload="$(cat ${RESPONSE_CONTENT})"
-upload="${upload#/hatrac}"
-split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
-for part in /tmp/parts-${RUNKEY}-*
-do
-    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-    md5=$(mymd5sum < "$part")
-    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
-    break
-done
+douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "201::text/uri-list::*"
 dotest "204::*::*" "${upload}" -X DELETE
 
 # check upload job for brand new object
-dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj2;upload"  \
-    -T "${TEST_DATA}" \
-    -X POST \
-    -H "Content-Type: application/json"
-upload="$(cat ${RESPONSE_CONTENT})"
-upload="${upload#/hatrac}"
-dotest "200::application/json::*" "${upload}"
-
-split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
-for part in /tmp/parts-${RUNKEY}-*
-do
-    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-    md5=$(mymd5sum < "$part")
-    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
-done
-
-dotest "201::*::*" "${upload}" -X POST
-dotest "200::application/x-bash::*" /ns-${RUNKEY}/foo2/obj2
+douploadtest "/ns-${RUNKEY}/foo2/obj2" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*" "201::*::*"
+dotest "200::application/x-bash::${upload_total_bytes}" /ns-${RUNKEY}/foo2/obj2
 
 # check upload job for brand new object canceled implicitly by object deletion
-dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/obj4;upload"  \
-    -T "${TEST_DATA}" \
-    -X POST \
-    -H "Content-Type: application/json"
-upload="$(cat ${RESPONSE_CONTENT})"
-upload="${upload#/hatrac}"
+douploadtest "/ns-${RUNKEY}/foo/obj4" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*"
 dotest "200::application/json::*" "${upload}"
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj4 -X DELETE
 dotest "404::*::*" "${upload}"
 
 # check upload job with mismatched MD5
-cat > ${TEST_DATA} <<EOF
-{"chunk_bytes": ${chunk_bytes},
-"total_bytes": ${total_bytes},
-"content_type": "application/x-bash",
-"content_md5": "$(echo "" | mymd5sum)"}
-EOF
-dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj2bad;upload"  \
-    -T "${TEST_DATA}" \
-    -X POST \
-    -H "Content-Type: application/json"
-upload="$(cat ${RESPONSE_CONTENT})"
-upload="${upload#/hatrac}"
-dotest "200::application/json::*" "${upload}"
-
-split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
-for part in /tmp/parts-${RUNKEY}-*
-do
-    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
-    md5=$(mymd5sum < "$part")
-    dotest "204::*::*" "${upload}/$pos" -T "$part" -H "Content-MD5: $md5"
-done
-
-dotest "409::*::*" "${upload}" -X POST
+douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "$(echo "" | mymd5sum)" "201::text/uri-list::*" "204::*::*" "204::*::*" "409::*::*"
 
 # check object conditional updates
 dotest "412::*::*" /ns-${RUNKEY}/foo2/obj1 \
