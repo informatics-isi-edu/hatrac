@@ -71,9 +71,9 @@ logger.addHandler(sysloghandler)
 logger.setLevel(logging.INFO)
 
 # some log message templates
-log_template = "%(elapsed_s)d.%(elapsed_ms)3.3ds %(client_ip)s user=%(client_identity)s req=%(reqid)s"
+log_template = "%(elapsed_s)d.%(elapsed_frac)4.4ds %(client_ip)s user=%(client_identity)s req=%(reqid)s"
 log_trace_template = log_template + " -- %(tracedata)s"
-log_final_template = log_template + " (%(status)s) %(method)s %(proto)s://%(host)s/%(uri)s %(range)s %(type)s"
+log_final_template = log_template + " (%(status)s) %(method)s %(proto)s://%(host)s%(uri)s %(range)s %(type)s"
 
 def log_parts():
     """Generate a dictionary of interpolation keys used by our logging template."""
@@ -84,7 +84,7 @@ def log_parts():
         client_identity = json.dumps(client_identity, separators=(',',':'))
     parts = dict(
         elapsed_s = elapsed.seconds, 
-        elapsed_ms = elapsed.microseconds/1000,
+        elapsed_frac = elapsed.microseconds/100,
         client_ip = web.ctx.ip,
         client_identity = urllib.quote(client_identity),
         reqid = web.ctx.hatrac_request_guid
@@ -248,6 +248,9 @@ class RestHandler (object):
         self.http_etag = None
         self.http_vary = _webauthn2_manager.get_http_vary()
 
+    def trace(self, msg):
+        web.ctx.hatrac_request_trace(msg)
+        
     def _fullname(self, path, name):
         nameparts = [ n for n in ((path or '') + (name or '')).split('/') if n ]
         fullname = '/' + '/'.join(nameparts)
