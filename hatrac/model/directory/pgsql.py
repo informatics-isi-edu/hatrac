@@ -423,6 +423,12 @@ class connection (psycopg2.extensions.connection):
     """
     def __init__(self, dsn):
         psycopg2.extensions.connection.__init__(self, dsn)
+        try:
+            self._prepare_hatrac_stmts()
+        except psycopg2.ProgrammingError:
+            self.rollback()
+
+    def _prepare_hatrac_stmts(self):
         cur = self.cursor()
         cur.execute("""
 
@@ -756,12 +762,13 @@ class HatracDirectory (object):
 
     @db_wrap()
     def schema_upgrade(self, conn=None, cur=None):
-        if not db.query("""
+        cur.execute("""
 SELECT bool_or(True) AS has_ancestors FROM information_schema.columns
 WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'ancestors' ;
 """
-        )[0].has_ancestors:
-            db.query("""
+        )
+        if not cur.next()['has_ancestors']:
+            cur.execute("""
 ALTER TABLE hatrac."name" ADD COLUMN ancestors int8[];
 UPDATE hatrac."name" SET ancestors = ARRAY[]::int8[];
 CREATE INDEX ON hatrac."name" (id) WHERE "subtree-owner" IS NOT NULL;
@@ -769,14 +776,15 @@ CREATE INDEX ON hatrac."name" (id) WHERE "subtree-create" IS NOT NULL;
 CREATE INDEX ON hatrac."name" (id) WHERE "subtree-read" IS NOT NULL;
 CREATE INDEX ON hatrac."name" (id) WHERE "subtree-update" IS NOT NULL;
 """)
-            maxdepth = db.query("""
+            cur.execute("""
 SELECT max( array_length(regexp_split_to_array(substring(n.name from 2), '/'), 1) ) maxdepth
 FROM name n
 WHERE id > 1;
 """)[0].maxdepth
-
+            maxdepth = cur.next()['maxdepth']
+            
             for i in range(maxdepth):
-                db.query("""
+                cur.execute("""
 UPDATE name n SET ancestors = a.ancestors || a.id
 FROM (
   SELECT n2.id, regexp_split_to_array(substring(n2.name from 2), '/') as name_parts
@@ -790,12 +798,13 @@ WHERE n.id = n2.id
 """)
             web.debug('added ancestors column to name table')
 
-        if not db.query("""
+        cur.execute("""
 SELECT bool_or(True) AS has_pid FROM information_schema.columns
 WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'pid';
 """
-        )[0].has_pid:
-            db.query("""
+        )
+        if not cur.next()['has_pid']:
+            cur.execute("""
 ALTER TABLE hatrac."name" ADD COLUMN "pid" int8 REFERENCES "name" (id);
 UPDATE hatrac."name" c SET pid = p.id
 FROM (
@@ -812,20 +821,23 @@ WHERE c.id = c2.id
     @db_wrap()
     def deploy_db(self, admin_roles, conn=None, cur=None):
         """Initialize database and set root namespace owners."""
-        db.query('CREATE SCHEMA IF NOT EXISTS hatrac')
+        cur.execute('CREATE SCHEMA IF NOT EXISTS hatrac')
         for sql in [
                 _name_table_sql,
                 _version_table_sql,
                 _upload_table_sql,
                 _chunk_table_sql
         ]:
-            db.query(sql)
+            cur.execute(sql)
+
+        # prepare statements again since they would have failed prior to above deploy SQL steps...
+        self.pc.conn._prepare_hatrac_stmts()
 
         rootns = HatracNamespace(self, **(self._name_lookup(conn, cur, '/')))
 
         for role in admin_roles:
             self._set_resource_acl_role(conn, cur, rootns, 'owner', role)
-
+            
     @db_wrap()
     def create_name(self, name, is_object, client_context, conn=None, cur=None):
         """Create, persist, and return a HatracNamespace or HatracObject instance.
