@@ -211,8 +211,8 @@ def web_method():
 
             try:
                 # run actual method
-                for buf in original_method(*args):
-                    yield buf
+                return original_method(*args)
+
             except hatrac.core.BadRequest, ev:
                 raise BadRequest(str(ev))
             except hatrac.core.Unauthenticated, ev:
@@ -474,9 +474,7 @@ class RestHandler (object):
         if self.http_vary:
             web.header('Vary', ', '.join(self.http_vary))
 
-        if self.get_body:
-            for buf in data_generator:
-                yield buf
+        return data_generator
 
     def create_response(self, resource):
         """Form response for resource creation request."""
