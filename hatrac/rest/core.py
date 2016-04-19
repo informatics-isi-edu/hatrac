@@ -79,7 +79,7 @@ def log_parts():
     """Generate a dictionary of interpolation keys used by our logging template."""
     now = datetime.datetime.now(pytz.timezone('UTC'))
     elapsed = (now - web.ctx.hatrac_start_time)
-    client_identity = web.ctx.webauthn2_context.client if web.ctx.webauthn2_context else ''
+    client_identity = web.ctx.webauthn2_context.client if web.ctx.webauthn2_context and web.ctx.webauthn2_context.client else ''
     if type(client_identity) is dict:
         client_identity = json.dumps(client_identity, separators=(',',':'))
     parts = dict(
