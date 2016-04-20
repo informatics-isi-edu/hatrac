@@ -596,7 +596,7 @@ class PooledConnection (object):
         self.used_pool = pools[dsn]
         self.conn = self.used_pool.getconn()
         self.conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ)
-        self.cur = self.conn.cursor()
+        self.cur = self.conn.cursor(cursor_factory=DictCursor)
 
     def perform(self, bodyfunc, finalfunc=lambda x: x, verbose=False):
         """Run bodyfunc(conn, cur) using pooling, commit, transform with finalfunc, clean up.
@@ -833,7 +833,7 @@ WHERE c.id = c2.id
         # prepare statements again since they would have failed prior to above deploy SQL steps...
         self.pc.conn._prepare_hatrac_stmts()
 
-        rootns = HatracNamespace(self, **dict((self._name_lookup(conn, cur, '/'))))
+        rootns = HatracNamespace(self, **(self._name_lookup(conn, cur, '/')))
 
         for role in admin_roles:
             self._set_resource_acl_role(conn, cur, rootns, 'owner', role)
