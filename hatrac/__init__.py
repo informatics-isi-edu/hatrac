@@ -8,6 +8,7 @@ import sys
 import core
 import model
 import rest
+import psycopg2
 
 def instantiate(config):
     """Return a directory service instance for config."""
