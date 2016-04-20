@@ -18,7 +18,10 @@ def instantiate(config):
     return directory
 
 # instantiate a default singleton
-directory = instantiate(core.config)
+try:
+    directory = instantiate(core.config)
+except psycopg2.OperationalError:
+    directory = None
 
 # TODO: conditionalize this if we ever have alternate directory impls
 def deploy_cli(argv, config=None):
