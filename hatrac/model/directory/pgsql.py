@@ -833,7 +833,7 @@ WHERE c.id = c2.id
         # prepare statements again since they would have failed prior to above deploy SQL steps...
         self.pc.conn._prepare_hatrac_stmts()
 
-        rootns = HatracNamespace(self, **(self._name_lookup(conn, cur, '/')))
+        rootns = HatracNamespace(self, **dict((self._name_lookup(conn, cur, '/'))))
 
         for role in admin_roles:
             self._set_resource_acl_role(conn, cur, rootns, 'owner', role)
