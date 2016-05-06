@@ -22,31 +22,32 @@ This documentation is broken down into the following general topics:
 
 ### Quick Links to Operations
 
-The REST API supports the following operations:
+The REST API supports the following operations.
 
-- [Get namespace listing](#namespace-listing-retrieval)
-- [Create nested namespace](#nested-namespace-creation)
-- [Delete nested namespace](#nested-namespace-deletion)
-
-- [Create or update object](#object-creation-and-update)
-- [Get object content](#object-retrieval)
-- [Get object version list](#object-version-list-retrieval)
-- [Delete object](#object-deletion)
-
-- [Create object version](#object-creation-and-update)
-- [Get object version content](#object-version-retrieval)
-- [Delete object version](#object-version-deletion)
-
-- [Get access controls](#access-control-retrieval)
-- [Update access control list](#access-control-list-update)
-- [Clear access control list](#access-control-list-deletion)
-
-- [Get upload job listing](#chunked-upload-job-listing-retrieval)
-- [Create upload job](#chunked-upload-job-creation)
-- [Get upload job status](#chunked-upload-job-status-retrieval)
-- [Upload data chunk](#chunk-upload)
-- [Finalize upload job](#chunked-upload-job-finalization)
-- [Cancel upload job](#chunked-upload-job-cancellation)
+1. Namespace operations
+  - [Get namespace listing](#namespace-listing-retrieval)
+  - [Create nested namespace](#nested-namespace-creation)
+  - [Delete nested namespace](#nested-namespace-deletion)
+2. Object operations
+  - [Create or update object](#object-creation-and-update)
+  - [Get object content](#object-retrieval)
+  - [Delete object](#object-deletion)
+3. Object version operations
+  - [Get object version list](#object-version-list-retrieval)
+  - [Create object version](#object-creation-and-update)
+  - [Get object version content](#object-version-retrieval)
+  - [Delete object version](#object-version-deletion)
+4. Access control list operations
+  - [Get access controls](#access-control-retrieval)
+  - [Update access control list](#access-control-list-update)
+  - [Clear access control list](#access-control-list-deletion)
+5. Chunked upload operations
+  - [Get upload job listing](#chunked-upload-job-listing-retrieval)
+  - [Create upload job](#chunked-upload-job-creation)
+  - [Get upload job status](#chunked-upload-job-status-retrieval)
+  - [Upload data chunk](#chunk-upload)
+  - [Finalize upload job](#chunked-upload-job-finalization)
+  - [Cancel upload job](#chunked-upload-job-cancellation)
 
 ## URL Conventions
 
