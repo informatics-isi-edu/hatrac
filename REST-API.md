@@ -5,6 +5,49 @@
 data-oriented collaboration. It presents a simple HTTP REST API with
 the following characteristics:
 
+## Contents
+
+### Main Topics
+
+This documentation is broken down into the following general topics:
+
+1. [URL Conventions](#url-conventions)
+2. [Resource Types Overview](#resource-naming-and-lifecycle-rules)
+3. [Root Namespace](#root-namespace-resource)
+4. [Nested Namespaces](#nested-namespace-resources)
+5. [Objects](#object-resources)
+6. [Object Versions](#object-version-resources)
+7. [Access Control Lists](#access-control-list-sub-resources)
+8. [Chunked Uploads](#chunked-upload-resources)
+
+### Quick Links to Operations
+
+The REST API supports the following operations:
+
+- [Get namespace listing](#namespace-listing-retrieval)
+- [Create nested namespace](#nested-namespace-creation)
+- [Delete nested namespace](#nested-namespace-deletion)
+
+- [Create or update object](#object-creation-and-update)
+- [Get object content](#object-retrieval)
+- [Get object version list](#object-version-list-retrieval)
+- [Delete object](#object-deletion)
+
+- [Create object version](#object-creation-and-update)
+- [Get object version content](#object-version-retrieval)
+- [Delete object version](#object-version-deletion)
+
+- [Get access controls](#access-control-retrieval)
+- [Update access control list](#access-control-list-update)
+- [Clear access control list](#access-control-list-deletion)
+
+- [Get upload job listing](#chunked-upload-job-listing-retrieval)
+- [Create upload job](#chunked-upload-job-creation)
+- [Get upload job status](#chunked-upload-job-status-retrieval)
+- [Upload data chunk](#chunk-upload)
+- [Finalize upload job](#chunked-upload-job-finalization)
+- [Cancel upload job](#chunked-upload-job-cancellation)
+
 ## URL Conventions
 
 Any Hatrac URL is a valid HTTP URL and contains user-generated content
@@ -229,7 +272,7 @@ Typical PUT error responses would be:
   - The _parent path_ does not denote a namespace
   - The namespace already exists
 
-### Namespace Listing Retrieval
+### Nested Namespace Listing Retrieval
 
 The same GET and HEAD operations documented above for the Root
 Namespace Resource can also list direct children of any nested
