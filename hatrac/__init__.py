@@ -8,6 +8,7 @@ import sys
 import core
 import model
 import rest
+import psycopg2
 
 def instantiate(config):
     """Return a directory service instance for config."""
@@ -18,7 +19,10 @@ def instantiate(config):
     return directory
 
 # instantiate a default singleton
-directory = instantiate(core.config)
+try:
+    directory = instantiate(core.config)
+except psycopg2.OperationalError:
+    directory = None
 
 # TODO: conditionalize this if we ever have alternate directory impls
 def deploy_cli(argv, config=None):

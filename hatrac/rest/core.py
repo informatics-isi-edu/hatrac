@@ -71,9 +71,9 @@ logger.addHandler(sysloghandler)
 logger.setLevel(logging.INFO)
 
 # some log message templates
-log_template = "%(elapsed_s)d.%(elapsed_ms)3.3ds %(client_ip)s user=%(client_identity)s req=%(reqid)s"
+log_template = "%(elapsed_s)d.%(elapsed_frac)4.4ds %(client_ip)s user=%(client_identity)s req=%(reqid)s"
 log_trace_template = log_template + " -- %(tracedata)s"
-log_final_template = log_template + " (%(status)s) %(method)s %(proto)s://%(host)s/%(uri)s %(range)s %(type)s"
+log_final_template = log_template + " (%(status)s) %(method)s %(proto)s://%(host)s%(uri)s %(range)s %(type)s"
 
 def log_parts():
     """Generate a dictionary of interpolation keys used by our logging template."""
@@ -84,7 +84,7 @@ def log_parts():
         client_identity = json.dumps(client_identity, separators=(',',':'))
     parts = dict(
         elapsed_s = elapsed.seconds, 
-        elapsed_ms = elapsed.microseconds/1000,
+        elapsed_frac = elapsed.microseconds/100,
         client_ip = web.ctx.ip,
         client_identity = urllib.quote(client_identity),
         reqid = web.ctx.hatrac_request_guid
@@ -211,8 +211,8 @@ def web_method():
 
             try:
                 # run actual method
-                for buf in original_method(*args):
-                    yield buf
+                return original_method(*args)
+
             except hatrac.core.BadRequest, ev:
                 raise BadRequest(str(ev))
             except hatrac.core.Unauthenticated, ev:
@@ -248,6 +248,9 @@ class RestHandler (object):
         self.http_etag = None
         self.http_vary = _webauthn2_manager.get_http_vary()
 
+    def trace(self, msg):
+        web.ctx.hatrac_request_trace(msg)
+        
     def _fullname(self, path, name):
         nameparts = [ n for n in ((path or '') + (name or '')).split('/') if n ]
         fullname = '/' + '/'.join(nameparts)
@@ -471,9 +474,7 @@ class RestHandler (object):
         if self.http_vary:
             web.header('Vary', ', '.join(self.http_vary))
 
-        if self.get_body:
-            for buf in data_generator:
-                yield buf
+        return data_generator
 
     def create_response(self, resource):
         """Form response for resource creation request."""
