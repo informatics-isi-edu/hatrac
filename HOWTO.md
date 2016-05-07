@@ -78,8 +78,6 @@ equivalent `~/cookie` file needed for the rest of the examples below.
 The root namespace is listed with an HTTP GET on the namespace URL:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       https://server.example.org/hatrac/
 
 The response represents the currently empty root namespace:
@@ -92,8 +90,6 @@ The HTTP PUT operation with a special `Content-Type` header allows us
 to create a new namespace with our own chosen name:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       -H "Content-Type: application/x-hatrac-namespace" \
       -X PUT
       https://server.example.org/hatrac/folder1
@@ -120,10 +116,8 @@ Now, let's upload it using the built-in support for file upload via
 HTTP PUT using curl's `-T` transfer mode:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       -H "Content-Type: text/plain" \
-      -T hellow.txt \
+      -T hello.txt \
       https://server.example.org/hatrac/folder1/object1
 
 The response repeats the object name we have chosen but qualifies it
@@ -136,8 +130,6 @@ with a server-generated _version ID_:
 A simple HTTP GET will retrieve an existing object's *current version*:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       https://server.example.org/hatrac/folder1/object1
 
 The response contains the object content itself:
@@ -151,8 +143,6 @@ We can also ask `curl` to dump the protocol headers with the response
 on standard output using the `-D` flag:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       -D - \
       https://server.example.org/hatrac/folder1/object1
 
@@ -187,10 +177,8 @@ create a new version and update the *current version* to point to this
 new one:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       -H "Content-Type: text/plain" \
-      -T hellow.txt \
+      -T hello.txt \
       https://server.example.org/hatrac/folder1/object1
 
 The response repeats the object name we have chosen but qualifies it
@@ -219,8 +207,6 @@ Simply by using the full version-qualified URL for the object, you can
 retrieve the older version of the object:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       -D - \
       https://server.example.org/hatrac/folder1/object1:SP274AQOOO3TOXIS2BVSDA5HCE
 
@@ -245,8 +231,6 @@ object will automatically revert to the _latest_ remaining version as
 its new current version:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       -X DELETE \
       https://server.example.org/hatrac/folder1/object1:3VJO6XIPAGVBAGPUIOMG546SWU
 
@@ -258,8 +242,6 @@ unqualified object name, you'll get the previous version again.
 You can delete the entire object and all of its versions at once:
 
     curl -b ~/cookie -c ~/cookie \
-      -d username=test-user-1 \
-      -d password="my secret" \
       -X DELETE \
       https://server.example.org/hatrac/folder1/object1
 
