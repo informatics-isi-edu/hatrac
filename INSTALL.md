@@ -49,12 +49,12 @@ please see [working with SE-Linux](#working-with-selinux) below.
 1. Create `hatrac` daemon account.
   - E.g. `useradd --create-home --system hatrac` (as root)
 1. Create `hatrac` PostgreSQL role.
-  - E.g. `createuser hatrac` (as PostgreSQL superuser)
+  - E.g. `createuser -d hatrac` (as PostgreSQL superuser)
 1. Configure `~hatrac/hatrac_config.json`
   - See [example Hatrac configuration](#example-hatrac-configuration) below.
 1. Create and initialize `hatrac` database.
   - E.g. `createdb hatrac` (as `hatrac` user)
-  - E.g. `hatrac-deploy your_username ` (as `hatrac` user)
+  - E.g. `hatrac-deploy your_username_or_group` (as `hatrac` user)
 1. Create file storage directory under Apache
   - E.g. `mkdir /var/www/hatrac && chown hatrac /var/www/hatrac` (as root)
 1. Configure `~hatrac/webauthn2_config.json`
