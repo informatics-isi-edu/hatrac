@@ -83,7 +83,7 @@ class ACLEntry (str):
 
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        return len(self), 'text/plain', None, [self]
+        return len(self), 'text/plain', None, self
 
 class ACL (set):
     def is_object(self):
@@ -93,7 +93,7 @@ class ACL (set):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(list(self)) + '\n'
         nbytes = len(body)
-        return nbytes, 'application/json', None, [body]
+        return nbytes, 'application/json', None, body
 
     def __getitem__(self, role):
         if role not in self:
@@ -112,7 +112,7 @@ class ACLs (dict):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(self.resource.get_acls()) + '\n'
         nbytes = len(body)
-        return nbytes, 'application/json', None, [body]
+        return nbytes, 'application/json', None, body
 
     def __getitem__(self, k):
         try:
@@ -303,7 +303,7 @@ class HatracVersions (object):
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(self.object.directory.object_enumerate_versions(self.object)) + '\n'
-        return len(body), 'application/json', None, [body]
+        return len(body), 'application/json', None, body
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
@@ -364,7 +364,7 @@ class HatracUploads (object):
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner'], client_context)
         body = jsonWriterRaw(self.object.directory.namespace_enumerate_uploads(self.object)) + '\n'
-        return len(body), 'application/json', None, [body]
+        return len(body), 'application/json', None, body
 
 class HatracUpload (HatracName):
     """Represent an upload job."""
@@ -409,7 +409,7 @@ class HatracUpload (HatracName):
             content_type=self.content_type,
             content_md5=self.content_md5 and base64.b64encode(self.content_md5) or None
             )) + '\n'
-        return len(body), 'application/json', None, [body]
+        return len(body), 'application/json', None, body
 
     def finalize(self, client_context):
         return self.directory.upload_finalize(self, client_context)

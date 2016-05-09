@@ -96,6 +96,11 @@ NUM_TESTS=0
 
 BASE_URL=${BASE_URL:-https://$(hostname)/hatrac}
 
+jsoncheck()
+{
+    python -c "import sys; import json; v = json.load(sys.stdin);" 2>&1
+}
+
 dotest()
 {
     pattern="$1"
@@ -121,7 +126,18 @@ dotest()
 	fi
     fi
 
-    if [[ "$summary" != $pattern ]] || [[ -n "${md5_mismatch}" ]]
+    json_error=""
+    if [[ "$summary" == *::application/json::* ]] && [[ "$summary" != *::*::0 ]]
+    then
+	json_error=$(jsoncheck < ${RESPONSE_CONTENT})
+	if [[ $? -ne 0 ]]
+	then
+	    json_error=${json_error#*ValueError}
+	    echo "Error parsing JSON response: ${json_error}" >&2
+	fi
+    fi
+
+    if [[ "$summary" != $pattern ]] || [[ -n "${md5_mismatch}" ]] || [[ -n "${json_error}" ]]
     then
 	printf "FAILED.\n" >&2
 	cat <<EOF
@@ -137,7 +153,7 @@ TEST FAILURE:
 
 Expected result: $pattern
 Actual result: $summary
-${md5_mismatch}
+${md5_mismatch}${json_error}
 Response headers:
 $(cat ${RESPONSE_HEADERS})
 Response body:
