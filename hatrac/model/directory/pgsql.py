@@ -1241,7 +1241,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(name),
             sql_literal(check_deleted)
         ))
-        for row in cur:
+        for row in list(cur):
             return row
         raise hatrac.core.NotFound('Resource %s not found.' % (self.prefix + name))
         
@@ -1250,7 +1250,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(int(object.id)),
             sql_literal(version)
         ))
-        for row in cur:
+        for row in list(cur):
             if row['is_deleted'] and not allow_deleted:
                 raise hatrac.core.NotFound("Resource %s:%s not available." % (object, version))
             else:
@@ -1262,7 +1262,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(int(object.id)),
             sql_literal(job)
         ))
-        for row in cur:
+        for row in list(cur):
             return row
         raise hatrac.core.NotFound("Resource %s;upload/%s not found." % (object, job))
         
