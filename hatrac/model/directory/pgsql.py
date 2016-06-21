@@ -1038,7 +1038,7 @@ WHERE c.id = c2.id
     def get_current_version(self, object, conn=None, cur=None):
         """Return a HatracObjectVersion instance corresponding to latest.
         """
-        assert object.id is not Null, object
+        assert object.id is not None, object
         results = self._version_list(conn, cur, object.id, limit=1)
         if results:
             return HatracObjectVersion(self, object, **results[0])
