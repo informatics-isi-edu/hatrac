@@ -593,43 +593,47 @@ pools = PoolManager()
 
 class PooledConnection (object):
     def __init__(self, dsn):
-        self.used_pool = pools[dsn]
-        self.conn = self.used_pool.getconn()
-        self.conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ)
-        self.cur = self.conn.cursor(cursor_factory=DictCursor)
+        self.dsn = dsn
 
     def perform(self, bodyfunc, finalfunc=lambda x: x, verbose=False):
         """Run bodyfunc(conn, cur) using pooling, commit, transform with finalfunc, clean up.
         
            Automates handling of errors.
         """
-        assert self.conn is not None
-        try:
-            result = bodyfunc(self.conn, self.cur)
-            self.conn.commit()
-            return finalfunc(result)
-        except psycopg2.InterfaceError, e:
-            # reset bad connection
-            self.used_pool.putconn(self.conn, close=True)
-            self.conn = None
-            raise e
-        except GeneratorExit, e:
-            # happens normally at end of result yielding sequence
-            raise
-        except:
-            if self.conn is not None:
-                self.conn.rollback()
-            if verbose:
-                et, ev, tb = sys.exc_info()
-                web.debug(u'got exception "%s" during PooledConnection.perform()' % unicode(ev),
-                          traceback.format_exception(et, ev, tb))
-            raise
+        used_pool = pools[self.dsn]
+        conn = used_pool.getconn()
+        assert conn is not None
+        assert conn.status == psycopg2.extensions.STATUS_READY, ("pooled connection status", conn.status)
+        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ)
+        cur = conn.cursor(cursor_factory=DictCursor)
 
-    def final(self):
-        if self.conn is not None:
-            self.cur.close()
-            self.used_pool.putconn(self.conn)
-            self.conn = None
+        try:
+            try:
+                result = bodyfunc(conn, cur)
+                conn.commit()
+                return finalfunc(result)
+            except psycopg2.InterfaceError, e:
+                # reset bad connection
+                used_pool.putconn(conn, close=True)
+                conn = None
+                raise e
+            except GeneratorExit, e:
+                # happens normally at end of result yielding sequence
+                raise
+            except:
+                if conn is not None:
+                    conn.rollback()
+                if verbose:
+                    et, ev, tb = sys.exc_info()
+                    web.debug(u'got exception "%s" during PooledConnection.perform()' % unicode(ev),
+                              traceback.format_exception(et, ev, tb))
+                raise
+        finally:
+            if conn is not None:
+                assert conn.status == psycopg2.extensions.STATUS_READY, ("pooled connection status", conn.status)
+                cur.close()
+                used_pool.putconn(conn)
+                conn = None
 
 _name_table_sql = """
 CREATE TABLE hatrac.name (
@@ -831,7 +835,7 @@ WHERE c.id = c2.id
             cur.execute(sql)
 
         # prepare statements again since they would have failed prior to above deploy SQL steps...
-        self.pc.conn._prepare_hatrac_stmts()
+        conn._prepare_hatrac_stmts()
 
         rootns = HatracNamespace(self, **(self._name_lookup(conn, cur, '/')))
 
