@@ -35,9 +35,9 @@ install:
   - sudo useradd -m -r hatrac
   - sudo -H -u postgres createuser -d hatrac
   - sudo -H -u hatrac createdb hatrac
+  - sudo cp test/hatrac_config.json ~hatrac/
   - sudo -H -u hatrac hatrac-deploy admin
   - sudo cp test/wsgi_hatrac_travis.conf /etc/apache2/conf.d/
-  - sudo cp test/hatrac_config.json ~hatrac/
   - sudo mkdir /var/www/hatrac
   - sudo chown hatrac.apache /var/www/hatrac
   - sudo service apache2 restart
