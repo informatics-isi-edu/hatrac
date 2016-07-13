@@ -53,7 +53,7 @@ before_script:
 
 script:
   - curl --fail -k -b $COOKIES -c $COOKIES -d username=test1 -d password=dummypassword https://${HOSTNAME}/authn/session
-  - python test/rest-smoketest.py
+  - bash ./test/rest-smoketest.sh
 
 after_failure:
   - sudo cat ${HTTPD_ERROR_LOG}
