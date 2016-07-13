@@ -39,7 +39,7 @@ install:
   - sudo -H -u hatrac hatrac-deploy admin
   - sudo cp test/wsgi_hatrac_travis.conf /etc/apache2/conf.d/
   - sudo mkdir /var/www/hatrac
-  - sudo chown hatrac.apache /var/www/hatrac
+  - sudo chown hatrac /var/www/hatrac
   - sudo service apache2 restart
   - sudo ls -l /etc/apache2/conf.d
   - sudo ls -lR /var/run/apache2
