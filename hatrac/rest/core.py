@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2016 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -25,13 +25,9 @@ import hatrac.core
 import sys
 import traceback
 import hashlib
+from webauthn2.util import context_from_environment
 
-try:
-    _webauthn2_config = webauthn2.merge_config(jsonFileName='webauthn2_config.json')
-except:
-    _webauthn2_config = webauthn2.merge_config()
-
-_webauthn2_manager = webauthn2.Manager(overrides=_webauthn2_config)
+_webauthn2_manager = webauthn2.Manager()
 
 def hash_list(l):
     copy = [ s.replace(';', ';;') for s in l ]
@@ -205,7 +201,9 @@ def web_method():
             
             try:
                 # get client authentication context
-                web.ctx.webauthn2_context = _webauthn2_manager.get_request_context()
+                web.ctx.webauthn2_context = context_from_environment()
+                if web.ctx.webauthn2_context.client is None:
+                    web.ctx.webauthn2_context = _webauthn2_manager.get_request_context()
             except (ValueError, IndexError), ev:
                 raise Unauthorized('service access requires client authentication')
 
