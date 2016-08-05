@@ -198,7 +198,7 @@ class HatracName (object):
            or client in acl \
            or acl.intersection(attributes):
             return True
-        elif client_context.client or client_context.attributes:
+        elif client_context.client is not None:
             raise hatrac.core.Forbidden('Access to %s forbidden.' % self)
         else:
             raise hatrac.core.Unauthenticated('Authentication required for access to %s' % self)
