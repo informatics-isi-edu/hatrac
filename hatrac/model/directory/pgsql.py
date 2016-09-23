@@ -302,7 +302,10 @@ class HatracVersions (object):
 
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        body = jsonWriterRaw(self.object.directory.object_enumerate_versions(self.object)) + '\n'
+        body = jsonWriterRaw([
+            "%s%s" % (self.object.directory.prefix, name)
+            for name in self.object.directory.object_enumerate_versions(self.object)
+        ]) + '\n'
         return len(body), 'application/json', None, body
 
 class HatracObjectVersion (HatracName):
