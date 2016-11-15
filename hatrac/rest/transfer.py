@@ -1,12 +1,10 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2016 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
 import re
-import binascii
-import base64
 import web
 import hatrac.core
 from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest
@@ -36,13 +34,17 @@ class ObjectTransferChunk (RestHandler):
             nbytes = int(web.ctx.env['CONTENT_LENGTH'])
         except:
             raise LengthRequired()
-        if 'HTTP_CONTENT_MD5' in web.ctx.env:
-            try:
-                content_md5 = base64.b64decode(web.ctx.env.get('HTTP_CONTENT_MD5').strip())
-            except TypeError, e:
-                raise BadRequest('Content-MD5 invalid header "%s": %s' % (web.ctx.env.get('HTTP_CONTENT_MD5').strip(), e))
-        else:
-            content_md5 = None
+
+        metadata = {}
+
+        for hdr, var in [
+                ('content-md5', 'HTTP_CONTENT_MD5'),
+                ('content-sha256', 'HTTP_CONTENT_SHA256')
+        ]:
+            val = web.ctx.env.get(var)
+            if val is not None:
+                metadata[hdr] = val
+                
         upload = self.resolve_upload(path, name, job)
         upload.enforce_acl(['owner'], web.ctx.webauthn2_context)
         self.http_check_preconditions('PUT')
@@ -51,7 +53,7 @@ class ObjectTransferChunk (RestHandler):
             web.ctx.env['wsgi.input'],
             web.ctx.webauthn2_context,
             nbytes,
-            content_md5
+            web.ctx.hatrac_directory.metadata_from_http(metadata)
         )
         return self.update_response()
 
@@ -112,29 +114,22 @@ class ObjectTransfers (RestHandler):
         try:
             chunksize = int(job['chunk_bytes'])
             nbytes = int(job['total_bytes'])
-            content_type = job.get('content_type')
-            content_md5 = job.get('content_md5')
         except KeyError, ev:
             raise BadRequest('Missing required field %s.' % ev)
         except ValueError, ev:
             raise BadRequest('Invalid count: %s.' % ev)
 
-        if content_md5 is not None:
-            content_md5 = content_md5.strip()
+        metadata = {}
 
-        if content_md5 is None:
-            pass
-        elif re.match('^[0-9a-zA-z]\+$', content_md5) and len(content_md5) == 32:
-            # tolerate a hex digest
-            content_md5 = binascii.unhexlify(content_md5)
-        elif len(content_md5) == 24:
-            try:
-                content_md5 = base64.b64decode(content_md5)
-            except Exception, ev:
-                raise BadRequest('Invalid content_md5 base64 encoded value: %s.' % ev)
-        else:
-            raise BadRequest('Invalid content_md5 "%s" is neither 32-byte hex or 24-byte base64 string.' % content_md5)
-
+        for hdr, key in [
+                ('content-type', 'content_type'),
+                ('content-md5', 'content_md5'),
+                ('content-sha256', 'content_sha256'),
+                ('content-disposition', 'content_disposition')]:
+            val = job.get(key)
+            if val is not None:
+                metadata[hdr] = val
+            
         # create object implicitly or reuse existing object...
         try:
             resource = web.ctx.hatrac_directory.create_name(
@@ -151,7 +146,7 @@ class ObjectTransfers (RestHandler):
         # say resource_exists=False as we always create a new one...
         self.http_check_preconditions('POST', False)
         upload = resource.create_version_upload_job(
-            chunksize, web.ctx.webauthn2_context, nbytes, content_type, content_md5
+            chunksize, web.ctx.webauthn2_context, nbytes, web.ctx.hatrac_directory.metadata_from_http(metadata)
         )
         return self.create_response(upload)
 

@@ -76,7 +76,8 @@ class ACLEntry (str):
 
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        return len(self), 'text/plain', None, self
+        body = self + '\n'
+        return len(body), Metadata({'content-type': 'text/plain'}), body
 
 class ACL (set):
     def is_object(self):
@@ -85,8 +86,7 @@ class ACL (set):
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(list(self)) + '\n'
-        nbytes = len(body)
-        return nbytes, 'application/json', None, body
+        return len(body), Metadata({'content-type': 'application/json'}), body
 
     def __getitem__(self, role):
         if role not in self:
@@ -105,7 +105,7 @@ class ACLs (dict):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(self.resource.get_acls()) + '\n'
         nbytes = len(body)
-        return nbytes, 'application/json', None, body
+        return nbytes, Metadata({'content-type': 'application/json'}), body
 
     def __getitem__(self, k):
         try:
@@ -232,10 +232,10 @@ class HatracNamespace (HatracName):
         return self.directory.create_name(name, is_object, client_context)
 
     def get_content(self, client_context, get_data=True):
-        """Return (nbytes, content_type, content_md5, data_generator) for namespace."""
+        """Return (nbytes, metadata, data_generator) for namespace."""
         body = [ str(r) for r in self.directory.namespace_enumerate_names(self, False) ]
         body = jsonWriterRaw(body) + '\n'
-        return (len(body), 'application/json', None, body)
+        return (len(body), Metadata({'content-type': 'application/json'}), body)
 
 class HatracObject (HatracName):
     """Represent a bound object."""
@@ -257,17 +257,17 @@ class HatracObject (HatracName):
     def get_versions(self):
         return HatracVersions(self)
 
-    def create_version_from_file(self, input, client_context, nbytes, content_type=None, content_md5=None):
+    def create_version_from_file(self, input, client_context, nbytes, metadata={}):
         """Create, persist, and return HatracObjectVersion with given content.
 
         """
-        return self.directory.create_version_from_file(self, input, client_context, nbytes, content_type, content_md5)
+        return self.directory.create_version_from_file(self, input, client_context, nbytes, metadata)
 
-    def create_version_upload_job(self, chunksize, client_context, nbytes=None, content_type=None, content_md5=None):
-        return self.directory.create_version_upload_job(self, chunksize, client_context, nbytes, content_type, content_md5)
+    def create_version_upload_job(self, chunksize, client_context, nbytes=None, metadata={}):
+        return self.directory.create_version_upload_job(self, chunksize, client_context, nbytes, metadata)
 
     def get_content_range(self, client_context, get_slice=None, get_data=True):
-        """Return (nbytes, content_type, content_md5, data_generator) for current version.
+        """Return (nbytes, metadata, data_generator) for current version.
         """
         resource = self.get_current_version()
         return resource.get_content_range(client_context, get_slice, get_data=get_data)
@@ -301,7 +301,7 @@ class HatracVersions (object):
             "%s%s" % (self.object.directory.prefix, name)
             for name in self.object.directory.object_enumerate_versions(self.object)
         ]) + '\n'
-        return len(body), 'application/json', None, body
+        return len(body), Metadata({'content-type': 'application/json'}), body
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
@@ -358,7 +358,7 @@ class HatracUploads (object):
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner'], client_context)
         body = jsonWriterRaw(self.object.directory.namespace_enumerate_uploads(self.object)) + '\n'
-        return len(body), 'application/json', None, body
+        return len(body), Metadata({'content-type': 'application/json'}), body
 
 class HatracUpload (HatracName):
     """Represent an upload job."""
@@ -387,8 +387,8 @@ class HatracUpload (HatracName):
         object = self.object._reload(conn, cur)
         return type(self)(self.directory, object, **self.directory._upload_lookup(conn, cur, object, self.job))
 
-    def upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5=None):
-        return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5)
+    def upload_chunk_from_file(self, position, input, client_context, nbytes, metadata={}):
+        return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, metadata)
 
     def get_content(self, client_context, get_data=True):
         self.enforce_acl(['owner'], client_context)
@@ -766,6 +766,10 @@ class HatracDirectory (object):
         self.prefix = config.get('service_prefix')
         self.pc = PooledConnection(config.database_dsn)
 
+    @staticmethod
+    def metadata_from_http(metadata):
+        return Metadata.from_http(metadata)
+        
     @db_wrap()
     def schema_upgrade(self, conn=None, cur=None):
         cur.execute("""
@@ -952,33 +956,33 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         return lambda : self.storage.delete(resource.name, resource.version)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
-    def create_version(self, object, client_context, nbytes=None, content_type=None, content_md5=None, conn=None, cur=None):
+    def create_version(self, object, client_context, nbytes=None, metadata={}, conn=None, cur=None):
         """Create, persist, and return a HatracObjectVersion instance.
 
            Newly created instance is marked 'deleted'.
         """
-        v = self._create_version(conn, cur, object, nbytes, content_type, content_md5)
+        v = self._create_version(conn, cur, object, nbytes, metadata)
         resource = HatracObjectVersion(self, object, **v)
         self._set_resource_acl_role(conn, cur, resource, 'owner', client_context.client)
         return resource
 
-    def create_version_from_file(self, object, input, client_context, nbytes, content_type=None, content_md5=None):
+    def create_version_from_file(self, object, input, client_context, nbytes, metadata={}):
         """Create, persist, and return HatracObjectVersion with given content.
 
         """
-        resource = self.create_version(object, client_context, nbytes, content_type, content_md5)
-        version = self.storage.create_from_file(object.name, input, nbytes, content_type, content_md5)
+        resource = self.create_version(object, client_context, nbytes, metadata)
+        version = self.storage.create_from_file(object.name, input, nbytes, metadata)
         self.pc.perform(lambda conn, cur: self._complete_version(conn, cur, resource, version))
         return self.version_resolve(object, version)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
-    def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, content_type=None, content_md5=None, conn=None, cur=None):
-        job = self.storage.create_upload(object.name, nbytes, content_type, content_md5)
-        resource = HatracUpload(self, object, **self._create_upload(conn, cur, object, job, chunksize, nbytes, content_type, content_md5))
+    def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
+        job = self.storage.create_upload(object.name, nbytes, metadata)
+        resource = HatracUpload(self, object, **self._create_upload(conn, cur, object, job, chunksize, nbytes, metadata))
         self._set_resource_acl_role(conn, cur, resource, 'owner', client_context.client)
         return resource
 
-    def upload_chunk_from_file(self, upload, position, input, client_context, nbytes, content_md5=None):
+    def upload_chunk_from_file(self, upload, position, input, client_context, nbytes, metadata={}):
         upload.enforce_acl(['owner'], client_context)
         nchunks = upload.nbytes / upload.chunksize
         remainder = upload.nbytes % upload.chunksize
@@ -1011,8 +1015,8 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             chunk_aux = list(self._chunk_list(conn, cur, upload))
         else:
             chunk_aux = None
-        version_id = self.storage.finalize_upload(upload.name, upload.job, chunk_aux, content_md5=upload.content_md5)
-        version = HatracObjectVersion(self, upload.object, **self._create_version(conn, cur, upload.object, upload.nbytes, upload.content_type, upload.content_md5))
+        version_id = self.storage.finalize_upload(upload.name, upload.job, chunk_aux, metadata=upload.metadata)
+        version = HatracObjectVersion(self, upload.object, **self._create_version(conn, cur, upload.object, upload.nbytes, upload.metadata))
         self._set_resource_acl_role(conn, cur, version, 'owner', client_context.client)
         self._complete_version(conn, cur, version, version_id)
         self._delete_upload(conn, cur, upload)
@@ -1030,13 +1034,12 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         if objversion.is_deleted:
             raise hatrac.core.NotFound('Resource %s is not available.' % objversion)
         if get_data:
-            nbytes, content_type, content_md5, data = self.storage.get_content_range(object.name, objversion.version, objversion.content_md5, get_slice)
+            nbytes, metadata, data = self.storage.get_content_range(object.name, objversion.version, objversion.metadata, get_slice)
         else:
             nbytes = objversion.nbytes
-            content_type = objversion.content_type
-            content_md5 = objversion.content_md5
+            metadata = objversion.metadata
             data = None
-        return nbytes, objversion.content_type, content_md5, data
+        return nbytes, metadata, data
 
     def get_version_content(self, object, objversion, client_context, get_data=True):
         """Return (nbytes, data_generator) pair for specific version."""
