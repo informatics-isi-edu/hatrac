@@ -38,6 +38,7 @@ def deploy_cli(argv, config=None):
     if len(argv) > 1:
         root_roles = argv[1:]
         deploy_dir.deploy_db(root_roles)
+        deploy_dir.schema_upgrade()
         return 0
     else:
         sys.stderr.write("""

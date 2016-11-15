@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2016 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -434,6 +434,8 @@ class connection (psycopg2.extensions.connection):
     def _prepare_hatrac_stmts(self):
         cur = self.cursor()
         cur.execute("""
+        
+        DEALLOCATE PREPARE ALL;
 
         PREPARE hatrac_complete_version (int8, text, boolean) AS 
           UPDATE hatrac.version  SET is_deleted = $3, version = $2  WHERE id = $1 ;
@@ -639,7 +641,7 @@ class PooledConnection (object):
                 conn = None
 
 _name_table_sql = """
-CREATE TABLE hatrac.name (
+CREATE TABLE IF NOT EXISTS hatrac.name (
   id bigserial PRIMARY KEY,
   pid int8 REFERENCES hatrac."name" (id),
   ancestors int8[],
@@ -656,19 +658,20 @@ CREATE TABLE hatrac.name (
   "subtree-read" text[]
 );
 
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE NOT is_deleted;
-CREATE INDEX ON hatrac."name" (id) WHERE "subtree-owner" IS NOT NULL;
-CREATE INDEX ON hatrac."name" (id) WHERE "subtree-create" IS NOT NULL;
-CREATE INDEX ON hatrac."name" (id) WHERE "subtree-read" IS NOT NULL;
-CREATE INDEX ON hatrac."name" (id) WHERE "subtree-update" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS name_ancestors_idx ON hatrac."name" USING gin (ancestors) WHERE NOT is_deleted;
+CREATE INDEX IF NOT EXISTS name_id_idx ON hatrac."name" (id) WHERE "subtree-owner" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS name_id_idx1 ON hatrac."name" (id) WHERE "subtree-create" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS name_id_idx2 ON hatrac."name" (id) WHERE "subtree-read" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS name_id_idx3 ON hatrac."name" (id) WHERE "subtree-update" IS NOT NULL;
 
 INSERT INTO hatrac.name 
 (name, ancestors, subtype, is_deleted)
-VALUES ('/', array[]::int8[], 0, False);
+VALUES ('/', array[]::int8[], 0, False)
+ON CONFLICT (name) DO NOTHING ;
 """
 
 _version_table_sql = """
-CREATE TABLE hatrac.version (
+CREATE TABLE IF NOT EXISTS hatrac.version (
   id bigserial PRIMARY KEY,
   nameid int8 NOT NULL REFERENCES hatrac.name(id),
   version text,
@@ -682,11 +685,11 @@ CREATE TABLE hatrac.version (
   CHECK(version IS NOT NULL OR is_deleted)
 );
 
-CREATE INDEX version_nameid_id_idx ON hatrac.version (nameid, id);
+CREATE INDEX IF NOT EXISTS version_nameid_id_idx ON hatrac.version (nameid, id);
 """
 
 _upload_table_sql = """
-CREATE TABLE hatrac.upload (
+CREATE TABLE IF NOT EXISTS hatrac.upload (
   id bigserial PRIMARY KEY,
   nameid int8 NOT NULL REFERENCES hatrac.name(id),
   job text NOT NULL,
@@ -701,7 +704,7 @@ CREATE TABLE hatrac.upload (
 """
 
 _chunk_table_sql = """
-CREATE TABLE hatrac.chunk (
+CREATE TABLE IF NOT EXISTS hatrac.chunk (
   uploadid int8 NOT NULL REFERENCES hatrac.upload(id),
   position int8 NOT NULL,
   aux json,
@@ -774,7 +777,7 @@ SELECT bool_or(True) AS has_ancestors FROM information_schema.columns
 WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'ancestors' ;
 """
         )
-        if not cur.next()['has_ancestors']:
+        if not cur.next()[0]:
             cur.execute("""
 ALTER TABLE hatrac."name" ADD COLUMN ancestors int8[];
 UPDATE hatrac."name" SET ancestors = ARRAY[]::int8[];
@@ -788,7 +791,7 @@ SELECT max( array_length(regexp_split_to_array(substring(n.name from 2), '/'), 1
 FROM name n
 WHERE id > 1;
 """)[0].maxdepth
-            maxdepth = cur.next()['maxdepth']
+            maxdepth = cur.next()[0]
             
             for i in range(maxdepth):
                 cur.execute("""
@@ -803,14 +806,14 @@ WHERE n.id = n2.id
   AND a.ancestors IS NOT NULL
   AND n.id > 1
 """)
-            web.debug('added ancestors column to name table')
+            sys.stderr.write('added ancestors column to name table\n')
 
         cur.execute("""
 SELECT bool_or(True) AS has_pid FROM information_schema.columns
 WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'pid';
 """
         )
-        if not cur.next()['has_pid']:
+        if not cur.next()[0]:
             cur.execute("""
 ALTER TABLE hatrac."name" ADD COLUMN "pid" int8 REFERENCES "name" (id);
 UPDATE hatrac."name" c SET pid = p.id
