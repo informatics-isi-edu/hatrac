@@ -17,8 +17,9 @@ This documentation is broken down into the following general topics:
 4. [Nested Namespaces](#nested-namespace-resources)
 5. [Objects](#object-resources)
 6. [Object Versions](#object-version-resources)
-7. [Access Control Lists](#access-control-list-sub-resources)
-8. [Chunked Uploads](#chunked-upload-resources)
+7. [Metadata](#metadata-sub-resources)
+8. [Access Control Lists](#access-control-list-sub-resources)
+9. [Chunked Uploads](#chunked-upload-resources)
 
 ### Quick Links to Operations
 
@@ -37,11 +38,16 @@ The REST API supports the following operations.
   - [Create object version](#object-creation-and-update)
   - [Get object version content](#object-version-retrieval)
   - [Delete object version](#object-version-deletion)
-4. Access control list operations
+4. Metadata management operations
+  - [Get metadata collection](#metadata-collection-retrieval)
+  - [Get metadata value](#metadata-value-retrieval)
+  - [Create or update metadata value](#metadata-value-creation-and-update)
+  - [Delete metadata value](#metadata-value-deletion)
+5. Access control list operations
   - [Get access controls](#access-control-retrieval)
   - [Update access control list](#access-control-list-update)
   - [Clear access control list](#access-control-list-deletion)
-5. Chunked upload operations
+6. Chunked upload operations
   - [Get upload job listing](#chunked-upload-job-listing-retrieval)
   - [Create upload job](#chunked-upload-job-creation)
   - [Get upload job status](#chunked-upload-job-status-retrieval)
@@ -625,6 +631,114 @@ version:
   - An object may be left empty, i.e. with no current version, if all
     versions have been deleted.  A subsequent update can reintroduce
     content for the object.
+
+## Metadata Sub-Resources
+
+The service also exposes sub-resources for metadata management on
+existing object versions:
+
+- https:// _authority_ / _resource name_ ;metadata
+- https:// _authority_ / _resource name_ ;metadata/ _fieldname_
+
+Where _resource name_ is currently restricted to object version names
+as described above. The _fieldname_ is a lower-case string which
+matches an HTTP request header suitable for describing content
+metadata. The currently recognized _fieldnames_ include:
+
+- `content-type`
+- `content-disposition`
+- `content-md5`
+- `content-sha256`
+
+### Lifecycle and Ownership
+
+Metadata are sub-resources of the main resource identified in the
+_resource name_ in the URL, and their lifetime is bounded by the
+lifetime of that main resource.
+
+1. Initial metadata MAY be specified during object creation and update.
+2. Immutable checksums MAY be added on existing object versions.
+3. Mutable metadata MAY be added, removed, or modified on existing object versions.
+
+### Metadata Collection Retrieval
+
+The GET operation is used to retrieve all metadata sub-resources en masse
+as a document:
+
+    GET /resource_name;metadata
+	Host: authority_name
+	Accept: application/json
+	If-None-Match: etag_value
+	
+for which the successful response is:
+
+    200 OK
+	Content-Type: application/json
+	Content-Length: N
+	ETag: etag_value
+	
+	{"content-type": content_type, 
+	 "content-md5": hash_value,
+	 "content-sha256": hash_value,
+	 "content-disposition": disposition}
+
+The standard
+[object version metadata retrieval](#object-version-metadata-retrieval),
+operation uses the `HEAD` method on the main resource to retrieve this
+same metadata as HTTP response headers.
+
+### Metadata Value Retrieval
+
+The GET operation is used to retrieve one metadata sub-resource as a
+text value:
+
+    GET /resource_name;metadata/fieldname
+	Host: authority_name
+	Accept: text/plain
+	If-None-Match: etag_value
+	
+for which the successful response is:
+
+    200 OK
+	Content-Type: text/plain
+	Content-Length: N
+	ETag: etag_value
+	
+	value
+
+The textual _value_ is identical to what would be present in the HTTP
+response header value when retrieving the main resource content.
+
+### Metadata Value Creation and Update
+
+The PUT operation is used to create or update one metadata sub-resource as a
+text value:
+
+    PUT /resource_name;metadata/fieldname
+	Host: authority_name
+	Content-Type: text/plain
+	If-Match: etag_value
+
+	value
+
+for which the successful response is:
+
+    204 No Content
+
+The textual _value_ is identical to what would be present in the HTTP
+request header value when creating the main resource content.
+
+### Metadata Value Deletion
+
+The DELETE operation is used to create or update one metadata sub-resource as a
+text value:
+
+    DELETE /resource_name;metadata/fieldname
+	Host: authority_name
+
+for which the successful response is:
+
+    204 No Content
 
 ## Access Control List Sub-Resources
 
