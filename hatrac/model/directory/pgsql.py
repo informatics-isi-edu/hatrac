@@ -52,14 +52,7 @@ from psycopg2.extras import DictCursor
 from StringIO import StringIO
 from webauthn2.util import sql_literal, sql_identifier, jsonWriterRaw
 import hatrac.core
-from hatrac.core import coalesce
-
-def sql_hexlify(b):
-    """Serialize binary string as hex-encoded text literal for SQL, handling None as NULL."""
-    if b is None:
-        return sql_literal(b)
-    else:
-        return sql_literal(binascii.hexlify(b))
+from hatrac.core import coalesce, Metadata
 
 def regexp_escape(s):
     safe = set(
@@ -138,6 +131,8 @@ class HatracName (object):
         self.pid = args['pid']
         self.name = args['name']
         self.is_deleted = args.get('is_deleted')
+        self.metadata = Metadata(args.get('metadata', {}))
+        self.metadata.resource = self
         self.acls = ACLs()
         self.acls.directory = directory
         self.acls.resource = self
@@ -322,10 +317,6 @@ class HatracObjectVersion (HatracName):
         self.object = object
         self.version = args['version']
         self.nbytes = args['nbytes']
-        self.content_type = args['content_type']
-        self.content_md5 = None
-        if args['content_md5']:
-            self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
         return '%s:%s' % (self.object, self.version)
@@ -385,8 +376,6 @@ class HatracUpload (HatracName):
         self.job = args['job']
         self.nbytes = args['nbytes']
         self.chunksize = args['chunksize']
-        self.content_type = args['content_type']
-        self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
         return "%s;upload/%s" % (self.object, self.job)
@@ -403,16 +392,25 @@ class HatracUpload (HatracName):
 
     def get_content(self, client_context, get_data=True):
         self.enforce_acl(['owner'], client_context)
-        body = jsonWriterRaw(dict(
+        metadata = self.metadata.to_http()
+        # TODO: generalize for all hashes?
+        body = dict(
             url=str(self), 
             target=str(self.object), 
             owner=self.get_acl('owner'),
             chunksize=self.chunksize,
-            nbytes=self.nbytes,
-            content_type=self.content_type,
-            content_md5=self.content_md5 and base64.b64encode(self.content_md5) or None
-            )) + '\n'
-        return len(body), 'application/json', None, body
+            nbytes=self.nbytes
+        )
+        for hdr, field in [
+                ('content-type', 'content_type'),
+                ('content-md5', 'content_md5'),
+                ('content-sha256', 'content_sha256'),
+                ('content-disposition', 'content_disposition')
+        ]:
+            if hdr in metadata:
+                body[field] = metadata[hdr]
+        body = jsonWriterRaw(body) + '\n'
+        return len(body), Metadata({'content-type': 'application/json'}), body
 
     def finalize(self, client_context):
         return self.directory.upload_finalize(self, client_context)
@@ -676,8 +674,7 @@ CREATE TABLE IF NOT EXISTS hatrac.version (
   nameid int8 NOT NULL REFERENCES hatrac.name(id),
   version text,
   nbytes int8,
-  content_type text,
-  content_md5 text,
+  metadata jsonb,
   is_deleted bool NOT NULL,
   owner text[],
   read text[],
@@ -695,8 +692,7 @@ CREATE TABLE IF NOT EXISTS hatrac.upload (
   job text NOT NULL,
   nbytes int8 NOT NULL,
   chunksize int8 NOT NULL,
-  content_type text,
-  content_md5 text,
+  metadata jsonb,
   owner text[],
   UNIQUE(nameid, job),
   CHECK(chunksize > 0)
@@ -826,8 +822,36 @@ WHERE c.id = c2.id
   AND p.name = ('/' || array_to_string(c2.name_parts[1:array_length(c2.name_parts, 1)-1], '/'))
 ;
 """)
-            web.debug('added pid column to name table')
-            
+            sys.stderr.write('added pid column to name table\n')
+
+        cur.execute("""
+SELECT table_name
+FROM information_schema.columns
+WHERE table_schema = 'hatrac' 
+  AND table_name = ANY (ARRAY['version', 'upload'])
+  AND column_name = 'content_type'
+EXCEPT
+SELECT table_name
+FROM information_schema.columns
+WHERE table_schema = 'hatrac' 
+  AND table_name = ANY (ARRAY['version', 'upload'])
+  AND column_name = 'metadata';
+""")
+        for tname in [ row[0] for row in cur ]:
+            sys.stderr.write('converting %s to have metadata column... ' % tname)
+            cur.execute("""
+ALTER TABLE hatrac.%(table)s ADD COLUMN metadata jsonb;
+UPDATE hatrac.%(table)s SET metadata = (
+  CASE WHEN content_type IS NOT NULL THEN jsonb_build_object('content-type', content_type) ELSE '{}'::jsonb END
+  || CASE WHEN content_md5 IS NOT NULL THEN jsonb_build_object('content-md5', content_md5) ELSE '{}'::jsonb END
+);
+ALTER TABLE hatrac.%(table)s DROP COLUMN content_type;
+ALTER TABLE hatrac.%(table)s DROP COLUMN content_md5;
+ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
+""" % dict(table=sql_identifier(tname))
+            )
+            sys.stderr.write('done.\n')
+        
     @db_wrap()
     def deploy_db(self, admin_roles, conn=None, cur=None):
         """Initialize database and set root namespace owners."""
@@ -972,7 +996,7 @@ WHERE c.id = c2.id
             upload.chunksize, 
             input, 
             nbytes, 
-            content_md5
+            metadata
         )
 
         def db_thunk(conn, cur):
@@ -1165,11 +1189,11 @@ RETURNING *
         )
         return list(cur)[0]
 
-    def _create_version(self, conn, cur, object, nbytes=None, content_type=None, content_md5=None):
+    def _create_version(self, conn, cur, object, nbytes=None, metadata={}):
         cur.execute("""
 INSERT INTO hatrac.version
-(nameid, nbytes, content_type, content_md5, is_deleted)
-VALUES (%(nameid)s, %(nbytes)s, %(type)s, %(md5)s, True)
+(nameid, nbytes, metadata, is_deleted)
+VALUES (%(nameid)s, %(nbytes)s, %(metadata)s, True)
 RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS "ancestors"
 """ % dict(
     name=sql_literal(object.name),
@@ -1177,17 +1201,16 @@ RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS
     pid=sql_literal(object.pid),
     ancestors=','.join([sql_literal(a) for a in object.ancestors]),
     nbytes=nbytes is not None and sql_literal(int(nbytes)) or 'NULL::int8',
-    type=content_type and sql_literal(content_type) or 'NULL::text',
-    md5=sql_hexlify(content_md5)
+    metadata=sql_literal(metadata.to_sql())
 )
         )
         return list(cur)[0]
 
-    def _create_upload(self, conn, cur, object, job, chunksize, nbytes, content_type, content_md5):
+    def _create_upload(self, conn, cur, object, job, chunksize, nbytes, metadata):
         cur.execute("""
 INSERT INTO hatrac.upload 
-(nameid, job, nbytes, chunksize, content_type, content_md5)
-VALUES (%(nameid)s, %(job)s, %(nbytes)s, %(chunksize)s, %(content_type)s, %(content_md5)s)
+(nameid, job, nbytes, chunksize, metadata)
+VALUES (%(nameid)s, %(job)s, %(nbytes)s, %(chunksize)s, %(metadata)s)
 RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS "ancestors"
 """ % dict(
     name=sql_literal(object.name),
@@ -1197,8 +1220,7 @@ RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS
     job=sql_literal(job),
     nbytes=sql_literal(int(nbytes)),
     chunksize=sql_literal(int(chunksize)),
-    content_type=sql_literal(content_type),
-    content_md5=sql_hexlify(content_md5)
+    metadata=sql_literal(metadata.to_sql())
 )
         )
         return list(cur)[0]
@@ -1265,6 +1287,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
             if row['is_deleted'] and not allow_deleted:
                 raise hatrac.core.NotFound("Resource %s:%s not available." % (object, version))
             else:
+                row['metadata'] = Metadata.from_sql(row['metadata'])
                 return row
         raise hatrac.core.NotFound("Resource %s:%s not found." % (object, version))
 
@@ -1274,6 +1297,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(job)
         ))
         for row in list(cur):
+            row['metadata'] = Metadata.from_sql(row['metadata'])
             return row
         raise hatrac.core.NotFound("Resource %s;upload/%s not found." % (object, job))
         
@@ -1289,7 +1313,10 @@ EXECUTE hatrac_delete_upload(%(id)s);
             nameid,
             ("%d" % limit) if limit is not None else 'NULL'
         ))
-        return list(cur)
+        def helper(row):
+            row['metadata'] = Metadata.from_sql(row['metadata'])
+            return row
+        return [ helper(row) for row in cur ]
         
     def _chunk_list(self, conn, cur, upload, position=None):
         cur.execute("EXECUTE hatrac_chunk_list(%d, %s);" % (
@@ -1307,7 +1334,10 @@ EXECUTE hatrac_delete_upload(%(id)s);
             cur.execute("EXECUTE hatrac_object_enumerate_versions(%s);" % sql_literal(int(resource.id)))
         else:
             cur.execute("EXECUTE hatrac_namepattern_enumerate_versions(%s);" % sql_literal(sql_literal("^" + regexp_escape(resource.name) + '/')))
-        return list(cur)
+        def helper(row):
+            row['metadata'] = Metadata.from_sql(row['metadata'])
+            return row
+        return [ helper(row) for row in cur ]
 
     def _namespace_enumerate_names(self, conn, cur, resource, recursive=True, need_acls=True):
         cur.execute("EXECUTE hatrac_namespace_%s_%sacl (%s);" % (

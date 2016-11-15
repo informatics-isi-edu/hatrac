@@ -8,7 +8,11 @@
 
 """
 
-from webauthn2 import merge_config
+import binascii
+import base64
+import re
+
+from webauthn2 import merge_config, jsonWriterRaw
 
 config = merge_config(
     jsonFileName='hatrac_config.json'
@@ -43,3 +47,175 @@ class NotFound (HatracException):
     """Exceptions representing attempted access to unknown resource."""
     pass
 
+def _make_bin_decoder(nbytes, context=''):
+    def helper(orig):
+        if len(orig) == nbytes * 2:
+            try:
+                data = binascii.unhexlify(orig)
+            except Exception, e:
+                raise BadRequest('Could not hex-decode "%s". %s' % (orig, str(e)))
+        else:
+            try:
+                data = base64.b64decode(orig)
+            except Exception, e:
+                raise BadRequest('Could not base64 decode "%s". %s' % (orig, str(e)))
+                
+        if len(data) != nbytes:
+            raise BadRequest(
+                'Could not decode "%s"%s into %d bytes using hex nor base64.' % (
+                    orig,
+                    context,
+                    nbytes
+                )
+            )
+        return data
+    return helper
+        
+def _test_content_disposition(orig):
+    m = re.match("^filename[*]=UTF-8''[^/]+$", orig)
+    if not m:
+        raise BadRequest(
+            'Cannot accept content-disposition "%s".' % orig
+        )
+    return orig
+
+class MetadataValue (str):
+    def is_object(self):
+        return False
+    
+    def get_content(self, client_context, get_data=True):
+        self.container.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        body = self + '\n'
+        return len(body), Metadata({'content-type': 'text/plain'}), body
+
+class Metadata (dict):
+
+    _all_keys = {
+        'content-type',
+        'content-disposition',
+        'content-md5',
+        'content-sha256'
+    }
+
+    _write_once_keys = {
+        'content-md5',
+        'content-sha256'
+    }
+
+    # { key: (coder, decoder)... }
+    _sql_codecs = {
+        'content-md5': (
+            binascii.hexlify,
+            binascii.unhexlify
+        ),
+        'content-sha256': (
+            binascii.hexlify,
+            binascii.unhexlify
+        )
+    }
+
+    # { key: (coder, decoder)... }
+    _http_codecs = {
+        'content-disposition': (
+            lambda x: x,
+            _test_content_disposition
+        ),
+        'content-md5': (
+            base64.b64encode,
+            _make_bin_decoder(16, ' for content-md5')
+        ),
+        'content-sha256': (
+            base64.b64encode,
+            _make_bin_decoder(32, ' for content-sha256')
+        )
+    }
+    
+    def is_object(self):
+        return False
+
+    def get_content(self, client_context, get_data=True):
+        self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        body = jsonWriterRaw(self.to_http()) + '\n'
+        nbytes = len(body)
+        return nbytes, Metadata({'content-type': 'application/json'}), body
+    
+    def _sql_encoded_val(self, k, v):
+        enc, dec = self._sql_codecs.get(k, (lambda x: x, lambda x: x))
+        return enc(v)
+    
+    def _sql_decoded_val(self, k, v):
+        enc, dec = self._sql_codecs.get(k, (lambda x: x, lambda x: x))
+        return dec(v)
+    
+    def _http_encoded_val(self, k, v):
+        enc, dec = self._http_codecs.get(k, (lambda x: x, lambda x: x))
+        return enc(v)
+    
+    def _http_decoded_val(self, k, v):
+        enc, dec = self._http_codecs.get(k, (lambda x: x, lambda x: x))
+        return dec(v)
+    
+    def to_sql(self):
+        return jsonWriterRaw(
+            {
+                k: self._sql_encoded_val(k, v)
+                for k, v in self.items()
+            }
+        )
+
+    def to_http(self):
+        return {
+            k: self._http_encoded_val(k, v)
+            for k, v in self.items()
+        }
+
+    @staticmethod
+    def from_sql(orig):
+        md = Metadata()
+        for k, v in orig.items():
+            md[k] = md._sql_decoded_val(k, v)
+        return md
+
+    @staticmethod
+    def from_http(orig):
+        md = Metadata()
+        for k, v in orig.items():
+            md[k] = md._http_decoded_val(k, v.strip())
+        return md
+    
+    def __getitem__(self, k):
+        k = k.lower()
+        if k not in self._all_keys:
+            raise BadRequest('Unknown metadata key %s' % k)
+        try:
+            return dict.__getitem__(self, k)
+        except KeyError:
+            raise NotFound(
+                'Metadata %s;metadata/%s not found.' % (self.resource, k)
+            )
+
+    def __setitem__(self, k, v):
+        k = k.lower()
+        if k not in self._all_keys:
+            raise BadRequest('Unknown metadata key %s' % k)
+        v = MetadataValue(v)
+        v.container = self
+        if k in self._write_once_keys and k in self:
+            raise Conflict(
+                'Metadata %s;metadata/%s cannot be modified once set.' % (self.resource, k)
+            )
+        dict.__setitem__(self, k.lower(), v)
+        if hasattr(self, 'resource'):
+            v.resource = self.resource
+
+    def update(self, updates):
+        for k, v in updates.items():
+            k = k.lower()
+            if k not in self or self[k] != v:
+                self[k.lower()] = v
+            
+    def pop(self, k):
+        k = k.lower()
+        return dict.pop(self, k)
+        
+        
