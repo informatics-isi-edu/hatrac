@@ -44,7 +44,7 @@ distribution with Python 2.6. It has a conventional web service stack:
 - mod_wsgi 
 - web.py lightweight web framework
 - psycopg2 database driver
-- PostgreSQL 9.x
+- PostgreSQL 9.5 or newer
 - webauthn2 security adaptation layer (another product of our group)
 
 ### Installation
