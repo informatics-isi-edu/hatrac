@@ -337,16 +337,38 @@ configuration is provided as input:
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
 	If-Match: etag_value
 	If-None-Match: *
     
     ...content...
 
-The optional `If-Match` and `If-None-Match` headers MAY be specified to limit object update to specific scenarios. In a normal situation, only one of these two headers is specified in a single request:
+The optional `If-Match` and `If-None-Match` headers MAY be specified
+to limit object update to specific scenarios. In a normal situation,
+only one of these two headers is specified in a single request:
   - An _etag value_ with the `If-Match` header requires that the current version of the object on the server match the version indicated by the _etag value_ in order for the object to be updated as per the request _content_.
   - An `*` with the `If-None-Match` header requires that the object lack a current version on the server in order for the object to be created or updated as per the request _content_.
 
-Without either `If-Match` or `If-None-Match` headers in the request, the update will be unconditionally applied if allowed by policy and the current state of the server.
+Without either `If-Match` or `If-None-Match` headers in the request,
+the update will be unconditionally applied if allowed by policy and
+the current state of the server.
+
+The optional `Content-MD5` and `Content-SHA256` headers can carry an
+MD5 or SHA-256 _hash value_, respectively. The _hash value_ MUST be
+the base64 encoded representation of the underlying bit sequence
+defined by the relevant hash algorithm standard. Either or both, if
+supplied, will be stored and returned with data retrieval responses,
+useful for end-to-end data integrity checks by clients. An
+implementation MAY validate the supplied _content_ and reject the
+request if it mismatches any supplied _hash value_.
+
+The optional `Content-Disposition` header will be stored and returned
+with data retrieval responses. An implementation MAY restrict which
+values are acceptable as content disposition instructions. Every
+implementation SHOULD support the `filename*=UTF-8''` _filename_
+syntax where _filename_ is a basename with no path separator
+characters.
 
 A successful response is:
 
@@ -357,11 +379,9 @@ A successful response is:
     
     /namespace_path/object_name:version_id
 
-The optional `Content-MD5` header can carry an MD5 _hash value_ which
-will be stored and used for data integrity checks.  The successful
-response includes the _version id_ qualified name of the newly updated
-object.
-    
+The successful response includes the _version id_ qualified name of
+the newly updated object.
+
 Typical PUT error responses would be:
   - **400 Bad Request**: the client supplied a `Content-MD5` header
       with a _hash value_ that does not match the entity _content_
@@ -416,13 +436,16 @@ for which a successful response is:
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
     ETag: etag_value
     
     ...content...
 
-The optional `Content-MD5` header MUST be present if it was supplied
-during object creation and MAY be present if the service computes
-missing checksums in other cases.
+The optional `Content-MD5`, `Content-SHA256`, and
+`Content-Disposition` headers MUST be present if supplied during
+object creation and MAY be present if the service computes missing
+values in other cases.
 
 It is RECOMMENDED that a Hatrac server return an `ETag` indicating the version of the _content_ returned to the client.
     
@@ -451,6 +474,8 @@ for which a successful response is:
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
 
 The HEAD operation is essentially equivalent to the GET operation but
 with the actual object content elided.
@@ -535,6 +560,8 @@ for which the successful response is:
     200 OK
     Content-Type: content_type
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
     Content-Length: N
 	ETag: etag_value
     
@@ -558,6 +585,8 @@ for which the successful response is:
     200 OK
     Content-Type: content_type
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
     Content-Length: N
     
 with the same interpretation as documented for Object Metadata
