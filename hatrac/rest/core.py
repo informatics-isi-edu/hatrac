@@ -29,15 +29,28 @@ from webauthn2.util import context_from_environment
 
 _webauthn2_manager = webauthn2.Manager()
 
+def hash_value(d):
+    return base64.b64encode(hashlib.md5(d).digest())
+
+def hash_multi(d):
+    if d is None:
+        return '_'
+    elif isinstance(d, (str, unicode)):
+        return hash_value(d)
+    elif isinstance(d, (list, set)):
+        return hash_list(d)
+    elif isinstance(d, dict):
+        return hash_dict(d)
+    else:
+        raise NotImplementedError('hash %s' % type(d))
+
 def hash_list(l):
-    copy = [ s.replace(';', ';;') for s in l ]
+    copy = [ hash_multi(s) for s in l ]
     copy.sort()
-    return base64.b64encode(hashlib.md5(';'.join(copy)).digest())
+    return hash_value(''.join(copy))
 
 def hash_dict(d):
-    copy = [ (k, hash_list(v)) for k, v in d.items() ]
-    copy.sort(key=lambda p: p[0])
-    return ";".join([ v for k, v in copy ])
+    return hash_list([ hash_multi(k) + hash_multi(v) for k, v in d.items() ])
 
 # map URL pattern (regexp) to handler class
 dispatch_rules = dict()
