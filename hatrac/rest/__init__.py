@@ -13,6 +13,7 @@ import core
 
 # these modify core.dispatch_rules
 import acl
+import metadata
 import name
 import transfer
 

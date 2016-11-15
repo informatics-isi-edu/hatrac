@@ -202,6 +202,12 @@ class HatracName (object):
         """Delete resource and its children."""
         return self.directory.delete_name(self, client_context)
 
+    def update_metadata(self, updates, client_context):
+        self.directory.update_resource_metadata(self, updates, client_context)
+
+    def pop_metadata(self, fieldname, client_context):
+        self.directory.pop_resource_metadata(self, fieldname, client_context)
+        
     def set_acl(self, access, acl, client_context):
         self.directory.set_resource_acl(self, access, acl, client_context)
 
@@ -1082,6 +1088,14 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         else:
             raise hatrac.core.Conflict('Object %s currently has no content.' % object)
 
+    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
+    def update_resource_metadata(self, resource, updates, client_context, conn=None, cur=None):
+        self._update_resource_metadata(conn, cur, resource, updates)
+        
+    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
+    def pop_resource_metadata(self, resource, fieldname, client_context, conn=None, cur=None):
+        self._pop_resource_metadata(conn, cur, resource, fieldname)
+        
     @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def set_resource_acl_role(self, resource, access, role, client_context, conn=None, cur=None):
         self._set_resource_acl_role(conn, cur, resource, access, role)
@@ -1123,6 +1137,32 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             for r in self._namespace_enumerate_uploads(conn, cur, resource, recursive) 
         ]
 
+    def _update_resource_metadata(self, conn, cur, resource, updates):
+        resource.metadata.update(updates)
+        cur.execute("""
+UPDATE hatrac.%(table)s n
+SET metadata = %(metadata)s
+WHERE n.id = %(id)s ;
+""" % dict(
+    table=sql_identifier(resource._table_name),
+    id=sql_literal(resource.id),
+    metadata=sql_literal(resource.metadata.to_sql())
+)
+        )
+
+    def _pop_resource_metadata(self, conn, cur, resource, fieldname):
+        resource.metadata.pop(fieldname)
+        cur.execute("""
+UPDATE hatrac.%(table)s n
+SET metadata = %(metadata)s
+WHERE n.id = %(id)s ;
+""" % dict(
+    table=sql_identifier(resource._table_name),
+    id=sql_literal(resource.id),
+    metadata=sql_literal(resource.metadata.to_sql())
+)
+        )
+        
     def _set_resource_acl_role(self, conn, cur, resource, access, role):
         if access not in resource._acl_names:
             raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
