@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2016 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
