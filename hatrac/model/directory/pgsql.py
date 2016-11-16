@@ -399,22 +399,21 @@ class HatracUpload (HatracName):
     def get_content(self, client_context, get_data=True):
         self.enforce_acl(['owner'], client_context)
         metadata = self.metadata.to_http()
-        # TODO: generalize for all hashes?
-        body = dict(
-            url=str(self), 
-            target=str(self.object), 
-            owner=self.get_acl('owner'),
-            chunksize=self.chunksize,
-            nbytes=self.nbytes
-        )
-        for hdr, field in [
-                ('content-type', 'content_type'),
-                ('content-md5', 'content_md5'),
-                ('content-sha256', 'content_sha256'),
-                ('content-disposition', 'content_disposition')
-        ]:
+        body = {
+            'url': str(self), 
+            'target': str(self.object), 
+            'owner': self.get_acl('owner'),
+            'chunk-length': self.chunksize,
+            'content-length': self.nbytes
+        }
+        for hdr in {
+                'content-type',
+                'content-md5',
+                'content-sha256',
+                'content-disposition',
+        }:
             if hdr in metadata:
-                body[field] = metadata[hdr]
+                body[hdr] = metadata[hdr]
         body = jsonWriterRaw(body) + '\n'
         return len(body), Metadata({'content-type': 'application/json'}), body
 

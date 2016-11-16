@@ -112,8 +112,16 @@ class ObjectTransfers (RestHandler):
             raise BadRequest('Job input must be a flat JSON object.')
 
         try:
-            chunksize = int(job['chunk_bytes'])
-            nbytes = int(job['total_bytes'])
+            try:
+                # backwards-compatibility
+                chunksize = int(job['chunk_bytes'])
+            except KeyError, ev:
+                chunksize = int(job['chunk-length'])
+            try:
+                # backwards-compatibility
+                nbytes = int(job['total_bytes'])
+            except KeyError, ev:
+                nbytes = int(job['content-length'])
         except KeyError, ev:
             raise BadRequest('Missing required field %s.' % ev)
         except ValueError, ev:
@@ -121,14 +129,15 @@ class ObjectTransfers (RestHandler):
 
         metadata = {}
 
-        for hdr, key in [
-                ('content-type', 'content_type'),
-                ('content-md5', 'content_md5'),
-                ('content-sha256', 'content_sha256'),
-                ('content-disposition', 'content_disposition')]:
-            val = job.get(key)
-            if val is not None:
-                metadata[hdr] = val
+        for hdr, keys in [
+                ('content-type', {'content_type', 'content-type'}),
+                ('content-md5', {'content_md5', 'content-md5'}),
+                ('content-sha256', {'content-sha256'}),
+                ('content-disposition', {'content-disposition'})]:
+            for key in keys:
+                val = job.get(key)
+                if val is not None:
+                    metadata[hdr] = val
             
         # create object implicitly or reuse existing object...
         try:

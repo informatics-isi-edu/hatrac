@@ -246,7 +246,8 @@ Any hierarchical namespace in Hatrac has an HTTPS URL of the form:
 Where _parent path_ is the name of the enclosing namespace and
 _namespace id_ is the relative name of the nested namespace. Of
 course, the enclosing namespace may be the root namespace of the
-deployment or another nested namespace.
+deployment, e.g. `/hatrac`, or another nested namespace,
+e.g. `/hatrac/some/ancestors`.
 
 ### Nested Namespace Creation
 
@@ -335,20 +336,23 @@ _object name_ is the relative name of the object.
 ### Object Creation and Update
 
 The PUT operation is used to create a new object or a new version of
-an existing object.  A simple JSON representation of the namespace
-configuration is provided as input:
+an existing object.  Literal object content is provided as input:
 
     PUT /namespace_path/object_name
     Host: authority_name
-    Content-Type: content_type
-    Content-Length: N
-    Content-MD5: hash_value
-	Content-SHA256: hash_value
-	Content-Disposition: filename*=UTF-8''filename
+    Content-Type: text/plain
+    Content-Length: 14
+    Content-MD5: ZXS/CYPMeEBJpBYNGYhyjA==
+	Content-SHA256: 5+aEMqzlEZxe9xPaDUZ0GyBvTUaZf4s0yMpPgV/0yt0=
+	Content-Disposition: filename*=UTF-8''test.txt
 	If-Match: etag_value
 	If-None-Match: *
     
     ...content...
+
+This example has metadata consistent with an object containing a
+single Unix-style text line `...content...\n` inclusive of the
+line-terminator.
 
 The optional `If-Match` and `If-None-Match` headers MAY be specified
 to limit object update to specific scenarios. In a normal situation,
@@ -358,16 +362,22 @@ only one of these two headers is specified in a single request:
 
 Without either `If-Match` or `If-None-Match` headers in the request,
 the update will be unconditionally applied if allowed by policy and
-the current state of the server.
+the current state of the server. When supplied, they select HTTP
+standard conditional request processing.
 
 The optional `Content-MD5` and `Content-SHA256` headers can carry an
-MD5 or SHA-256 _hash value_, respectively. The _hash value_ MUST be
+MD5 or SHA-256 _hash value_, respectively. The _hash value_ SHOULD be
 the base64 encoded representation of the underlying bit sequence
 defined by the relevant hash algorithm standard. Either or both, if
 supplied, will be stored and returned with data retrieval responses,
 useful for end-to-end data integrity checks by clients. An
-implementation MAY validate the supplied _content_ and reject the
-request if it mismatches any supplied _hash value_.
+implementation MAY checksum the supplied _content_ and reject the
+request if it mismatches any supplied _hash value_ or if any _hash
+value_ is malformed. An implementation MAY recognize and accept
+hex-encoded _hash value_ or MAY reject it as a bad request, but in
+either case it MUST always return proper base64-encoded _hash value_
+in any service-issued `Content-MD5` or `Content-SHA256` response
+header.
 
 The optional `Content-Disposition` header will be stored and returned
 with data retrieval responses. An implementation MAY restrict which
@@ -1049,15 +1059,26 @@ The POST operation is used to create a new upload job:
     Host: authority_name
     Content-Type: application/json
     
-    {"chunk_bytes": K, 
-     "total_bytes": N,
-     "content_type": "content_type",
-     "content_md5": "hash_value"}
+    {"chunk-bytes": K, 
+     "content-length": N,
+     "content-type": "content_type",
+     "content-md5": "hash_value",
+	 "content-sha256": "hash_value",
+	 "content-disposition": "disposition"}
 
-where the JSON attributes `chunk-bytes` and `total-bytes` are
+where the JSON attributes `chunk-bytes` and `content-length` are
 mandatory to describe the shape of the data upload, while
-`content-type` and `content-md5` are optional and have the same
-meaning as if passed as headers in a simple PUT object operation.
+`content-type`, `content-disposition`, `content-md5`, and
+`content-sha256` are optional and provide additional metadata for the
+completed object, with the same semantics as if the object had been
+created as a simple object (without the upload job API) and those same
+fields had been provided as HTTP PUT request headers. For backwards
+compatibility, these JSON attribute names are also supported as
+aliases:
+
+- `chunk_bytes`: deprecated alias for `chunk-length`
+- `total_bytes`: deprecated alias for `content-length`
+- `content_md5`: deprecated alias for `content-md5`
 
 for which the successful response is:
 
@@ -1171,13 +1192,16 @@ for which the successful response is:
     
     {"url": "/namespace_path/object_name;upload/job_id",
      "owner": ["role"...],
-     "chunksize": K,
-     "target": "/namespace_path/object_name"}
+     "target": "/namespace_path/object_name"
+     "chunk-length": K,
+	 "content-length": N,
+	 ...
+	}
      
-summarizing the parameters set when the job was created. Note, there
-is no support for determining which chunks have or have not been
-uploaded as such tracking is not a requirement placed on Hatrac
-implementations.
+summarizing the parameters set when the job was created including
+optional object metadata such as `content-type`. Note, there is no
+support for determining which chunks have or have not been uploaded as
+such tracking is not a requirement placed on Hatrac implementations.
 
 ### Chunked Upload Job Cancellation
 

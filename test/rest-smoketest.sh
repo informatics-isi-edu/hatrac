@@ -284,10 +284,10 @@ douploadtest()
     _md5="$2"
     shift 2
     cat > ${TEST_DATA} <<EOF
-{"chunk_bytes": ${chunk_bytes},
-"total_bytes": ${upload_total_bytes},
-"content_type": "application/x-bash",
-"content_md5": "${_md5}"}
+{"chunk-length": ${chunk_bytes},
+"content-length": ${upload_total_bytes},
+"content-type": "application/x-bash",
+"content-md5": "${_md5}"}
 EOF
 
     dotest "$1" "${_url};upload"  \
