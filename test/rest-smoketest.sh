@@ -91,14 +91,78 @@ mymd5sum()
     md5sum | sed -e "s/ \+-//" | hex2base64
 }
 
+mysha256sum()
+{
+    # take data on stdin and output base64 encoded hash
+    sha256sum | sed -e "s/ \+-//" | hex2base64
+}
+
 NUM_FAILURES=0
 NUM_TESTS=0
 
 BASE_URL=${BASE_URL:-https://$(hostname)/hatrac}
 
-jsoncheck()
+summarycheck()
+{
+    if [[ "$summary" != $pattern ]]
+    then
+	echo "HTTP result does not match expectation ($summary != $pattern)"
+	return 1
+    fi
+
+    return 0
+}
+
+jsonload()
 {
     python -c "import sys; import json; v = json.load(sys.stdin);" 2>&1
+}
+
+jsoncheck()
+{
+    if [[ "$summary" == *::application/json::* ]] && [[ "$summary" != *::*::0 ]]
+    then
+	json_error=$(jsonload < ${RESPONSE_CONTENT})
+	if [[ $? -ne 0 ]]
+	then
+	    json_error=${json_error#*ValueError}
+	    echo "Error parsing JSON response: ${json_error}"
+	    return 1
+	fi
+    fi
+    return 0
+}
+
+hashcheck()
+{
+    # hashcheck header hasher 
+    header="$1"
+    hasher="$2"
+    shift 2
+    if grep -i -q ${header} < ${RESPONSE_HEADERS} && [[ "${request[0]}" != '--head' ]]
+    then
+	hash1=$(grep -i ${header} ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+: \([A-Za-z0-9/+=]\+\).*/\1/")
+	hash2=$("$hasher" < ${RESPONSE_CONTENT})
+	if [[ "$hash1" != "$hash2" ]]
+	then
+	    echo "${header} header != body (${hash1} != ${hash2})"
+	    return 1
+	elif [[ "$VERBOSE" = "true" ]]
+	then
+	    echo "${header} header == body (${hash1} == ${hash2})" >&2
+	fi
+    fi
+    return 0
+}
+
+md5check()
+{
+    hashcheck content-md5 mymd5sum
+}
+
+sha256check()
+{
+    hashcheck content-sha256 mysha256sum
 }
 
 dotest()
@@ -107,53 +171,29 @@ dotest()
     url="$2"
     shift 2
 
-    printf "%s " "$@" "${BASE_URL}$url" >&2
-    summary=$(mycurl "$@" "${BASE_URL}$url")
+    request=( "$@" "${BASE_URL}$url" )
+    printf "%s " "${request[@]}"  >&2
+    summary=$(mycurl "${request[@]}" )
     printf " -->  %s " "$summary" >&2
 
-    md5_mismatch=
-    hash1=
-    hash2=
-    if grep -i -q content-md5 ${RESPONSE_HEADERS} && [[ "$1" != '--head' ]]
-    then
-	hash1=$(grep -i content-md5 ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+: \([A-Za-z0-9/+=]\+\).*/\1/")
-	hash2=$(mymd5sum < ${RESPONSE_CONTENT})
-	if [[ "$hash1" != "$hash2" ]]
-	then
-	    md5_mismatch="Content-MD5 ${hash1} mismatch body ${hash2}"
-	else
-	    echo "Content-MD5 == body md5sum $hash1 == $hash2" >&2
-	fi
-    fi
-
-    json_error=""
-    if [[ "$summary" == *::application/json::* ]] && [[ "$summary" != *::*::0 ]]
-    then
-	json_error=$(jsoncheck < ${RESPONSE_CONTENT})
+    mismatches=()
+    
+    for check in summarycheck md5check sha256check jsoncheck
+    do
+	error_text=$( "$check" )
 	if [[ $? -ne 0 ]]
 	then
-	    json_error=${json_error#*ValueError}
-	    echo "Error parsing JSON response: ${json_error}" >&2
+	    mismatches+=( "${error_text}" )
 	fi
-    fi
-
-    if [[ "$summary" != $pattern ]] || [[ -n "${md5_mismatch}" ]] || [[ -n "${json_error}" ]]
+    done
+    
+    if [[ "${#mismatches[*]}" -gt 0 ]]
     then
-	printf "FAILED.\n" >&2
-	cat <<EOF
---
-${hash1}
---
-${hash2}
---
-EOF
-	cat <<EOF
+	cat >&2 <<EOF
+FAILED.
 
-TEST FAILURE:
+$(printf "%s\n" "${mismatches[@]}")
 
-Expected result: $pattern
-Actual result: $summary
-${md5_mismatch}${json_error}
 Response headers:
 $(cat ${RESPONSE_HEADERS})
 Response body:
@@ -162,7 +202,9 @@ $(head -c 500 ${RESPONSE_CONTENT})
 EOF
 	NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
     else
-	printf "OK.\n" >&2
+	cat >&2 <<EOF
+OK.
+EOF
 	if [[ "$VERBOSE" = "true" ]]
 	then
 	    cat >&2 <<EOF
@@ -196,14 +238,78 @@ dotest "409::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/json"
 
 # test objects
 md5=$(mymd5sum < $0)
+sha=$(mysha256sum < $0)
 script_size=$(stat -c "%s" $0)
+
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
+obj1_vers0="$(cat ${RESPONSE_CONTENT})"
+obj1_vers0="${obj1_vers0#/hatrac}"
+
+# metadata on object-version
+dotest "200::application/json::*" "${obj1_vers0};metadata/"
+
+# service assigns content-type automagically
+dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "200::*::*" "${obj1_vers0};metadata/content-type"
+
+# we can modify content-type
+cat > ${TEST_DATA} <<EOF
+text/plain
+EOF
+dotest "204::*::*" "${obj1_vers0};metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "200::*::*" "${obj1_vers0};metadata/content-type"
+dotest "204::*::*" "${obj1_vers0};metadata/content-type" -X DELETE
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "404::*::*" "${obj1_vers0};metadata/content-type"
+
+# we can modify content-type repeatedly
+cat > ${TEST_DATA} <<EOF
+application/x-bash
+EOF
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "200::*::*" "${obj1_vers0};metadata/content-type"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -X DELETE
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "404::*::*" "${obj1_vers0};metadata/content-type"
+
+# checksums can be applied once and are immutable
+dotest "404::*::*" "${obj1_vers0};metadata/content-md5"
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5"
+cat > ${TEST_DATA} <<EOF
+$(mymd5sum < $0)
+EOF
+dotest "204::*::*" "${obj1_vers0};metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
+cat > ${TEST_DATA} <<EOF
+$(echo "" | mymd5sum)
+EOF
+dotest "409::*::*" "${obj1_vers0};metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
+
+dotest "404::*::*" "${obj1_vers0};metadata/content-sha256"
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256"
+cat > ${TEST_DATA} <<EOF
+$(mysha256sum < $0)
+EOF
+dotest "204::*::*" "${obj1_vers0};metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
+cat > ${TEST_DATA} <<EOF
+$(echo "" | mysha256sum)
+EOF
+dotest "409::*::*" "${obj1_vers0};metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
+
+
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj1 -X DELETE
 dotest "409::*::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
     -H "Content-Type: application/x-bash" \
-    -H "Content-MD5: $md5"
+    -H "Content-MD5: $md5" \
+    -H "Content-SHA256: $sha" \
+    -H "Content-Disposition: filename*=UTF-8''$(basename $0)"
 obj1_vers1="$(cat ${RESPONSE_CONTENT})"
 obj1_vers1="${obj1_vers1#/hatrac}"
 dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
@@ -271,6 +377,7 @@ chunk_bytes=5242889
 # generate 5MB + file
 dd if=/dev/urandom bs=${chunk_bytes} count=1 2>/dev/null | base64 > ${upload_file_name}
 upload_md5=$(mymd5sum < ${upload_file_name})
+upload_sha=$(mysha256sum < ${upload_file_name})
 upload_total_bytes=$(stat -c "%s" ${upload_file_name})
 split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
 
@@ -279,15 +386,36 @@ dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
 
 douploadtest()
 {
-    # args: url md5 jobpat chunk0pat chunk1pat finalpat
+    # args: url md5 sha256 jobpat chunk0pat chunk1pat finalpat
     _url="$1"
     _md5="$2"
-    shift 2
+    _sha256="$3"
+    shift 3
+
+    fields=(
+	'"content-length": '"${upload_total_bytes}"
+	'"content-type": "application/x-bash"'
+    )
+
+    if [[ -n "${_md5}" ]]
+    then
+	fields+=(
+	    '"content-md5": "'"${_md5}"'"'
+	)
+    fi
+
+    if [[ -n "${_sha256}" ]]
+    then
+	fields+=(
+	    '"content-sha256": "'"${_sha256}"'"'
+	)
+    fi
+    
     cat > ${TEST_DATA} <<EOF
-{"chunk-length": ${chunk_bytes},
-"content-length": ${upload_total_bytes},
-"content-type": "application/x-bash",
-"content-md5": "${_md5}"}
+{
+  $(printf "%s,\n" "${fields[@]}")
+  "chunk-length": ${chunk_bytes}
+}
 EOF
 
     dotest "$1" "${_url};upload"  \
@@ -331,10 +459,10 @@ EOF
 }
 
 # cannot upload to a deleted object
-douploadtest "/ns-${RUNKEY}/foo/obj1" "${upload_md5}" "409::*::*" 
+douploadtest "/ns-${RUNKEY}/foo/obj1" "" "" "409::*::*" 
 
 # check upload job for new version of existing test object... omit finalpat so we can intersperse tests
-douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*"
+douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "${upload_sha}" "201::text/uri-list::*" "204::*::*" "204::*::*"
 
 # do some bad chunk upload tests before we finalize
 dotest "409::*::*" "${upload}/$(( ${upload_total_bytes} / ${chunk_bytes} + 2 ))" -T "$part"
@@ -350,29 +478,29 @@ obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg
 
 
 # check upload job deletion
-douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*"
+douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "${upload_sha}" "201::text/uri-list::*" "204::*::*" "204::*::*"
 dotest "204::*::*" "${upload}" -X DELETE
 
-douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "201::text/uri-list::*"
+douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "" "201::text/uri-list::*"
 dotest "204::*::*" "${upload}" -X DELETE
 
 # check upload job for brand new object
-douploadtest "/ns-${RUNKEY}/foo2/obj2" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*" "201::*::*"
+douploadtest "/ns-${RUNKEY}/foo2/obj2" "${upload_md5}" "" "201::text/uri-list::*" "204::*::*" "204::*::*" "201::*::*"
 dotest "200::application/x-bash::${upload_total_bytes}" /ns-${RUNKEY}/foo2/obj2
 
 # check upload job for brand new object canceled implicitly by object deletion
-douploadtest "/ns-${RUNKEY}/foo/obj4" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*"
+douploadtest "/ns-${RUNKEY}/foo/obj4" "${upload_md5}" "" "201::text/uri-list::*" "204::*::*" "204::*::*"
 dotest "200::application/json::*" "${upload}"
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj4 -X DELETE
 dotest "404::*::*" "${upload}"
 
 # check upload job with mismatched, invalid MD5, invalid base64
-douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "$(echo "" | mymd5sum)" "201::text/uri-list::*" "204::*::*" "204::*::*" "409::*::*"
-douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "YmFkX21kNQo=" "400::*::*"
-douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "bad_md5" "400::*::*"
+douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "$(echo "" | mymd5sum)" "" "201::text/uri-list::*" "204::*::*" "204::*::*" "409::*::*"
+douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "YmFkX21kNQo=" "" "400::*::*"
+douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "bad_md5" "" "400::*::*"
 
 # check upload job with mismatched, invalid MD5, invalid base64 in final chunk
-douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "${upload_md5}" "201::text/uri-list::*" "204::*::*" "204::*::*"
+douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "${upload_md5}" "" "201::text/uri-list::*" "204::*::*" "204::*::*"
 parts=( /tmp/parts-${RUNKEY}-* )
 dotest "400::*::*" "${upload}/0" -T "${parts[0]}" -H "Content-MD5: $(echo "" | mymd5sum)"
 dotest "400::*::*" "${upload}/0" -T "${parts[0]}" -H "Content-MD5: YmFkX21kNQo="

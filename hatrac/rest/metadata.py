@@ -28,12 +28,13 @@ class Metadata (RestHandler):
 
         value = web.ctx.env['wsgi.input'].read()
 
-        resource = self.resolve_name_or_version(
-            path, name, version
-        )
-        if not resource.is_object():
-            raise NotFound('Namespaces do not have metadata sub-resources.')
-        resource = resource.get_current_version()
+        if version:
+            resource = self.resolve_version(path, name, version)
+        else:
+            resource = self.resolve(path, name)
+            if not resource.is_object():
+                raise NotFound('Namespaces do not have metadata sub-resources.')
+            resource = resource.get_current_version()
         
         self.set_http_etag(hash_value(resource.metadata.get(fieldname, '')))
         self.http_check_preconditions('PUT')
@@ -47,12 +48,13 @@ class Metadata (RestHandler):
     @web_method()
     def DELETE(self, path, name, version, fieldname):
         """Clear Metadata value."""
-        resource = self.resolve_name_or_version(
-            path, name, version
-        )
-        if not resource.is_object():
-            raise NotFound('Namespaces do not have metadata sub-resources.')
-        resource = resource.get_current_version()
+        if version:
+            resource = self.resolve_version(path, name, version)
+        else:
+            resource = self.resolve(path, name)
+            if not resource.is_object():
+                raise NotFound('Namespaces do not have metadata sub-resources.')
+            resource = resource.get_current_version()
 
         self.set_http_etag(hash_value(resource.metadata.get(fieldname, '')))
         self.http_check_preconditions('DELETE')
@@ -65,10 +67,15 @@ class Metadata (RestHandler):
 
     def _GET(self, path, name, version, fieldname):
         """Get Metadata value."""
-        resource = self.resolve_name_or_version(path, name, version)
-        if not resource.is_object():
-            raise NotFound('Namespaces do not have metadata sub-resources.')
-        resource = resource.get_current_version().metadata[fieldname]
+        if version:
+            resource = self.resolve_version(path, name, version)
+        else:
+            resource = self.resolve(path, name)
+            if not resource.is_object():
+                raise NotFound('Namespaces do not have metadata sub-resources.')
+            resource = resource.get_current_version()
+
+        resource = resource.metadata[fieldname]
 
         self.set_http_etag(hash_value(resource))
         self.http_check_preconditions()
@@ -88,10 +95,15 @@ class MetadataCollection (RestHandler):
 
     def _GET(self, path, name, version):
         """Get Metadata collection."""
-        resource = self.resolve_name_or_version(path, name, version)
-        if not resource.is_object():
-            raise NotFound('Namespaces do not have metadata sub-resources.')
-        resource = resource.get_current_version().metadata
+        if version:
+            resource = self.resolve_version(path, name, version)
+        else:
+            resource = self.resolve(path, name)
+            if not resource.is_object():
+                raise NotFound('Namespaces do not have metadata sub-resources.')
+            resource = resource.get_current_version()
+
+        resource = resource.metadata
 
         self.set_http_etag(hash_dict(resource))
         self.http_check_preconditions()

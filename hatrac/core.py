@@ -129,6 +129,11 @@ class Metadata (dict):
             _make_bin_decoder(32, ' for content-sha256')
         )
     }
+
+    def __init__(self, src={}):
+        dict.__init__(self)
+        for k, v in src.items():
+            self[k] = v
     
     def is_object(self):
         return False
