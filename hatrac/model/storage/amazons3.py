@@ -113,20 +113,21 @@ class HatracStorage (PooledS3BucketConnection):
         PooledS3BucketConnection.__init__(self, config)
 
     @s3_bucket_wrap()
-    def create_from_file(self, name, input, nbytes, content_type=None, content_md5=None, s3_conn=None, s3_bucket=None):
+    def create_from_file(self, name, input, nbytes, metadata={}, s3_conn=None, s3_bucket=None):
         """Create an entire file-version object from input content, returning version ID."""
         s3_key = boto.s3.key.Key(s3_bucket, name)
         def helper(input, headers, nbytes, md5):
             s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
             return s3_key.version_id
-        return self._send_content_from_stream(input, nbytes, content_type, content_md5, helper)
+        return self._send_content_from_stream(input, nbytes, metadata, helper)
 
-    def _send_content_from_stream(self, input, nbytes, content_type, content_md5, sendfunc):
+    def _send_content_from_stream(self, input, nbytes, metadata, sendfunc):
         """Common file-sending logic to talk to S3."""
         headers = {'Content-Length': str(nbytes)}
-        if content_type is not None:
-            headers['Content-Type'] = content_type
-        if content_md5 is not None:
+        if 'content-type' in metadata:
+            headers['Content-Type'] = metadata['content-type']
+        if 'content-md5' in metadata:
+            content_md5 = metadata['content-md5']
             md5 = (binascii.hexlify(content_md5), base64.b64encode(content_md5))
             input = InputWrapper(input, nbytes)
         else:
@@ -155,29 +156,34 @@ class HatracStorage (PooledS3BucketConnection):
             
         return sendfunc(input, headers, nbytes, md5)
 
-    def get_content(self, name, version, content_md5=None):
-        return self.get_content_range(name, version, content_md5, None)
+    def get_content(self, name, version, metadata={}):
+        return self.get_content_range(name, version, metadata, None)
      
     @s3_bucket_wrap(deferred_conn_reuse=True)
-    def get_content_range(self, name, version, content_md5=None, get_slice=None, s3_conn=None, s3_bucket=None):
+    def get_content_range(self, name, version, metadata={}, get_slice=None, s3_conn=None, s3_bucket=None):
         s3_key = boto.s3.key.Key(s3_bucket, name)
         s3_key.version_id = version.strip()
+        nbytes = s3_key.size
         
-        if get_slice is None:
-            headers = None
-            rbytes = None
+        if get_slice is not None:
+            pos = coalesce(get_slice.start, 0)
+            limit = coalesce(get_slice.stop, nbytes)
         else:
-            headers = {'Range':'bytes=%d-%d' % (get_slice.start, get_slice.stop-1)}
-            rbytes = get_slice.stop - get_slice.start
-            
+            pos = 0
+            limit = nbytes
+        
+        if pos != 0 or limit != nbytes:
+            headers = {'Range':'bytes=%d-%d' % (pos, limit)}
+            # object metadata does not apply to partial read content
+            metadata = {}
+        else:
+            headers = None
+
+        length = limit - pos
+
         # Note: version ID is not being set on the key, this forces the right version
         s3_key.open_read(headers=headers,query_args='versionId=%s' % version)
        
-        md5 = s3_key.md5
-        if rbytes is None:
-            rbytes = s3_key.size
-            md5 = content_md5
-
         def data_generator():
             conn_tuple = (s3_conn, s3_bucket)
             try:
@@ -190,7 +196,7 @@ class HatracStorage (PooledS3BucketConnection):
                 if conn_tuple:
                     self._put_pooled_connection(conn_tuple)
 
-        return rbytes, s3_key.content_type, md5, data_generator()
+        return length, metadata, data_generator()
 
     @s3_bucket_wrap()
     def delete(self, name, version, s3_conn=None, s3_bucket=None):
@@ -200,25 +206,24 @@ class HatracStorage (PooledS3BucketConnection):
         s3_key.delete()
 
     @s3_bucket_wrap()
-    def create_upload(self, name, nbytes=None, content_type=None, content_md5=None, s3_conn=None, s3_bucket=None):
+    def create_upload(self, name, nbytes=None, metadata={}, s3_conn=None, s3_bucket=None):
         upload = s3_bucket.initiate_multipart_upload(name)
         return upload.id
 
     @s3_bucket_wrap()
-    def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, content_md5=None, s3_conn=None, s3_bucket=None):
+    def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, metadata={}, s3_conn=None, s3_bucket=None):
         upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
         upload.key_name = name
         upload.id = upload_id
 
         def helper(input, headers, nbytes, md5):
             # We have to set content-type to None to avoid boto trying to work out type
-            if headers is None or 'Content-Type' not in headers:
-                headers['Content-Type'] = None
+            headers = headers if headers is not None else {}
+            headers['Content-Type'] = headers.get('Content-Type', None)
             s3_key = upload.upload_part_from_file(input, position + 1, headers=headers, md5=md5, size=nbytes)
-           
             return dict(etag=s3_key.etag)
-        return self._send_content_from_stream(input, nbytes, None, content_md5, helper)
-
+        
+        return self._send_content_from_stream(input, nbytes, None, metadata, helper)
               
     @s3_bucket_wrap()
     def cancel_upload(self, name, upload_id, s3_conn=None, s3_bucket=None):
@@ -229,7 +234,7 @@ class HatracStorage (PooledS3BucketConnection):
         return None
 
     @s3_bucket_wrap()
-    def finalize_upload(self, name, upload_id, chunk_data, s3_conn=None, s3_bucket=None, content_md5=None):
+    def finalize_upload(self, name, upload_id, chunk_data, metadata={}, s3_conn=None, s3_bucket=None):
         upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
         upload.key_name = name
         upload.id = upload_id
