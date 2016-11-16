@@ -15,8 +15,10 @@ model with:
 
 [![Build Status](https://travis-ci.org/informatics-isi-edu/hatrac.svg)](https://travis-ci.org/informatics-isi-edu/hatrac)
 
-Hatrac is currently under rapid development, with an expectation to
-have a stable release sometime in 2015.
+Hatrac is research software but runs in production for several
+informatics projects using the filesystem storage backend. It is
+developed in a continuous-integration style with an automated
+regression test suite covering all core API features.
 
 ## Using Hatrac
 
@@ -39,7 +41,7 @@ deployment.
 ### Prerequisites
 
 Hatrac is developed and tested primarily on an enterprise Linux
-distribution with Python 2.6. It has a conventional web service stack:
+distribution with Python 2.7. It has a conventional web service stack:
 - Apache HTTPD
 - mod_wsgi 
 - web.py lightweight web framework
