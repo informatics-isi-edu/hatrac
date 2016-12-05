@@ -29,15 +29,28 @@ from webauthn2.util import context_from_environment
 
 _webauthn2_manager = webauthn2.Manager()
 
+def hash_value(d):
+    return base64.b64encode(hashlib.md5(d).digest())
+
+def hash_multi(d):
+    if d is None:
+        return '_'
+    elif isinstance(d, (str, unicode)):
+        return hash_value(d)
+    elif isinstance(d, (list, set)):
+        return hash_list(d)
+    elif isinstance(d, dict):
+        return hash_dict(d)
+    else:
+        raise NotImplementedError('hash %s' % type(d))
+
 def hash_list(l):
-    copy = [ s.replace(';', ';;') for s in l ]
+    copy = [ hash_multi(s) for s in l ]
     copy.sort()
-    return base64.b64encode(hashlib.md5(';'.join(copy)).digest())
+    return hash_value(''.join(copy))
 
 def hash_dict(d):
-    copy = [ (k, hash_list(v)) for k, v in d.items() ]
-    copy.sort(key=lambda p: p[0])
-    return ";".join([ v for k, v in copy ])
+    return hash_list([ hash_multi(k) + hash_multi(v) for k, v in d.items() ])
 
 # map URL pattern (regexp) to handler class
 dispatch_rules = dict()
@@ -447,7 +460,7 @@ class RestHandler (object):
                 pass
 
         if get_slice is not None:
-            nbytes, content_type, content_md5, data_generator \
+            nbytes, metadata, data_generator \
                 = resource.get_content_range(client_context, get_slice, get_data=self.get_body)
             web.ctx.status = '206 Partial Content'
             web.header(
@@ -455,20 +468,21 @@ class RestHandler (object):
                 % (get_slice.start, get_slice.stop - 1, resource.nbytes)
             )
         else:
-            nbytes, content_type, content_md5, data_generator = resource.get_content(client_context, get_data=self.get_body)
+            nbytes, metadata, data_generator = resource.get_content(client_context, get_data=self.get_body)
             web.ctx.status = '200 OK'
 
-        if resource.is_object() and resource.is_version():
+        web.header('Content-Length', nbytes)
+
+        metadata = hatrac.core.Metadata(metadata).to_http()
+        for hdr, val in metadata.items():
+            web.header(hdr, val)
+
+        if resource.is_object() and resource.is_version() and 'content-disposition' not in resource.metadata:
             web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.quote(str(resource.object).split("/")[-1]))
             
-        web.header('Content-Length', nbytes)
-        if content_type:
-            web.header('Content-Type', content_type)
-        if content_md5:
-            assert len(content_md5) == 16
-            web.header('Content-MD5', base64.b64encode(content_md5))
         if self.http_etag:
             web.header('ETag', self.http_etag)
+            
         if self.http_vary:
             web.header('Vary', ', '.join(self.http_vary))
 

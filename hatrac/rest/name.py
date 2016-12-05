@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2016 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -8,7 +8,6 @@
 
 """
 
-import base64
 from core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, hash_list
 import hatrac.core
 import web
@@ -138,19 +137,20 @@ class Name (RestHandler):
                 nbytes = int(web.ctx.env['CONTENT_LENGTH'])
             except:
                 raise LengthRequired()
+
+            metadata = { 'content-type': in_content_type }
+            
             if 'HTTP_CONTENT_MD5' in web.ctx.env:
-                try:
-                    content_md5 = base64.b64decode(web.ctx.env.get('HTTP_CONTENT_MD5').strip())
-                except TypeError, e:
-                    raise BadRequest('Content-MD5 invalid header "%s": %s' % (web.ctx.env.get('HTTP_CONTENT_MD5').strip(), e))
-            else:
-                content_md5 = None
+                metadata['content-md5'] = web.ctx.env.get('HTTP_CONTENT_MD5').strip()
+
+            if 'HTTP_CONTENT_SHA256' in web.ctx.env:
+                metadata['content-sha256'] = web.ctx.env.get('HTTP_CONTENT_SHA256').strip()
+
             resource = resource.create_version_from_file(
                 web.ctx.env['wsgi.input'],
                 web.ctx.webauthn2_context,
                 nbytes,
-                content_type=in_content_type,
-                content_md5=content_md5
+                metadata=web.ctx.hatrac_directory.metadata_from_http(metadata)
             )
                 
         return self.create_response(resource)

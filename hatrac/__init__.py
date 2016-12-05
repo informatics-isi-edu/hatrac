@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2016 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -38,6 +38,7 @@ def deploy_cli(argv, config=None):
     if len(argv) > 1:
         root_roles = argv[1:]
         deploy_dir.deploy_db(root_roles)
+        deploy_dir.schema_upgrade()
         return 0
     else:
         sys.stderr.write("""

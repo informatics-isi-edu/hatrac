@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2016 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -77,7 +77,7 @@ class HatracStorage (object):
 
         return (dirname, relname)
 
-    def create_from_file(self, name, input, nbytes, content_type=None, content_md5=None):
+    def create_from_file(self, name, input, nbytes, metadata={}):
         """Create an entire file-version object from input content, returning version ID."""
         
         version = base64.b32encode( 
@@ -89,10 +89,10 @@ class HatracStorage (object):
         f = make_file(dirname, relname, 'wb')
 
         # upload whole content at offset 0 (for code reuse)
-        self.upload_chunk_from_file(None, None, 0, 0, input, nbytes, content_md5, f)
+        self.upload_chunk_from_file(None, None, 0, 0, input, nbytes, metadata, f)
         return version
 
-    def create_upload(self, name, nbytes=None, content_type=None, content_md5=None):
+    def create_upload(self, name, nbytes=None, metadata={}):
         upload_id = self.create_from_file(name, StringIO(''), 0)
         return upload_id
 
@@ -101,13 +101,13 @@ class HatracStorage (object):
         self.delete(name, upload_id)
         return None
 
-    def finalize_upload(self, name, upload_id, chunk_data, content_md5=None):
+    def finalize_upload(self, name, upload_id, chunk_data, metadata={}):
         # nothing changes in storage for this backend strategy
         version_id = upload_id
         assert chunk_data is None
 
         # aggressively validate uploaded content against pre-defined MD5 if it was given at job start
-        if content_md5 is not None:
+        if 'content-md5' in metadata:
             dirname, relname = self._dirname_relname(name, version_id)
             fullname = "%s/%s" % (dirname, relname)
             f = open(fullname, "rb")
@@ -123,15 +123,15 @@ class HatracStorage (object):
                     eof = True
 
             stored_md5 = hasher.digest()
-            if content_md5 != stored_md5:
+            if metadata['content-md5'] != stored_md5:
                 raise Conflict(
                     'Current uploaded content MD5 %s does not match expected %s.'
-                    % (binascii.hexlify(stored_md5), binascii.hexlify(content_md5))
+                    % (binascii.hexlify(stored_md5), binascii.hexlify(metadata['content-md5']))
                 )
         
         return version_id
 
-    def upload_chunk_from_file(self, name, version, position, chunksize, input, nbytes, content_md5=None, f=None):
+    def upload_chunk_from_file(self, name, version, position, chunksize, input, nbytes, metadata={}, f=None):
         """Save chunk data into storage.
 
            If self.track_chunks, return value must be None or a value
@@ -146,7 +146,7 @@ class HatracStorage (object):
             f = open(fullname, "r+b")
         f.seek(position*chunksize)
 
-        if content_md5:
+        if 'content-md5' in metadata:
             hasher = hashlib.md5()
         else:
             hasher = None
@@ -178,19 +178,19 @@ class HatracStorage (object):
 
         if hasher:
             received_md5 = hasher.digest()
-            if content_md5 != received_md5:
+            if metadata['content-md5'] != received_md5:
                 raise BadRequest(
                     'Received content MD5 %s does not match expected %s.' 
-                    % (binascii.hexlify(received_md5), binascii.hexlify(content_md5))
+                    % (binascii.hexlify(received_md5), binascii.hexlify(metadata['content-md5']))
                 )
 
         return "test"
                
-    def get_content(self, name, version, content_md5=None):
-        return self.get_content_range(name, version, content_md5)
+    def get_content(self, name, version, metadata={}):
+        return self.get_content_range(name, version, metadata)
      
-    def get_content_range(self, name, version, content_md5=None, get_slice=None):
-        """Return (nbytes, content_type, content_md5, data_iterator) tuple for existing file-version object."""
+    def get_content_range(self, name, version, metadata={}, get_slice=None):
+        """Return (nbytes, metadata, data_iterator) tuple for existing file-version object."""
         dirname, relname = self._dirname_relname(name, version)
         fullname = "%s/%s" % (dirname, relname)
         nbytes = os.path.getsize(fullname)
@@ -203,13 +203,13 @@ class HatracStorage (object):
             limit = nbytes
 
         if pos != 0 or limit != nbytes:
-            # cannot integrity-check a partial read
-            content_md5 = None
-        
+            # object metadata does not apply to partial read content
+            metadata = {}
+            
         length = limit - pos
 
         def helper():
-            if content_md5:
+            if 'content-md5' in metadata:
                 hasher = hashlib.md5()
             else:
                 hasher = None
@@ -233,15 +233,15 @@ class HatracStorage (object):
 
                     if eof and hasher:
                         retrieved_md5 = hasher.digest()
-                        if content_md5 != retrieved_md5:
+                        if metadata['content-md5'] != retrieved_md5:
                             raise IOError(
                                 'Retrieved content MD5 %s does not match expected %s.'
-                                % (binascii.hexlify(retrieved_md5), binascii.hexlify(content_md5))
+                                % (binascii.hexlify(retrieved_md5), binascii.hexlify(metadata['content-md5']))
                             )
 
                     yield buf
 
-        return (length, None, content_md5, helper())
+        return (length, metadata, helper())
 
     def delete(self, name, version):
         """Delete object version."""

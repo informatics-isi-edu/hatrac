@@ -17,8 +17,9 @@ This documentation is broken down into the following general topics:
 4. [Nested Namespaces](#nested-namespace-resources)
 5. [Objects](#object-resources)
 6. [Object Versions](#object-version-resources)
-7. [Access Control Lists](#access-control-list-sub-resources)
-8. [Chunked Uploads](#chunked-upload-resources)
+7. [Metadata](#metadata-sub-resources)
+8. [Access Control Lists](#access-control-list-sub-resources)
+9. [Chunked Uploads](#chunked-upload-resources)
 
 ### Quick Links to Operations
 
@@ -37,11 +38,16 @@ The REST API supports the following operations.
   - [Create object version](#object-creation-and-update)
   - [Get object version content](#object-version-retrieval)
   - [Delete object version](#object-version-deletion)
-4. Access control list operations
+4. Metadata management operations
+  - [Get metadata collection](#metadata-collection-retrieval)
+  - [Get metadata value](#metadata-value-retrieval)
+  - [Create or update metadata value](#metadata-value-creation-and-update)
+  - [Delete metadata value](#metadata-value-deletion)
+5. Access control list operations
   - [Get access controls](#access-control-retrieval)
   - [Update access control list](#access-control-list-update)
   - [Clear access control list](#access-control-list-deletion)
-5. Chunked upload operations
+6. Chunked upload operations
   - [Get upload job listing](#chunked-upload-job-listing-retrieval)
   - [Create upload job](#chunked-upload-job-creation)
   - [Get upload job status](#chunked-upload-job-status-retrieval)
@@ -240,7 +246,8 @@ Any hierarchical namespace in Hatrac has an HTTPS URL of the form:
 Where _parent path_ is the name of the enclosing namespace and
 _namespace id_ is the relative name of the nested namespace. Of
 course, the enclosing namespace may be the root namespace of the
-deployment or another nested namespace.
+deployment, e.g. `/hatrac`, or another nested namespace,
+e.g. `/hatrac/some/ancestors`.
 
 ### Nested Namespace Creation
 
@@ -329,24 +336,55 @@ _object name_ is the relative name of the object.
 ### Object Creation and Update
 
 The PUT operation is used to create a new object or a new version of
-an existing object.  A simple JSON representation of the namespace
-configuration is provided as input:
+an existing object.  Literal object content is provided as input:
 
     PUT /namespace_path/object_name
     Host: authority_name
-    Content-Type: content_type
-    Content-Length: N
-    Content-MD5: hash_value
+    Content-Type: text/plain
+    Content-Length: 14
+    Content-MD5: ZXS/CYPMeEBJpBYNGYhyjA==
+	Content-SHA256: 5+aEMqzlEZxe9xPaDUZ0GyBvTUaZf4s0yMpPgV/0yt0=
+	Content-Disposition: filename*=UTF-8''test.txt
 	If-Match: etag_value
 	If-None-Match: *
     
     ...content...
 
-The optional `If-Match` and `If-None-Match` headers MAY be specified to limit object update to specific scenarios. In a normal situation, only one of these two headers is specified in a single request:
+This example has metadata consistent with an object containing a
+single Unix-style text line `...content...\n` inclusive of the
+line-terminator.
+
+The optional `If-Match` and `If-None-Match` headers MAY be specified
+to limit object update to specific scenarios. In a normal situation,
+only one of these two headers is specified in a single request:
   - An _etag value_ with the `If-Match` header requires that the current version of the object on the server match the version indicated by the _etag value_ in order for the object to be updated as per the request _content_.
   - An `*` with the `If-None-Match` header requires that the object lack a current version on the server in order for the object to be created or updated as per the request _content_.
 
-Without either `If-Match` or `If-None-Match` headers in the request, the update will be unconditionally applied if allowed by policy and the current state of the server.
+Without either `If-Match` or `If-None-Match` headers in the request,
+the update will be unconditionally applied if allowed by policy and
+the current state of the server. When supplied, they select HTTP
+standard conditional request processing.
+
+The optional `Content-MD5` and `Content-SHA256` headers can carry an
+MD5 or SHA-256 _hash value_, respectively. The _hash value_ SHOULD be
+the base64 encoded representation of the underlying bit sequence
+defined by the relevant hash algorithm standard. Either or both, if
+supplied, will be stored and returned with data retrieval responses,
+useful for end-to-end data integrity checks by clients. An
+implementation MAY checksum the supplied _content_ and reject the
+request if it mismatches any supplied _hash value_ or if any _hash
+value_ is malformed. An implementation MAY recognize and accept
+hex-encoded _hash value_ or MAY reject it as a bad request, but in
+either case it MUST always return proper base64-encoded _hash value_
+in any service-issued `Content-MD5` or `Content-SHA256` response
+header.
+
+The optional `Content-Disposition` header will be stored and returned
+with data retrieval responses. An implementation MAY restrict which
+values are acceptable as content disposition instructions. Every
+implementation SHOULD support the `filename*=UTF-8''` _filename_
+syntax where _filename_ is a basename with no path separator
+characters.
 
 A successful response is:
 
@@ -357,11 +395,9 @@ A successful response is:
     
     /namespace_path/object_name:version_id
 
-The optional `Content-MD5` header can carry an MD5 _hash value_ which
-will be stored and used for data integrity checks.  The successful
-response includes the _version id_ qualified name of the newly updated
-object.
-    
+The successful response includes the _version id_ qualified name of
+the newly updated object.
+
 Typical PUT error responses would be:
   - **400 Bad Request**: the client supplied a `Content-MD5` header
       with a _hash value_ that does not match the entity _content_
@@ -416,13 +452,16 @@ for which a successful response is:
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
     ETag: etag_value
     
     ...content...
 
-The optional `Content-MD5` header MUST be present if it was supplied
-during object creation and MAY be present if the service computes
-missing checksums in other cases.
+The optional `Content-MD5`, `Content-SHA256`, and
+`Content-Disposition` headers MUST be present if supplied during
+object creation and MAY be present if the service computes missing
+values in other cases.
 
 It is RECOMMENDED that a Hatrac server return an `ETag` indicating the version of the _content_ returned to the client.
     
@@ -451,6 +490,8 @@ for which a successful response is:
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
 
 The HEAD operation is essentially equivalent to the GET operation but
 with the actual object content elided.
@@ -535,6 +576,8 @@ for which the successful response is:
     200 OK
     Content-Type: content_type
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
     Content-Length: N
 	ETag: etag_value
     
@@ -558,6 +601,8 @@ for which the successful response is:
     200 OK
     Content-Type: content_type
     Content-MD5: hash_value
+	Content-SHA256: hash_value
+	Content-Disposition: filename*=UTF-8''filename
     Content-Length: N
     
 with the same interpretation as documented for Object Metadata
@@ -596,6 +641,114 @@ version:
   - An object may be left empty, i.e. with no current version, if all
     versions have been deleted.  A subsequent update can reintroduce
     content for the object.
+
+## Metadata Sub-Resources
+
+The service also exposes sub-resources for metadata management on
+existing object versions:
+
+- https:// _authority_ / _resource name_ ;metadata
+- https:// _authority_ / _resource name_ ;metadata/ _fieldname_
+
+Where _resource name_ is currently restricted to object version names
+as described above. The _fieldname_ is a lower-case string which
+matches an HTTP request header suitable for describing content
+metadata. The currently recognized _fieldnames_ include:
+
+- `content-type`
+- `content-disposition`
+- `content-md5`
+- `content-sha256`
+
+### Lifecycle and Ownership
+
+Metadata are sub-resources of the main resource identified in the
+_resource name_ in the URL, and their lifetime is bounded by the
+lifetime of that main resource.
+
+1. Initial metadata MAY be specified during object creation and update.
+2. Immutable checksums MAY be added on existing object versions.
+3. Mutable metadata MAY be added, removed, or modified on existing object versions.
+
+### Metadata Collection Retrieval
+
+The GET operation is used to retrieve all metadata sub-resources en masse
+as a document:
+
+    GET /resource_name;metadata
+	Host: authority_name
+	Accept: application/json
+	If-None-Match: etag_value
+	
+for which the successful response is:
+
+    200 OK
+	Content-Type: application/json
+	Content-Length: N
+	ETag: etag_value
+	
+	{"content-type": content_type, 
+	 "content-md5": hash_value,
+	 "content-sha256": hash_value,
+	 "content-disposition": disposition}
+
+The standard
+[object version metadata retrieval](#object-version-metadata-retrieval),
+operation uses the `HEAD` method on the main resource to retrieve this
+same metadata as HTTP response headers.
+
+### Metadata Value Retrieval
+
+The GET operation is used to retrieve one metadata sub-resource as a
+text value:
+
+    GET /resource_name;metadata/fieldname
+	Host: authority_name
+	Accept: text/plain
+	If-None-Match: etag_value
+	
+for which the successful response is:
+
+    200 OK
+	Content-Type: text/plain
+	Content-Length: N
+	ETag: etag_value
+	
+	value
+
+The textual _value_ is identical to what would be present in the HTTP
+response header value when retrieving the main resource content.
+
+### Metadata Value Creation and Update
+
+The PUT operation is used to create or update one metadata sub-resource as a
+text value:
+
+    PUT /resource_name;metadata/fieldname
+	Host: authority_name
+	Content-Type: text/plain
+	If-Match: etag_value
+
+	value
+
+for which the successful response is:
+
+    204 No Content
+
+The textual _value_ is identical to what would be present in the HTTP
+request header value when creating the main resource content.
+
+### Metadata Value Deletion
+
+The DELETE operation is used to create or update one metadata sub-resource as a
+text value:
+
+    DELETE /resource_name;metadata/fieldname
+	Host: authority_name
+
+for which the successful response is:
+
+    204 No Content
 
 ## Access Control List Sub-Resources
 
@@ -906,15 +1059,26 @@ The POST operation is used to create a new upload job:
     Host: authority_name
     Content-Type: application/json
     
-    {"chunk_bytes": K, 
-     "total_bytes": N,
-     "content_type": "content_type",
-     "content_md5": "hash_value"}
+    {"chunk-bytes": K, 
+     "content-length": N,
+     "content-type": "content_type",
+     "content-md5": "hash_value",
+	 "content-sha256": "hash_value",
+	 "content-disposition": "disposition"}
 
-where the JSON attributes `chunk-bytes` and `total-bytes` are
+where the JSON attributes `chunk-bytes` and `content-length` are
 mandatory to describe the shape of the data upload, while
-`content-type` and `content-md5` are optional and have the same
-meaning as if passed as headers in a simple PUT object operation.
+`content-type`, `content-disposition`, `content-md5`, and
+`content-sha256` are optional and provide additional metadata for the
+completed object, with the same semantics as if the object had been
+created as a simple object (without the upload job API) and those same
+fields had been provided as HTTP PUT request headers. For backwards
+compatibility, these JSON attribute names are also supported as
+aliases:
+
+- `chunk_bytes`: deprecated alias for `chunk-length`
+- `total_bytes`: deprecated alias for `content-length`
+- `content_md5`: deprecated alias for `content-md5`
 
 for which the successful response is:
 
@@ -1028,13 +1192,16 @@ for which the successful response is:
     
     {"url": "/namespace_path/object_name;upload/job_id",
      "owner": ["role"...],
-     "chunksize": K,
-     "target": "/namespace_path/object_name"}
+     "target": "/namespace_path/object_name"
+     "chunk-length": K,
+	 "content-length": N,
+	 ...
+	}
      
-summarizing the parameters set when the job was created. Note, there
-is no support for determining which chunks have or have not been
-uploaded as such tracking is not a requirement placed on Hatrac
-implementations.
+summarizing the parameters set when the job was created including
+optional object metadata such as `content-type`. Note, there is no
+support for determining which chunks have or have not been uploaded as
+such tracking is not a requirement placed on Hatrac implementations.
 
 ### Chunked Upload Job Cancellation
 

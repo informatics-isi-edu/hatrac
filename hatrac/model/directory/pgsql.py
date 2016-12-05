@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2016 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -52,14 +52,7 @@ from psycopg2.extras import DictCursor
 from StringIO import StringIO
 from webauthn2.util import sql_literal, sql_identifier, jsonWriterRaw
 import hatrac.core
-from hatrac.core import coalesce
-
-def sql_hexlify(b):
-    """Serialize binary string as hex-encoded text literal for SQL, handling None as NULL."""
-    if b is None:
-        return sql_literal(b)
-    else:
-        return sql_literal(binascii.hexlify(b))
+from hatrac.core import coalesce, Metadata
 
 def regexp_escape(s):
     safe = set(
@@ -83,7 +76,8 @@ class ACLEntry (str):
 
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        return len(self), 'text/plain', None, self
+        body = self + '\n'
+        return len(body), Metadata({'content-type': 'text/plain'}), body
 
 class ACL (set):
     def is_object(self):
@@ -92,8 +86,7 @@ class ACL (set):
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(list(self)) + '\n'
-        nbytes = len(body)
-        return nbytes, 'application/json', None, body
+        return len(body), Metadata({'content-type': 'application/json'}), body
 
     def __getitem__(self, role):
         if role not in self:
@@ -112,7 +105,7 @@ class ACLs (dict):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = jsonWriterRaw(self.resource.get_acls()) + '\n'
         nbytes = len(body)
-        return nbytes, 'application/json', None, body
+        return nbytes, Metadata({'content-type': 'application/json'}), body
 
     def __getitem__(self, k):
         try:
@@ -138,6 +131,8 @@ class HatracName (object):
         self.pid = args['pid']
         self.name = args['name']
         self.is_deleted = args.get('is_deleted')
+        self.metadata = Metadata(args.get('metadata', {}))
+        self.metadata.resource = self
         self.acls = ACLs()
         self.acls.directory = directory
         self.acls.resource = self
@@ -207,6 +202,12 @@ class HatracName (object):
         """Delete resource and its children."""
         return self.directory.delete_name(self, client_context)
 
+    def update_metadata(self, updates, client_context):
+        self.directory.update_resource_metadata(self, updates, client_context)
+
+    def pop_metadata(self, fieldname, client_context):
+        self.directory.pop_resource_metadata(self, fieldname, client_context)
+        
     def set_acl(self, access, acl, client_context):
         self.directory.set_resource_acl(self, access, acl, client_context)
 
@@ -237,10 +238,10 @@ class HatracNamespace (HatracName):
         return self.directory.create_name(name, is_object, client_context)
 
     def get_content(self, client_context, get_data=True):
-        """Return (nbytes, content_type, content_md5, data_generator) for namespace."""
+        """Return (nbytes, metadata, data_generator) for namespace."""
         body = [ str(r) for r in self.directory.namespace_enumerate_names(self, False) ]
         body = jsonWriterRaw(body) + '\n'
-        return (len(body), 'application/json', None, body)
+        return (len(body), Metadata({'content-type': 'application/json'}), body)
 
 class HatracObject (HatracName):
     """Represent a bound object."""
@@ -262,17 +263,17 @@ class HatracObject (HatracName):
     def get_versions(self):
         return HatracVersions(self)
 
-    def create_version_from_file(self, input, client_context, nbytes, content_type=None, content_md5=None):
+    def create_version_from_file(self, input, client_context, nbytes, metadata={}):
         """Create, persist, and return HatracObjectVersion with given content.
 
         """
-        return self.directory.create_version_from_file(self, input, client_context, nbytes, content_type, content_md5)
+        return self.directory.create_version_from_file(self, input, client_context, nbytes, metadata)
 
-    def create_version_upload_job(self, chunksize, client_context, nbytes=None, content_type=None, content_md5=None):
-        return self.directory.create_version_upload_job(self, chunksize, client_context, nbytes, content_type, content_md5)
+    def create_version_upload_job(self, chunksize, client_context, nbytes=None, metadata={}):
+        return self.directory.create_version_upload_job(self, chunksize, client_context, nbytes, metadata)
 
     def get_content_range(self, client_context, get_slice=None, get_data=True):
-        """Return (nbytes, content_type, content_md5, data_generator) for current version.
+        """Return (nbytes, metadata, data_generator) for current version.
         """
         resource = self.get_current_version()
         return resource.get_content_range(client_context, get_slice, get_data=get_data)
@@ -306,7 +307,7 @@ class HatracVersions (object):
             "%s%s" % (self.object.directory.prefix, name)
             for name in self.object.directory.object_enumerate_versions(self.object)
         ]) + '\n'
-        return len(body), 'application/json', None, body
+        return len(body), Metadata({'content-type': 'application/json'}), body
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
@@ -322,10 +323,6 @@ class HatracObjectVersion (HatracName):
         self.object = object
         self.version = args['version']
         self.nbytes = args['nbytes']
-        self.content_type = args['content_type']
-        self.content_md5 = None
-        if args['content_md5']:
-            self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
         return '%s:%s' % (self.object, self.version)
@@ -367,7 +364,7 @@ class HatracUploads (object):
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner'], client_context)
         body = jsonWriterRaw(self.object.directory.namespace_enumerate_uploads(self.object)) + '\n'
-        return len(body), 'application/json', None, body
+        return len(body), Metadata({'content-type': 'application/json'}), body
 
 class HatracUpload (HatracName):
     """Represent an upload job."""
@@ -385,8 +382,6 @@ class HatracUpload (HatracName):
         self.job = args['job']
         self.nbytes = args['nbytes']
         self.chunksize = args['chunksize']
-        self.content_type = args['content_type']
-        self.content_md5 = binascii.unhexlify(args['content_md5'])
 
     def __str__(self):
         return "%s;upload/%s" % (self.object, self.job)
@@ -398,21 +393,29 @@ class HatracUpload (HatracName):
         object = self.object._reload(conn, cur)
         return type(self)(self.directory, object, **self.directory._upload_lookup(conn, cur, object, self.job))
 
-    def upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5=None):
-        return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, content_md5)
+    def upload_chunk_from_file(self, position, input, client_context, nbytes, metadata={}):
+        return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, metadata)
 
     def get_content(self, client_context, get_data=True):
         self.enforce_acl(['owner'], client_context)
-        body = jsonWriterRaw(dict(
-            url=str(self), 
-            target=str(self.object), 
-            owner=self.get_acl('owner'),
-            chunksize=self.chunksize,
-            nbytes=self.nbytes,
-            content_type=self.content_type,
-            content_md5=self.content_md5 and base64.b64encode(self.content_md5) or None
-            )) + '\n'
-        return len(body), 'application/json', None, body
+        metadata = self.metadata.to_http()
+        body = {
+            'url': str(self), 
+            'target': str(self.object), 
+            'owner': self.get_acl('owner'),
+            'chunk-length': self.chunksize,
+            'content-length': self.nbytes
+        }
+        for hdr in {
+                'content-type',
+                'content-md5',
+                'content-sha256',
+                'content-disposition',
+        }:
+            if hdr in metadata:
+                body[hdr] = metadata[hdr]
+        body = jsonWriterRaw(body) + '\n'
+        return len(body), Metadata({'content-type': 'application/json'}), body
 
     def finalize(self, client_context):
         return self.directory.upload_finalize(self, client_context)
@@ -434,6 +437,8 @@ class connection (psycopg2.extensions.connection):
     def _prepare_hatrac_stmts(self):
         cur = self.cursor()
         cur.execute("""
+        
+        DEALLOCATE PREPARE ALL;
 
         PREPARE hatrac_complete_version (int8, text, boolean) AS 
           UPDATE hatrac.version  SET is_deleted = $3, version = $2  WHERE id = $1 ;
@@ -639,7 +644,7 @@ class PooledConnection (object):
                 conn = None
 
 _name_table_sql = """
-CREATE TABLE hatrac.name (
+CREATE TABLE IF NOT EXISTS hatrac.name (
   id bigserial PRIMARY KEY,
   pid int8 REFERENCES hatrac."name" (id),
   ancestors int8[],
@@ -656,25 +661,25 @@ CREATE TABLE hatrac.name (
   "subtree-read" text[]
 );
 
-CREATE INDEX ON hatrac."name" USING gin (ancestors) WHERE NOT is_deleted;
-CREATE INDEX ON hatrac."name" (id) WHERE "subtree-owner" IS NOT NULL;
-CREATE INDEX ON hatrac."name" (id) WHERE "subtree-create" IS NOT NULL;
-CREATE INDEX ON hatrac."name" (id) WHERE "subtree-read" IS NOT NULL;
-CREATE INDEX ON hatrac."name" (id) WHERE "subtree-update" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS name_ancestors_idx ON hatrac."name" USING gin (ancestors) WHERE NOT is_deleted;
+CREATE INDEX IF NOT EXISTS name_id_idx ON hatrac."name" (id) WHERE "subtree-owner" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS name_id_idx1 ON hatrac."name" (id) WHERE "subtree-create" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS name_id_idx2 ON hatrac."name" (id) WHERE "subtree-read" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS name_id_idx3 ON hatrac."name" (id) WHERE "subtree-update" IS NOT NULL;
 
 INSERT INTO hatrac.name 
 (name, ancestors, subtype, is_deleted)
-VALUES ('/', array[]::int8[], 0, False);
+VALUES ('/', array[]::int8[], 0, False)
+ON CONFLICT (name) DO NOTHING ;
 """
 
 _version_table_sql = """
-CREATE TABLE hatrac.version (
+CREATE TABLE IF NOT EXISTS hatrac.version (
   id bigserial PRIMARY KEY,
   nameid int8 NOT NULL REFERENCES hatrac.name(id),
   version text,
   nbytes int8,
-  content_type text,
-  content_md5 text,
+  metadata jsonb,
   is_deleted bool NOT NULL,
   owner text[],
   read text[],
@@ -682,18 +687,17 @@ CREATE TABLE hatrac.version (
   CHECK(version IS NOT NULL OR is_deleted)
 );
 
-CREATE INDEX version_nameid_id_idx ON hatrac.version (nameid, id);
+CREATE INDEX IF NOT EXISTS version_nameid_id_idx ON hatrac.version (nameid, id);
 """
 
 _upload_table_sql = """
-CREATE TABLE hatrac.upload (
+CREATE TABLE IF NOT EXISTS hatrac.upload (
   id bigserial PRIMARY KEY,
   nameid int8 NOT NULL REFERENCES hatrac.name(id),
   job text NOT NULL,
   nbytes int8 NOT NULL,
   chunksize int8 NOT NULL,
-  content_type text,
-  content_md5 text,
+  metadata jsonb,
   owner text[],
   UNIQUE(nameid, job),
   CHECK(chunksize > 0)
@@ -701,7 +705,7 @@ CREATE TABLE hatrac.upload (
 """
 
 _chunk_table_sql = """
-CREATE TABLE hatrac.chunk (
+CREATE TABLE IF NOT EXISTS hatrac.chunk (
   uploadid int8 NOT NULL REFERENCES hatrac.upload(id),
   position int8 NOT NULL,
   aux json,
@@ -767,6 +771,10 @@ class HatracDirectory (object):
         self.prefix = config.get('service_prefix')
         self.pc = PooledConnection(config.database_dsn)
 
+    @staticmethod
+    def metadata_from_http(metadata):
+        return Metadata.from_http(metadata)
+        
     @db_wrap()
     def schema_upgrade(self, conn=None, cur=None):
         cur.execute("""
@@ -774,7 +782,7 @@ SELECT bool_or(True) AS has_ancestors FROM information_schema.columns
 WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'ancestors' ;
 """
         )
-        if not cur.next()['has_ancestors']:
+        if not cur.next()[0]:
             cur.execute("""
 ALTER TABLE hatrac."name" ADD COLUMN ancestors int8[];
 UPDATE hatrac."name" SET ancestors = ARRAY[]::int8[];
@@ -788,7 +796,7 @@ SELECT max( array_length(regexp_split_to_array(substring(n.name from 2), '/'), 1
 FROM name n
 WHERE id > 1;
 """)[0].maxdepth
-            maxdepth = cur.next()['maxdepth']
+            maxdepth = cur.next()[0]
             
             for i in range(maxdepth):
                 cur.execute("""
@@ -803,14 +811,14 @@ WHERE n.id = n2.id
   AND a.ancestors IS NOT NULL
   AND n.id > 1
 """)
-            web.debug('added ancestors column to name table')
+            sys.stderr.write('added ancestors column to name table\n')
 
         cur.execute("""
 SELECT bool_or(True) AS has_pid FROM information_schema.columns
 WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'pid';
 """
         )
-        if not cur.next()['has_pid']:
+        if not cur.next()[0]:
             cur.execute("""
 ALTER TABLE hatrac."name" ADD COLUMN "pid" int8 REFERENCES "name" (id);
 UPDATE hatrac."name" c SET pid = p.id
@@ -823,8 +831,36 @@ WHERE c.id = c2.id
   AND p.name = ('/' || array_to_string(c2.name_parts[1:array_length(c2.name_parts, 1)-1], '/'))
 ;
 """)
-            web.debug('added pid column to name table')
-            
+            sys.stderr.write('added pid column to name table\n')
+
+        cur.execute("""
+SELECT table_name
+FROM information_schema.columns
+WHERE table_schema = 'hatrac' 
+  AND table_name = ANY (ARRAY['version', 'upload'])
+  AND column_name = 'content_type'
+EXCEPT
+SELECT table_name
+FROM information_schema.columns
+WHERE table_schema = 'hatrac' 
+  AND table_name = ANY (ARRAY['version', 'upload'])
+  AND column_name = 'metadata';
+""")
+        for tname in [ row[0] for row in cur ]:
+            sys.stderr.write('converting %s to have metadata column... ' % tname)
+            cur.execute("""
+ALTER TABLE hatrac.%(table)s ADD COLUMN metadata jsonb;
+UPDATE hatrac.%(table)s SET metadata = (
+  CASE WHEN content_type IS NOT NULL THEN jsonb_build_object('content-type', content_type) ELSE '{}'::jsonb END
+  || CASE WHEN content_md5 IS NOT NULL THEN jsonb_build_object('content-md5', content_md5) ELSE '{}'::jsonb END
+);
+ALTER TABLE hatrac.%(table)s DROP COLUMN content_type;
+ALTER TABLE hatrac.%(table)s DROP COLUMN content_md5;
+ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
+""" % dict(table=sql_identifier(tname))
+            )
+            sys.stderr.write('done.\n')
+        
     @db_wrap()
     def deploy_db(self, admin_roles, conn=None, cur=None):
         """Initialize database and set root namespace owners."""
@@ -925,33 +961,33 @@ WHERE c.id = c2.id
         return lambda : self.storage.delete(resource.name, resource.version)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
-    def create_version(self, object, client_context, nbytes=None, content_type=None, content_md5=None, conn=None, cur=None):
+    def create_version(self, object, client_context, nbytes=None, metadata={}, conn=None, cur=None):
         """Create, persist, and return a HatracObjectVersion instance.
 
            Newly created instance is marked 'deleted'.
         """
-        v = self._create_version(conn, cur, object, nbytes, content_type, content_md5)
+        v = self._create_version(conn, cur, object, nbytes, metadata)
         resource = HatracObjectVersion(self, object, **v)
         self._set_resource_acl_role(conn, cur, resource, 'owner', client_context.client)
         return resource
 
-    def create_version_from_file(self, object, input, client_context, nbytes, content_type=None, content_md5=None):
+    def create_version_from_file(self, object, input, client_context, nbytes, metadata={}):
         """Create, persist, and return HatracObjectVersion with given content.
 
         """
-        resource = self.create_version(object, client_context, nbytes, content_type, content_md5)
-        version = self.storage.create_from_file(object.name, input, nbytes, content_type, content_md5)
+        resource = self.create_version(object, client_context, nbytes, metadata)
+        version = self.storage.create_from_file(object.name, input, nbytes, metadata)
         self.pc.perform(lambda conn, cur: self._complete_version(conn, cur, resource, version))
         return self.version_resolve(object, version)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
-    def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, content_type=None, content_md5=None, conn=None, cur=None):
-        job = self.storage.create_upload(object.name, nbytes, content_type, content_md5)
-        resource = HatracUpload(self, object, **self._create_upload(conn, cur, object, job, chunksize, nbytes, content_type, content_md5))
+    def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
+        job = self.storage.create_upload(object.name, nbytes, metadata)
+        resource = HatracUpload(self, object, **self._create_upload(conn, cur, object, job, chunksize, nbytes, metadata))
         self._set_resource_acl_role(conn, cur, resource, 'owner', client_context.client)
         return resource
 
-    def upload_chunk_from_file(self, upload, position, input, client_context, nbytes, content_md5=None):
+    def upload_chunk_from_file(self, upload, position, input, client_context, nbytes, metadata={}):
         upload.enforce_acl(['owner'], client_context)
         nchunks = upload.nbytes / upload.chunksize
         remainder = upload.nbytes % upload.chunksize
@@ -969,7 +1005,7 @@ WHERE c.id = c2.id
             upload.chunksize, 
             input, 
             nbytes, 
-            content_md5
+            metadata
         )
 
         def db_thunk(conn, cur):
@@ -984,8 +1020,8 @@ WHERE c.id = c2.id
             chunk_aux = list(self._chunk_list(conn, cur, upload))
         else:
             chunk_aux = None
-        version_id = self.storage.finalize_upload(upload.name, upload.job, chunk_aux, content_md5=upload.content_md5)
-        version = HatracObjectVersion(self, upload.object, **self._create_version(conn, cur, upload.object, upload.nbytes, upload.content_type, upload.content_md5))
+        version_id = self.storage.finalize_upload(upload.name, upload.job, chunk_aux, metadata=upload.metadata)
+        version = HatracObjectVersion(self, upload.object, **self._create_version(conn, cur, upload.object, upload.nbytes, upload.metadata))
         self._set_resource_acl_role(conn, cur, version, 'owner', client_context.client)
         self._complete_version(conn, cur, version, version_id)
         self._delete_upload(conn, cur, upload)
@@ -1003,13 +1039,12 @@ WHERE c.id = c2.id
         if objversion.is_deleted:
             raise hatrac.core.NotFound('Resource %s is not available.' % objversion)
         if get_data:
-            nbytes, content_type, content_md5, data = self.storage.get_content_range(object.name, objversion.version, objversion.content_md5, get_slice)
+            nbytes, metadata, data = self.storage.get_content_range(object.name, objversion.version, objversion.metadata, get_slice)
         else:
             nbytes = objversion.nbytes
-            content_type = objversion.content_type
-            content_md5 = objversion.content_md5
+            metadata = objversion.metadata
             data = None
-        return nbytes, objversion.content_type, content_md5, data
+        return nbytes, metadata, data
 
     def get_version_content(self, object, objversion, client_context, get_data=True):
         """Return (nbytes, data_generator) pair for specific version."""
@@ -1052,6 +1087,14 @@ WHERE c.id = c2.id
         else:
             raise hatrac.core.Conflict('Object %s currently has no content.' % object)
 
+    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
+    def update_resource_metadata(self, resource, updates, client_context, conn=None, cur=None):
+        self._update_resource_metadata(conn, cur, resource, updates)
+        
+    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
+    def pop_resource_metadata(self, resource, fieldname, client_context, conn=None, cur=None):
+        self._pop_resource_metadata(conn, cur, resource, fieldname)
+        
     @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def set_resource_acl_role(self, resource, access, role, client_context, conn=None, cur=None):
         self._set_resource_acl_role(conn, cur, resource, access, role)
@@ -1093,6 +1136,32 @@ WHERE c.id = c2.id
             for r in self._namespace_enumerate_uploads(conn, cur, resource, recursive) 
         ]
 
+    def _update_resource_metadata(self, conn, cur, resource, updates):
+        resource.metadata.update(updates)
+        cur.execute("""
+UPDATE hatrac.%(table)s n
+SET metadata = %(metadata)s
+WHERE n.id = %(id)s ;
+""" % dict(
+    table=sql_identifier(resource._table_name),
+    id=sql_literal(resource.id),
+    metadata=sql_literal(resource.metadata.to_sql())
+)
+        )
+
+    def _pop_resource_metadata(self, conn, cur, resource, fieldname):
+        resource.metadata.pop(fieldname)
+        cur.execute("""
+UPDATE hatrac.%(table)s n
+SET metadata = %(metadata)s
+WHERE n.id = %(id)s ;
+""" % dict(
+    table=sql_identifier(resource._table_name),
+    id=sql_literal(resource.id),
+    metadata=sql_literal(resource.metadata.to_sql())
+)
+        )
+        
     def _set_resource_acl_role(self, conn, cur, resource, access, role):
         if access not in resource._acl_names:
             raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
@@ -1162,11 +1231,11 @@ RETURNING *
         )
         return list(cur)[0]
 
-    def _create_version(self, conn, cur, object, nbytes=None, content_type=None, content_md5=None):
+    def _create_version(self, conn, cur, object, nbytes=None, metadata={}):
         cur.execute("""
 INSERT INTO hatrac.version
-(nameid, nbytes, content_type, content_md5, is_deleted)
-VALUES (%(nameid)s, %(nbytes)s, %(type)s, %(md5)s, True)
+(nameid, nbytes, metadata, is_deleted)
+VALUES (%(nameid)s, %(nbytes)s, %(metadata)s, True)
 RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS "ancestors"
 """ % dict(
     name=sql_literal(object.name),
@@ -1174,17 +1243,16 @@ RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS
     pid=sql_literal(object.pid),
     ancestors=','.join([sql_literal(a) for a in object.ancestors]),
     nbytes=nbytes is not None and sql_literal(int(nbytes)) or 'NULL::int8',
-    type=content_type and sql_literal(content_type) or 'NULL::text',
-    md5=sql_hexlify(content_md5)
+    metadata=sql_literal(metadata.to_sql())
 )
         )
         return list(cur)[0]
 
-    def _create_upload(self, conn, cur, object, job, chunksize, nbytes, content_type, content_md5):
+    def _create_upload(self, conn, cur, object, job, chunksize, nbytes, metadata):
         cur.execute("""
 INSERT INTO hatrac.upload 
-(nameid, job, nbytes, chunksize, content_type, content_md5)
-VALUES (%(nameid)s, %(job)s, %(nbytes)s, %(chunksize)s, %(content_type)s, %(content_md5)s)
+(nameid, job, nbytes, chunksize, metadata)
+VALUES (%(nameid)s, %(job)s, %(nbytes)s, %(chunksize)s, %(metadata)s)
 RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS "ancestors"
 """ % dict(
     name=sql_literal(object.name),
@@ -1194,8 +1262,7 @@ RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS
     job=sql_literal(job),
     nbytes=sql_literal(int(nbytes)),
     chunksize=sql_literal(int(chunksize)),
-    content_type=sql_literal(content_type),
-    content_md5=sql_hexlify(content_md5)
+    metadata=sql_literal(metadata.to_sql())
 )
         )
         return list(cur)[0]
@@ -1262,6 +1329,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
             if row['is_deleted'] and not allow_deleted:
                 raise hatrac.core.NotFound("Resource %s:%s not available." % (object, version))
             else:
+                row['metadata'] = Metadata.from_sql(row['metadata'])
                 return row
         raise hatrac.core.NotFound("Resource %s:%s not found." % (object, version))
 
@@ -1271,6 +1339,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(job)
         ))
         for row in list(cur):
+            row['metadata'] = Metadata.from_sql(row['metadata'])
             return row
         raise hatrac.core.NotFound("Resource %s;upload/%s not found." % (object, job))
         
@@ -1286,7 +1355,10 @@ EXECUTE hatrac_delete_upload(%(id)s);
             nameid,
             ("%d" % limit) if limit is not None else 'NULL'
         ))
-        return list(cur)
+        def helper(row):
+            row['metadata'] = Metadata.from_sql(row['metadata'])
+            return row
+        return [ helper(row) for row in cur ]
         
     def _chunk_list(self, conn, cur, upload, position=None):
         cur.execute("EXECUTE hatrac_chunk_list(%d, %s);" % (
@@ -1304,7 +1376,10 @@ EXECUTE hatrac_delete_upload(%(id)s);
             cur.execute("EXECUTE hatrac_object_enumerate_versions(%s);" % sql_literal(int(resource.id)))
         else:
             cur.execute("EXECUTE hatrac_namepattern_enumerate_versions(%s);" % sql_literal(sql_literal("^" + regexp_escape(resource.name) + '/')))
-        return list(cur)
+        def helper(row):
+            row['metadata'] = Metadata.from_sql(row['metadata'])
+            return row
+        return [ helper(row) for row in cur ]
 
     def _namespace_enumerate_names(self, conn, cur, resource, recursive=True, need_acls=True):
         cur.execute("EXECUTE hatrac_namespace_%s_%sacl (%s);" % (
