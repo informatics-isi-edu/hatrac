@@ -214,8 +214,9 @@ def web_method():
             
             try:
                 # get client authentication context
-                web.ctx.webauthn2_context = context_from_environment()
-                if web.ctx.webauthn2_context.client is None:
+                web.ctx.webauthn2_context = context_from_environment(fallback=False)
+                if web.ctx.webauthn2_context is None:
+                    web.debug("falling back to _webauthn2_manager.get_request_context() after failed context_from_environment(False)")
                     web.ctx.webauthn2_context = _webauthn2_manager.get_request_context()
             except (ValueError, IndexError), ev:
                 raise Unauthorized('service access requires client authentication')
