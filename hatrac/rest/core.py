@@ -293,6 +293,16 @@ class RestHandler (object):
         else:
             return None
 
+    def parse_querystr(self, querystr):
+        params = querystr.split('&')
+        result = {}
+        for param in params:
+            if param:
+                parts = param.split('=')
+                if parts:
+                    result[ parts[0] ] = '='.join(parts[1:])
+        return result
+        
     def set_http_etag(self, version):
         """Set an ETag from version key.
 

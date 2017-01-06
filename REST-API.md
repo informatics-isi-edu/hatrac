@@ -257,7 +257,14 @@ The PUT operation is used to create a new nested namespace:
     Host: authority_name
     Content-Type: application/x-hatrac-namespace
 
-for which a successful response is:
+which may also be modified with the `parents` query parameter:
+
+    PUT /parent_path/namespace_id?parents=true
+    Host: authority_name
+    Content-Type: application/x-hatrac-namespace
+
+to request automatic creation of missing ancestors in _parent path_.
+In either case, a successful response is:
 
     201 Created
     Location: /parent_path/namespace_id
@@ -275,6 +282,9 @@ Typical PUT error responses would be:
   anonymous creation of such a namespace is not supported.
 - **403 Forbidden**: the client is authenticated but does not have
   sufficient privilege to create or update the namespace.
+- **404 Not Found**: the parent namespace does not exist and
+  `parents=true` query parameter was not supplied to request automatic
+  creation of missing ancestors.
 - **409 Conflict**: the namespace cannot be created due to a
   conflict with existing state of the service:
   - The _parent path_ does not denote a namespace
@@ -354,6 +364,12 @@ This example has metadata consistent with an object containing a
 single Unix-style text line `...content...\n` inclusive of the
 line-terminator.
 
+As with nested namespace creation, an optional query parameter may be
+included to enable automatic namespace creation:
+
+    PUT /namespace_path/object_name?parents=true
+	...
+
 The optional `If-Match` and `If-None-Match` headers MAY be specified
 to limit object update to specific scenarios. In a normal situation,
 only one of these two headers is specified in a single request:
@@ -406,6 +422,9 @@ Typical PUT error responses would be:
       anonymous creation of such an object is not supported.
   - **403 Forbidden**: the client is authenticated but does not have
       sufficient privilege to create the object.
+  - **404 Not Found**: the _parent path_ does not exist and the
+    `parents=true` query parameter was not supplied to request
+    automatic creation of missing ancestors.
   - **409 Conflict**: the object cannot be created due to a
       conflict with existing state of the service:
     - The _namespace path_ may not denote a namespace
@@ -1080,7 +1099,13 @@ aliases:
 - `total_bytes`: deprecated alias for `content-length`
 - `content_md5`: deprecated alias for `content-md5`
 
-for which the successful response is:
+As with object and namespace creation, an optional query parameter may
+be supplied to request automatic creation of ancestor namespaces:
+
+    POST /namespace_path/object_name;upload?parents=true
+	...
+
+In either case, the successful response is:
 
     201 Created
     Location /namespace_path/object_name;upload/job_id

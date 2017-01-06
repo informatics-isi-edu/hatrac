@@ -227,7 +227,7 @@ dotest "404::*::*" /ns-${RUNKEY}
 # create some test namespaces
 dotest "201::text/uri-list::*" /ns-${RUNKEY} -X PUT -H "Content-Type: application/x-hatrac-namespace"
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
-dotest "409::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "409::*::*"             /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2 -X PUT -H "Content-Type: application/x-hatrac-namespace"
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/bar -X PUT -H "Content-Type: application/x-hatrac-namespace"
 
@@ -371,6 +371,12 @@ dotest "409::*::*" /ns-${RUNKEY}/foo/obj3
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj3 -X DELETE
 dotest "404::*::*" /ns-${RUNKEY}/foo/obj3
 
+# test ancestor conflict modes
+dotest "404::*::*" "/ns-${RUNKEY}/not1/obj1"        -X PUT -T $0 -H "Content-Type: application/x-bash"
+dotest "404::*::*" "/ns-${RUNKEY}/not2/there2/obj1" -X PUT -T $0 -H "Content-Type: application/x-bash"
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/not1/obj1?parents=true"        -X PUT -T $0 -H "Content-Type: application/x-bash"
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/not2/there2/obj1?parents=true" -X PUT -T $0 -H "Content-Type: application/x-bash"
+
 # test chunk upload (S3 requires at least 5MB chunks)
 upload_file_name="/tmp/dummy-${RUNKEY}"
 chunk_bytes=5242889
@@ -383,6 +389,8 @@ split -b ${chunk_bytes} -d ${upload_file_name} /tmp/parts-${RUNKEY}-
 
 # namespaces don't have upload resources
 dotest "404::*::*" "/ns-${RUNKEY}/foo2;upload"
+
+upload_query=
 
 douploadtest()
 {
@@ -418,7 +426,9 @@ douploadtest()
 }
 EOF
 
-    dotest "$1" "${_url};upload"  \
+    [[ -n "${upload_query}" ]] && _suffix="?${upload_query}" || _suffix=''
+    
+    dotest "$1" "${_url};upload${_suffix}"  \
 	   -T "${TEST_DATA}" \
 	   -X POST \
 	   -H "Content-Type: application/json"
@@ -475,6 +485,14 @@ dotest "404::*::*" "${upload}" -X POST
 # check finalized object
 dotest "200::application/x-bash::${upload_total_bytes}" /ns-${RUNKEY}/foo2/obj1
 obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
+
+# test ancestor conflict modes
+douploadtest "/ns-${RUNKEY}/not3/obj1"        "" "" "404::*::*" 
+douploadtest "/ns-${RUNKEY}/not4/there2/obj1" "" "" "404::*::*" 
+upload_query='parents=true'
+douploadtest "/ns-${RUNKEY}/not3/obj1"        "" "" "201::text/uri-list::*" "204::*::*" "204::*::*"
+douploadtest "/ns-${RUNKEY}/not4/there2/obj1" "" "" "201::text/uri-list::*" "204::*::*" "204::*::*"
+upload_query=''
 
 
 # check upload job deletion

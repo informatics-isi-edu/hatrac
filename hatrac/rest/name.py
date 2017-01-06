@@ -82,8 +82,10 @@ class NameVersions (RestHandler):
 
 @web_url([
      # path, name
-    '/((?:[^/:;]+/)*)([^/:;]+)/?',
-    '/()()'
+    '/((?:[^/:;]+/)*)([^/:;]+)/?[?](.*)',
+    '/((?:[^/:;]+/)*)([^/:;]+)/?()',
+    '/()()[?](.*)',
+    '/()()()'
 ])
 class Name (RestHandler):
     """Represent Hatrac resources addressed by bare names.
@@ -95,10 +97,10 @@ class Name (RestHandler):
         RestHandler.__init__(self)
 
     @web_method()
-    def PUT(self, path, name):
+    def PUT(self, path, name, querystr):
         """Create object version or empty zone."""
         in_content_type = self.in_content_type()
-
+        
         resource = self.resolve(path, name, False)
         if not resource:
             # TODO: clarify disambiguation rules
@@ -107,11 +109,15 @@ class Name (RestHandler):
             else:
                 is_object = True
 
+            params = self.parse_querystr(querystr)
+            make_parents = params.get('parents', 'false').lower() == 'true'
+        
             # check precondition for current state of resource not existing
             self.http_check_preconditions('PUT', False)
             resource = web.ctx.hatrac_directory.create_name(
                 self._fullname(path, name),
                 is_object,
+                make_parents,
                 web.ctx.webauthn2_context
             )
         elif not resource.is_object():
@@ -156,7 +162,7 @@ class Name (RestHandler):
         return self.create_response(resource)
 
     @web_method()
-    def DELETE(self, path, name):
+    def DELETE(self, path, name, querystr):
         """Destroy all object versions or empty zone."""
         resource = self.resolve(
             path, name
@@ -182,7 +188,7 @@ class Name (RestHandler):
         return self.delete_response()
 
     # see core.RestHandler.GET and HEAD...
-    def _GET(self, path, name):
+    def _GET(self, path, name, querystr):
         """Get latest object version or zone listing."""
         resource = self.resolve(
             path, name

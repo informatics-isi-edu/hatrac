@@ -90,7 +90,8 @@ class ObjectTransfer (RestHandler):
 
 @web_url([
     # path, name
-    '/((?:[^/:;]+/)*)([^/:;]+);upload/?'
+    '/((?:[^/:;]+/)*)([^/:;]+);upload/?[?](.*)',
+    '/((?:[^/:;]+/)*)([^/:;]+);upload/?()'
 ])
 class ObjectTransfers (RestHandler):
 
@@ -98,7 +99,7 @@ class ObjectTransfers (RestHandler):
         RestHandler.__init__(self)
 
     @web_method()
-    def POST(self, path, name):
+    def POST(self, path, name, querystr):
         """Create a new chunked transfer job."""
         in_content_type = self.in_content_type()
 
@@ -141,9 +142,12 @@ class ObjectTransfers (RestHandler):
             
         # create object implicitly or reuse existing object...
         try:
+            params = self.parse_querystr(querystr)
+            make_parents = params.get('parents', 'false').lower() == 'true'
             resource = web.ctx.hatrac_directory.create_name(
                 self._fullname(path, name),
-                True,
+                True,  # is_object
+                make_parents,
                 web.ctx.webauthn2_context
             )
         except hatrac.core.Conflict, ev:
@@ -159,7 +163,7 @@ class ObjectTransfers (RestHandler):
         )
         return self.create_response(upload)
 
-    def _GET(self, path, name):
+    def _GET(self, path, name, querystr):
         """List outstanding chunked transfer jobs."""
         resource = self.resolve(path, name).get_uploads()
         self.http_check_preconditions()

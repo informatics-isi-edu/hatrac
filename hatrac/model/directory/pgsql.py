@@ -725,16 +725,25 @@ def db_wrap(reload_pos=None, transform=lambda x: x, enforce_acl=None):
        Transform result as transform(result).
     """
     def helper(original_method):
-        def wrapper(*args):
+        def wrapper(*args, **kwargs):
             def db_thunk(conn, cur):
                 args1 = list(args)
+                kwargs1 = dict(kwargs)
                 if reload_pos is not None:
                     args1[reload_pos] = args1[reload_pos]._reload(conn, cur)
                 if enforce_acl is not None:
                     rpos, cpos, acls = enforce_acl
                     args1[rpos].enforce_acl(acls, args[cpos])
-                return original_method(*args1, conn=conn, cur=cur)
-            return args[0].pc.perform(db_thunk, transform)
+                kwargs1['conn'] = conn
+                kwargs1['cur'] = cur
+                return original_method(*args1, **kwargs1)
+            conn = kwargs.get('conn')
+            cur = kwargs.get('cur')
+            if conn is not None and cur is not None:
+                # allow nested calls to db-wrapped functions to run in same outer transaction
+                return transform(db_thunk(conn, cur))
+            else:
+                return args[0].pc.perform(db_thunk, transform)
         return wrapper
     return helper
 
@@ -882,7 +891,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             self._set_resource_acl_role(conn, cur, rootns, 'owner', role)
             
     @db_wrap()
-    def create_name(self, name, is_object, client_context, conn=None, cur=None):
+    def create_name(self, name, is_object, make_parents, client_context, conn=None, cur=None):
         """Create, persist, and return a HatracNamespace or HatracObject instance.
 
         """
@@ -900,10 +909,16 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
                 raise hatrac.core.Conflict('Name %s already in use.' % resource)
         except hatrac.core.NotFound, ev:
             pass
-            
-        parent = HatracName.construct(self, **self._name_lookup(conn, cur, parname))
-        if parent.is_object():
-            raise hatrac.core.Conflict('Parent %s is not a namespace.' % (self.prefix + parname))
+
+        try:
+            parent = HatracName.construct(self, **self._name_lookup(conn, cur, parname))
+            if parent.is_object():
+                raise hatrac.core.Conflict('Parent %s is not a namespace.' % (self.prefix + parname))
+        except hatrac.core.NotFound:
+            if make_parents:
+                parent = self.create_name(parname, False, True, client_context, conn=conn, cur=cur)
+            else:
+                raise
 
         parent.enforce_acl(['owner', 'create', 'ancestor_owner', 'ancestor_create'], client_context)
         resource = HatracName.construct(self, **self._create_name(conn, cur, name, parent.id, parent.ancestors + [parent.id], is_object))
