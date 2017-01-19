@@ -152,6 +152,9 @@ class Name (RestHandler):
             if 'HTTP_CONTENT_SHA256' in web.ctx.env:
                 metadata['content-sha256'] = web.ctx.env.get('HTTP_CONTENT_SHA256').strip()
 
+            if 'HTTP_CONTENT_DISPOSITION' in web.ctx.env:
+                metadata['content-disposition'] = web.ctx.env.get('HTTP_CONTENT_DISPOSITION').strip()
+                
             resource = resource.create_version_from_file(
                 web.ctx.env['wsgi.input'],
                 web.ctx.webauthn2_context,
