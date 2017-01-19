@@ -11,6 +11,7 @@
 import binascii
 import base64
 import re
+import urllib
 
 from webauthn2 import merge_config, jsonWriterRaw
 
@@ -96,11 +97,33 @@ def _make_bin_decoder(nbytes, context=''):
     return helper
         
 def _test_content_disposition(orig):
-    m = re.match("^filename[*]=UTF-8''[^/]+$", orig)
+    m = re.match("^filename[*]=UTF-8''(?P<name>[-_.~A-Za-z0-9%]+)$", orig)
     if not m:
         raise BadRequest(
             'Cannot accept content-disposition "%s".' % orig
         )
+    
+    n = m.groupdict()['name']
+    
+    try:
+        n = urllib.unquote(str(n))
+    except Exception, e:
+        raise BadRequest(
+            'Invalid URL encoding of content-disposition filename component. %s.' % e
+        )
+    
+    try:
+        n = n.decode('utf8')
+    except Exception, e:
+        raise BadRequest(
+            'Invalid UTF-8 encoding of content-disposition filename component. %s.' % e
+        )
+
+    if n.find("/") >= 0 or n.find("\\") >= 0:
+        raise BadRequest(
+            'Invalid occurrence of path divider in content-disposition filename component "%s" after URL and UTF-8 decoding.' % n
+        )
+    
     return orig
 
 class MetadataValue (str):

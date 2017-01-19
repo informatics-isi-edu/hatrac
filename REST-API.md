@@ -400,7 +400,10 @@ with data retrieval responses. An implementation MAY restrict which
 values are acceptable as content disposition instructions. Every
 implementation SHOULD support the `filename*=UTF-8''` _filename_
 syntax where _filename_ is a basename with no path separator
-characters.
+characters. According to the web standards, the _filename_ component
+embedded in this header MUST be UTF-8 which is then URL-escaped
+(percent-encoded) on an octet by octet basis, just like URL components
+in this REST API.
 
 A successful response is:
 
