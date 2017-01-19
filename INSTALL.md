@@ -177,7 +177,8 @@ installed under `/etc/httpd/conf.d/` on Red Hat flavored machines:
     
     <Location /hatrac>
     
-       Require all granted
+       AuthType webauthn
+       Require webauthn-optional
     
        WSGIProcessGroup hatrac
         
