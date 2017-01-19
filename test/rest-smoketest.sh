@@ -301,6 +301,8 @@ EOF
 dotest "409::*::*" "${obj1_vers0};metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
 dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
 
+# test path with escaped unicode name "ǝɯɐuǝlᴉɟ ǝpoɔᴉun"
+TEST_DISPOSITION="filename*=UTF-8''%C7%9D%C9%AF%C9%90u%C7%9Dl%E1%B4%89%C9%9F%20%C7%9Dpo%C9%94%E1%B4%89un"
 
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj1 -X DELETE
 dotest "409::*::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
@@ -309,7 +311,7 @@ dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -H "Content-Type: application/x-bash" \
     -H "Content-MD5: $md5" \
     -H "Content-SHA256: $sha" \
-    -H "Content-Disposition: filename*=UTF-8''$(basename $0)"
+    -H "Content-Disposition: ${TEST_DISPOSITION}"
 obj1_vers1="$(cat ${RESPONSE_CONTENT})"
 obj1_vers1="${obj1_vers1#/hatrac}"
 dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
@@ -324,6 +326,15 @@ dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
        -X PUT -T $0 \
        -H "Content-Type: application/x-bash" \
        -H "Content-MD5: bad_md5"  # invalid base64
+dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
+       -X PUT -T $0 \
+       -H "Content-Disposition: filename*=UTF-8''not escaped.txt" # space char must be escaped
+dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
+       -X PUT -T $0 \
+       -H "Content-Disposition: filename*=UTF-8''illegal%2Fslash.txt" # slash not allowed
+dotest "400::*::*" /ns-${RUNKEY}/foo2/obj1_bad \
+       -X PUT -T $0 \
+       -H "Content-Disposition: filename*=UTF-8''illegal%5Cslash.txt" # slash not allowed
 dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1
 obj1_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
 dotest "304::*::*" /ns-${RUNKEY}/foo2/obj1 -H "If-None-Match: ${obj1_etag}"
@@ -333,7 +344,26 @@ dotest "304::*::*" "${obj1_vers1}" -H "If-None-Match: ${obj1_etag}"
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}" -H "If-None-Match: \"wrongetag\""
 dotest "304::*::*" "${obj1_vers1}" -H "If-Match: \"wrongetag\""
 dotest "200::application/x-bash::0" /ns-${RUNKEY}/foo2/obj1 --head
+
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
+disposition=$(grep -i 'content-disposition' < ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+: \([-_*='.~A-Za-z0-9%]\+\).*/\1/" )
+if [[ "$disposition" = "${TEST_DISPOSITION}" ]]
+then
+    cat >&2 <<EOF
+Find expected response header Content-Disposition: ${disposition}... OK.
+EOF
+else
+    cat >&2 <<EOF
+Find expected response header Content-Disposition: ${TEST_DISPOSITION}... FAILED.
+
+Response headers:
+$(cat ${RESPONSE_HEADERS})
+
+EOF
+    NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
+fi
+NUM_TESTS=$(( ${NUM_TESTS} + 1 ))
+
 dotest "200::application/x-bash::0" "${obj1_vers1}" --head
 
 dotest "200::application/json::[1-9]*" "/ns-${RUNKEY}/foo2/obj1;versions"
@@ -403,6 +433,7 @@ douploadtest()
     fields=(
 	'"content-length": '"${upload_total_bytes}"
 	'"content-type": "application/x-bash"'
+	'"content-disposition": "'"${TEST_DISPOSITION}"'"'
     )
 
     if [[ -n "${_md5}" ]]
