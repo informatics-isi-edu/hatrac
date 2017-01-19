@@ -50,9 +50,9 @@ import psycopg2
 import psycopg2.pool
 from psycopg2.extras import DictCursor
 from StringIO import StringIO
-from webauthn2.util import sql_literal, sql_identifier, jsonWriterRaw
+from webauthn2.util import jsonWriterRaw
 import hatrac.core
-from hatrac.core import coalesce, Metadata
+from hatrac.core import coalesce, Metadata, sql_literal, sql_identifier
 
 def regexp_escape(s):
     safe = set(

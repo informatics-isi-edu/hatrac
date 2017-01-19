@@ -23,6 +23,30 @@ def coalesce(*args):
         if arg is not None:
             return arg
 
+def _string_wrap(s, escape=u'\\', protect=[]):
+    try:
+        s = s.replace(escape, escape + escape)
+        for c in set(protect):
+            s = s.replace(c, escape + c)
+        return s
+    except Exception, e:
+        #web.debug('_string_wrap', s, escape, protect, e)
+        raise
+
+def sql_identifier(s):
+    # double " to protect from SQL
+    return u'"%s"' % _string_wrap(s, u'"')
+
+def sql_literal(v):
+    if type(v) is list:
+        return 'ARRAY[%s]' % (','.join(map(sql_literal, v)))
+    elif v is not None:
+        # double ' to protect from SQL
+        s = '%s' % v
+        return "'%s'" % _string_wrap(s, u"'")
+    else:
+        return 'NULL'
+
 class HatracException (Exception):
     """Base class for Hatrac API exceptions."""
     pass
