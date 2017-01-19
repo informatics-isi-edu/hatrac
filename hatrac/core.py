@@ -232,7 +232,8 @@ class Metadata (dict):
     def from_http(orig):
         md = Metadata()
         for k, v in orig.items():
-            md[k] = md._http_decoded_val(k, v.strip())
+            if v is not None:
+                md[k] = md._http_decoded_val(k, v.strip())
         return md
     
     def __getitem__(self, k):
