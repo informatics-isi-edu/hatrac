@@ -31,6 +31,7 @@ before_install:
   - cd webauthn
   - sudo make install
   - sudo make deploy
+  - sudo bash ./test/ubuntu-travis-setup.sh
   - cd ../hatrac
 
 install:
@@ -60,4 +61,7 @@ after_failure:
   - sudo ls -lR /etc/apache2
   - sudo ls -lR /var/run/apache2
   - sudo ls -lR /var/log/apache2
+  - sudo cat /etc/apache2/conf.d/webauthn.conf
+  - sudo cat /etc/apache2/conf.d/wsgi_webauthn2.conf
+  - sudo cat /etc/apache2/conf.d/wsgi_hatrac.conf
   - sudo cat ${HTTPD_ERROR_LOG}
