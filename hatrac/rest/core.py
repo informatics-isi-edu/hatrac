@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2017 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -124,6 +124,7 @@ class RestException (web.HTTPError):
             hdr = self.headers
         msg = message or self.message
         web.HTTPError.__init__(self, self.status, hdr, msg + '\n')
+        web.ctx.hatrac_content_type = hdr['Content-Type']
 
 class NotModified (RestException):
     status = '304 Not Modified'
@@ -473,18 +474,25 @@ class RestHandler (object):
         if get_slice is not None:
             nbytes, metadata, data_generator \
                 = resource.get_content_range(client_context, get_slice, get_data=self.get_body)
-            web.ctx.status = '206 Partial Content'
             web.header(
                 'Content-Range', 'bytes %d-%d/%d' 
                 % (get_slice.start, get_slice.stop - 1, resource.nbytes)
             )
+            web.ctx.hatrac_request_content_range = '%d-%d/%d' % (get_slice.start, get_slice.stop - 1, resource.nbytes)
+            web.ctx.status = '206 Partial Content'
         else:
             nbytes, metadata, data_generator = resource.get_content(client_context, get_data=self.get_body)
+            web.ctx.hatrac_request_content_range = '*/%d' % nbytes
             web.ctx.status = '200 OK'
 
         web.header('Content-Length', nbytes)
 
-        metadata = hatrac.core.Metadata(metadata).to_http()
+        metadata = hatrac.core.Metadata(metadata)
+        if 'content-type' in metadata:
+            web.ctx.hatrac_content_type = metadata['content-type']
+
+        metadata = metadata.to_http()
+            
         for hdr, val in metadata.items():
             web.header(hdr, val)
 
@@ -503,19 +511,27 @@ class RestHandler (object):
         """Form response for resource creation request."""
         web.ctx.status = '201 Created'
         web.header('Location', resource.asurl())
-        web.header('Content-Type', 'text/uri-list')
+        content_type = 'text/uri-list'
+        web.header('Content-Type', content_type)
+        web.ctx.hatrac_content_type = content_type
         body = resource.asurl() + '\n'
-        web.header('Content-Length', len(body))
+        nbytes = len(body)
+        web.header('Content-Length', nbytes)
+        web.ctx.hatrac_request_content_range = '*/%d' % nbytes
         return body
 
     def delete_response(self):
         """Form response for deletion request."""
         web.ctx.status = '204 No Content'
+        web.ctx.hatrac_request_content_range = '*/0'
+        web.ctx.hatrac_content_type = 'none'
         return ''
 
     def update_response(self):
         """Form response for update request."""
         web.ctx.status = '204 No Content'
+        web.ctx.hatrac_request_content_range = '*/0'
+        web.ctx.hatrac_content_type = 'none'
         return ''
 
     @web_method()
@@ -531,7 +547,10 @@ class RestHandler (object):
         """Get resource metadata."""
         self.get_body = False
         if hasattr(self, '_GET'):
-            return self._GET(*args)
+            result = self._GET(*args)
+            web.ctx.hatrac_request_content_range = '*/0'
+            web.ctx.hatrac_content_type = 'none'
+            return result
         else:
             raise NoMethod('Method HEAD not supported for this resource.')
 
