@@ -1058,7 +1058,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         else:
             nbytes = objversion.nbytes
             metadata = objversion.metadata
-            data = None
+            data = ''
         return nbytes, metadata, data
 
     def get_version_content(self, object, objversion, client_context, get_data=True):
