@@ -476,6 +476,7 @@ for which a successful response is:
     Content-MD5: hash_value
 	Content-SHA256: hash_value
 	Content-Disposition: filename*=UTF-8''filename
+	Content-Location: /namespace_path/object_name:version
     ETag: etag_value
     
     ...content...
@@ -483,7 +484,8 @@ for which a successful response is:
 The optional `Content-MD5`, `Content-SHA256`, and
 `Content-Disposition` headers MUST be present if supplied during
 object creation and MAY be present if the service computes missing
-values in other cases.
+values in other cases. The `Content-Location` header SHOULD be present and
+specifies the URL for the version of the object which was retrieved.
 
 It is RECOMMENDED that a Hatrac server return an `ETag` indicating the version of the _content_ returned to the client.
     
@@ -514,6 +516,7 @@ for which a successful response is:
     Content-MD5: hash_value
 	Content-SHA256: hash_value
 	Content-Disposition: filename*=UTF-8''filename
+	Content-Location: /namespace_path/object_name:version
 
 The HEAD operation is essentially equivalent to the GET operation but
 with the actual object content elided.

@@ -496,8 +496,10 @@ class RestHandler (object):
         for hdr, val in metadata.items():
             web.header(hdr, val)
 
-        if resource.is_object() and resource.is_version() and 'content-disposition' not in resource.metadata:
-            web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.quote(str(resource.object).split("/")[-1]))
+        if resource.is_object() and resource.is_version():
+            web.header('Content-Location', resource.asurl())
+            if 'content-disposition' not in resource.metadata:
+                web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.quote(str(resource.object).split("/")[-1]))
             
         if self.http_etag:
             web.header('ETag', self.http_etag)

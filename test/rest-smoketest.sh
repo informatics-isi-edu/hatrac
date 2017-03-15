@@ -120,7 +120,7 @@ jsonload()
 
 jsoncheck()
 {
-    if [[ "$summary" == *::application/json::* ]] && [[ "$summary" != *::*::0 ]]
+    if [[ "$summary" == *::application/json::* ]] && [[ "$summary" != *::*::0 ]] && [[ "${request[0]}" != '--head' ]]
     then
 	json_error=$(jsonload < ${RESPONSE_CONTENT})
 	if [[ $? -ne 0 ]]
@@ -174,6 +174,15 @@ dotest()
     request=( "$@" "${BASE_URL}$url" )
     printf "%s " "${request[@]}"  >&2
     summary=$(mycurl "${request[@]}" )
+
+    if [[ "${request[0]}" = '--head' ]]
+    then
+	# curl summary has download_size 0 when we want to check content-length...
+	content_length=$(grep -i 'content-length' < ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+:[[:space:]]*\([0-9]*\).*/\1/")
+	[[ -n "${content_length}" ]] || content_length=unknown
+	summary="${summary%0}${content_length}"
+    fi
+
     printf " -->  %s " "$summary" >&2
 
     mismatches=()
@@ -195,9 +204,9 @@ FAILED.
 $(printf "%s\n" "${mismatches[@]}")
 
 Response headers:
-$(cat ${RESPONSE_HEADERS})
+$(cat ${RESPONSE_HEADERS} | sed -e "s/\(.*\)/    \1/")
 Response body:
-$(head -c 500 ${RESPONSE_CONTENT})
+$(head -c 500 ${RESPONSE_CONTENT} | sed -e "s/\(.*\)/    \1/")
 
 EOF
 	NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
@@ -209,14 +218,35 @@ EOF
 	then
 	    cat >&2 <<EOF
 Response headers:
-$(cat ${RESPONSE_HEADERS})
+$(cat ${RESPONSE_HEADERS} | sed -e "s/\(.*\)/    \1/")
 Response body:
-$(cat ${RESPONSE_CONTENT})
+$(head -c 500 ${RESPONSE_CONTENT} | sed -e "s/\(.*\)/    \1/")
 
 EOF
 	fi
     fi
 
+    NUM_TESTS=$(( ${NUM_TESTS} + 1 ))
+}
+
+dohdrtest()
+{
+    # args: hdr sedpatgrp1 expectedval
+    gotval=$(grep -i "$1" < ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+:[[:space:]]*${2}.*/\1/")
+    printf "%s" "Expect response header $1: $3 (actual $gotval)... " >&2
+    if [[ "$gotval" = "$3" ]]
+    then
+	echo "OK." >&2
+    else
+	echo "FAILED." >&2
+	cat >&2 <<EOF
+
+Response headers:
+$(cat ${RESPONSE_HEADERS} | sed -e "s/\(.*\)/    \1/")
+
+EOF
+	NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
+    fi
     NUM_TESTS=$(( ${NUM_TESTS} + 1 ))
 }
 
@@ -233,7 +263,7 @@ dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/bar -X PUT -H "Content-Type: ap
 
 # status of test namespaces
 dotest "200::application/json::*" /ns-${RUNKEY}/foo
-dotest "200::application/json::0" /ns-${RUNKEY}/foo --head
+dotest "200::application/json::*" /ns-${RUNKEY}/foo --head
 dotest "409::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/json"
 
 # test objects
@@ -343,28 +373,18 @@ dotest "304::*::*" /ns-${RUNKEY}/foo2/obj1 -H "If-None-Match: *"
 dotest "304::*::*" "${obj1_vers1}" -H "If-None-Match: ${obj1_etag}"
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}" -H "If-None-Match: \"wrongetag\""
 dotest "304::*::*" "${obj1_vers1}" -H "If-Match: \"wrongetag\""
-dotest "200::application/x-bash::0" /ns-${RUNKEY}/foo2/obj1 --head
+dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1 --head
+
 
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
-disposition=$(grep -i 'content-disposition' < ${RESPONSE_HEADERS} | sed -e "s/^[^:]\+: \([-_*='.~A-Za-z0-9%]\+\).*/\1/" )
-if [[ "$disposition" = "${TEST_DISPOSITION}" ]]
-then
-    cat >&2 <<EOF
-Find expected response header Content-Disposition: ${disposition}... OK.
-EOF
-else
-    cat >&2 <<EOF
-Find expected response header Content-Disposition: ${TEST_DISPOSITION}... FAILED.
-
-Response headers:
-$(cat ${RESPONSE_HEADERS})
-
-EOF
-    NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
-fi
-NUM_TESTS=$(( ${NUM_TESTS} + 1 ))
-
-dotest "200::application/x-bash::0" "${obj1_vers1}" --head
+dohdrtest 'content-disposition' "\([-_*='.~A-Za-z0-9%]\+\)" "${TEST_DISPOSITION}"
+dohdrtest 'content-location' "\([^[:space:]]\+\)" "/hatrac${obj1_vers1}"
+dotest "200::application/x-bash::${script_size}" "${obj1_vers1}" --head
+dohdrtest 'content-location' "\([^[:space:]]\+\)" "/hatrac${obj1_vers1}"
+dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1
+dohdrtest 'content-location' "\([^[:space:]]\+\)" "/hatrac${obj1_vers1}"
+dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1 --head
+dohdrtest 'content-location' "\([^[:space:]]\+\)" "/hatrac${obj1_vers1}"
 
 dotest "200::application/json::[1-9]*" "/ns-${RUNKEY}/foo2/obj1;versions"
 dotest "404::*::*" "/ns-${RUNKEY}/foo2;versions"
@@ -576,14 +596,14 @@ dotest "204::*::*" /ns-${RUNKEY}/foo2/obj1 -X DELETE -H "If-Match: ${obj1_etag}"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl"
 acl_etag="$(grep -i "^etag:" < ${RESPONSE_HEADERS} | sed -e "s/^[Ee][Tt][Aa][Gg]: *\(\"[^\"]*\"\).*/\1/")"
 dotest "304::*::*" "/ns-${RUNKEY}/foo;acl" -H "If-None-Match: ${acl_etag}"
-dotest "200::application/json::0" "/ns-${RUNKEY}/foo;acl" --head
+dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl" --head
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/owner"
-dotest "200::application/json::0" "/ns-${RUNKEY}/foo;acl/owner" --head
+dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/owner" --head
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/create"
 dotest "404::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X PUT
-dotest "200::text/plain*::0" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" --head
+dotest "200::text/plain*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" --head
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE -H "If-Match: *"
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X PUT
 dotest "200::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
