@@ -1,6 +1,6 @@
 
 #
-# Copyright 2016 University of Southern California
+# Copyright 2016-2017 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -9,10 +9,13 @@ from webauthn2.util import jsonWriterRaw, jsonReader
 import web
 
 @web_url([
-    # path, name, version, fieldname
-    '/((?:[^/:;]+/)*)([^/:;]+):([^/:;]+);metadata/([^/:;]+)',
-    '/((?:[^/:;]+/)*)([^/:;]+)();metadata/([^/:;]+)',
-    '/()()();metadata/([^/:;]+)'
+    # path, name, version, fieldname, querystr
+    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+);metadata/([^/:;?]+)[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+)();metadata/([^/:;?]+)[?](.*)',
+    '/()()();metadata/([^/:;?]+)[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;]+);metadata/([^/:;?]+)()',
+    '/((?:[^/:;?]+/)*)([^/:;?]+)();metadata/([^/:;?]+)()',
+    '/()()();metadata/([^/:;?]+)()'
 ])
 class Metadata (RestHandler):
 
@@ -20,7 +23,7 @@ class Metadata (RestHandler):
         RestHandler.__init__(self)
 
     @web_method()
-    def PUT(self, path, name, version, fieldname):
+    def PUT(self, path, name, version, fieldname, querystr):
         """Replace Metadata value."""
         in_content_type = self.in_content_type()
         if in_content_type != 'text/plain':
@@ -46,7 +49,7 @@ class Metadata (RestHandler):
         return self.update_response()
 
     @web_method()
-    def DELETE(self, path, name, version, fieldname):
+    def DELETE(self, path, name, version, fieldname, querystr):
         """Clear Metadata value."""
         if version:
             resource = self.resolve_version(path, name, version)
@@ -65,7 +68,7 @@ class Metadata (RestHandler):
         )
         return self.update_response()
 
-    def _GET(self, path, name, version, fieldname):
+    def _GET(self, path, name, version, fieldname, querystr):
         """Get Metadata value."""
         if version:
             resource = self.resolve_version(path, name, version)
@@ -83,17 +86,20 @@ class Metadata (RestHandler):
         
 
 @web_url([
-    # path, name, version
-    '/((?:[^/:;]+/)*)([^/:;]+):([^/:;]+);metadata/?',
-    '/((?:[^/:;]+/)*)([^/:;]+)();metadata/?',
-    '/()()();metadata/?'
+    # path, name, version, querystr
+    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+);metadata/?[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+)();metadata/?[?](.*)',
+    '/()()();metadata/?[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+);metadata/?()',
+    '/((?:[^/:;?]+/)*)([^/:;?]+)();metadata/?()',
+    '/()()();metadata/?()'
 ])
 class MetadataCollection (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    def _GET(self, path, name, version):
+    def _GET(self, path, name, version, querystr):
         """Get Metadata collection."""
         if version:
             resource = self.resolve_version(path, name, version)

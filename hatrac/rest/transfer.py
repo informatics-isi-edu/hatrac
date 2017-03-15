@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2017 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -11,8 +11,9 @@ from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound,
 from webauthn2.util import jsonReader
 
 @web_url([
-    # path, name, job, chunk
-    '/((?:[^/:;]+/)*)([^/:;]+);upload/([^/:;]+)/([^/:;]+)'
+    # path, name, job, chunk, querystr
+    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/([^/:;?]+)/([^/:;?]+)[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/([^/:;?]+)/([^/:;?]+)()'
 ])
 class ObjectTransferChunk (RestHandler):
 
@@ -20,7 +21,7 @@ class ObjectTransferChunk (RestHandler):
         RestHandler.__init__(self)
 
     @web_method()
-    def PUT(self, path, name, job, chunk):
+    def PUT(self, path, name, job, chunk, querystr):
         """Upload chunk of transfer job."""
         try:
             chunk = int(chunk)
@@ -58,8 +59,9 @@ class ObjectTransferChunk (RestHandler):
         return self.update_response()
 
 @web_url([
-    # path, name, job
-    '/((?:[^/:;]+/)*)([^/:;]+);upload/([^/:;]+)/?'
+    # path, name, job, querystr
+    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/([^/:;?]+)/?[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/([^/:;?]+)/?()'
 ])
 class ObjectTransfer (RestHandler):
 
@@ -67,7 +69,7 @@ class ObjectTransfer (RestHandler):
         RestHandler.__init__(self)
 
     @web_method()
-    def POST(self, path, name, job):
+    def POST(self, path, name, job, querystr):
         """Update status of transfer job to finalize."""
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions('POST')
@@ -75,23 +77,23 @@ class ObjectTransfer (RestHandler):
         return self.create_response(version)
 
     @web_method()
-    def DELETE(self, path, name, job):
+    def DELETE(self, path, name, job, querystr):
         """Cancel existing transfer job."""
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions('DELETE')
         upload.cancel(web.ctx.webauthn2_context)
         return self.update_response()
 
-    def _GET(self, path, name, job):
+    def _GET(self, path, name, job, querystr):
         """Get status of transfer job."""
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions()
         return self.get_content(upload, web.ctx.webauthn2_context)
 
 @web_url([
-    # path, name
-    '/((?:[^/:;]+/)*)([^/:;]+);upload/?[?](.*)',
-    '/((?:[^/:;]+/)*)([^/:;]+);upload/?()'
+    # path, name, querystr
+    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/?[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/?()'
 ])
 class ObjectTransfers (RestHandler):
 

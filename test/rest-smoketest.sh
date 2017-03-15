@@ -253,18 +253,20 @@ EOF
 # initial state of catalog
 dotest "200::application/json::*" /
 dotest "404::*::*" /ns-${RUNKEY}
+dotest "200::application/json::*" "/?cid=smoke"
+dotest "404::*::*" "/ns-${RUNKEY}?cid=smoke"
 
 # create some test namespaces
-dotest "201::text/uri-list::*" /ns-${RUNKEY} -X PUT -H "Content-Type: application/x-hatrac-namespace"
-dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
-dotest "409::*::*"             /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/x-hatrac-namespace"
-dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2 -X PUT -H "Content-Type: application/x-hatrac-namespace"
-dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/bar -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}?cid=smoke" -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo"       -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "409::*::*"             "/ns-${RUNKEY}/foo"       -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo2"      -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/bar"   -X PUT -H "Content-Type: application/x-hatrac-namespace"
 
 # status of test namespaces
 dotest "200::application/json::*" /ns-${RUNKEY}/foo
-dotest "200::application/json::*" /ns-${RUNKEY}/foo --head
-dotest "409::*::*" /ns-${RUNKEY}/foo -X PUT -H "Content-Type: application/json"
+dotest "200::application/json::*" "/ns-${RUNKEY}/foo?cid=smoke" --head
+dotest "409::*::*" "/ns-${RUNKEY}/foo?cid=smoke" -X PUT -H "Content-Type: application/json"
 
 # test objects
 md5=$(mymd5sum < $0)
@@ -277,10 +279,13 @@ obj1_vers0="${obj1_vers0#/hatrac}"
 
 # metadata on object-version
 dotest "200::application/json::*" "${obj1_vers0};metadata/"
+dotest "200::application/json::*" "${obj1_vers0};metadata/?cid=smoke"
+dotest "200::application/json::*" "${obj1_vers0};metadata?cid=smoke"
 
 # service assigns content-type automagically
 dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
 dotest "200::*::*" "${obj1_vers0};metadata/content-type"
+dotest "200::*::*" "${obj1_vers0};metadata/content-type?cid=smoke"
 
 # we can modify content-type
 cat > ${TEST_DATA} <<EOF
@@ -290,6 +295,8 @@ dotest "204::*::*" "${obj1_vers0};metadata/content-type" -T ${TEST_DATA} -H "Con
 dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
 dotest "200::*::*" "${obj1_vers0};metadata/content-type"
 dotest "204::*::*" "${obj1_vers0};metadata/content-type" -X DELETE
+dotest "204::*::*" "${obj1_vers0};metadata/content-type?cid=smoke" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "204::*::*" "${obj1_vers0};metadata/content-type?cid=smoke" -X DELETE
 dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
 dotest "404::*::*" "${obj1_vers0};metadata/content-type"
 
@@ -335,6 +342,7 @@ dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DA
 TEST_DISPOSITION="filename*=UTF-8''%C7%9D%C9%AF%C9%90u%C7%9Dl%E1%B4%89%C9%9F%20%C7%9Dpo%C9%94%E1%B4%89un"
 
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj1 -X DELETE
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1?cid=smoke" -X DELETE
 dotest "409::*::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
@@ -375,7 +383,6 @@ dotest "200::application/x-bash::${script_size}" "${obj1_vers1}" -H "If-None-Mat
 dotest "304::*::*" "${obj1_vers1}" -H "If-Match: \"wrongetag\""
 dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1 --head
 
-
 dotest "200::application/x-bash::${script_size}" "${obj1_vers1}"
 dohdrtest 'content-disposition' "\([-_*='.~A-Za-z0-9%]\+\)" "${TEST_DISPOSITION}"
 dohdrtest 'content-location' "\([^[:space:]]\+\)" "/hatrac${obj1_vers1}"
@@ -387,6 +394,7 @@ dotest "200::application/x-bash::${script_size}" /ns-${RUNKEY}/foo2/obj1 --head
 dohdrtest 'content-location' "\([^[:space:]]\+\)" "/hatrac${obj1_vers1}"
 
 dotest "200::application/json::[1-9]*" "/ns-${RUNKEY}/foo2/obj1;versions"
+dotest "200::application/json::[1-9]*" "/ns-${RUNKEY}/foo2/obj1;versions?cid=smoke"
 dotest "404::*::*" "/ns-${RUNKEY}/foo2;versions"
 
 # test partial GET
@@ -400,6 +408,7 @@ dotest "200::*::${script_size}" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=-900000
 dotest "501::*::*" /ns-${RUNKEY}/foo2 -H "Range: bytes=1-2"
 dotest "501::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=1-2,3-5"
 dotest "416::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=900000-"
+dotest "416::*::*" "/ns-${RUNKEY}/foo2/obj1?cid=smoke" -H "Range: bytes=900000-"
 # syntactically invalid means ignore Range!
 dotest "200::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=900000-5,1-2"
 
@@ -407,6 +416,7 @@ dotest "200::*::*" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=900000-5,1-2"
 dotest "412::*::*" "${obj1_vers1}" -X DELETE -H "If-None-Match: *"
 dotest "412::*::*" "${obj1_vers1}" -X DELETE -H "If-None-Match: ${obj1_etag}"
 dotest "204::*::*" "${obj1_vers1}" -X DELETE
+dotest "404::*::*" "${obj1_vers1}?cid=smoke" -X DELETE
 dotest "404::*::*" "${obj1_vers1}"
 dotest "409::*::*" /ns-${RUNKEY}/foo2/obj1
 
@@ -477,7 +487,7 @@ douploadtest()
 }
 EOF
 
-    [[ -n "${upload_query}" ]] && _suffix="?${upload_query}" || _suffix=''
+    [[ -n "${upload_query}" ]] && _suffix="?${upload_query}&cid=smoke" || _suffix='?cid=smoke'
     
     dotest "$1" "${_url};upload${_suffix}"  \
 	   -T "${TEST_DATA}" \
@@ -493,6 +503,8 @@ EOF
 
 	    dotest "200::application/json::*" "${upload}"
 	    dotest "200::application/json::*" "${upload}" --head
+	    dotest "200::application/json::*" "${upload}?cid=smoke"
+	    dotest "200::application/json::*" "${upload}?cid=smoke" --head
 	    dotest "200::*::*" "${_url};upload"
 	    dotest "200::*::*" "${_url};upload" --head
 	    dotest "405::*::*" "${upload}/0"
@@ -504,6 +516,7 @@ EOF
 		then
 		    pos=$(echo "$part" | sed -e "s|/tmp/parts-${RUNKEY}-0*\([0-9]\+\)|\1|")
 		    dotest "$1" "${upload}/$pos" -T "$part" -H "Content-MD5: $(mymd5sum < "$part")"
+		    dotest "$1" "${upload}/$pos?cid=smoke" -T "$part" -H "Content-MD5: $(mymd5sum < "$part")"
 		    shift
 		else
 		    return 0
@@ -551,7 +564,7 @@ douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "${upload_sha}" "201::tex
 dotest "204::*::*" "${upload}" -X DELETE
 
 douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "" "201::text/uri-list::*"
-dotest "204::*::*" "${upload}" -X DELETE
+dotest "204::*::*" "${upload}?cid=smoke" -X DELETE
 
 # check upload job for brand new object
 douploadtest "/ns-${RUNKEY}/foo2/obj2" "${upload_md5}" "" "201::text/uri-list::*" "204::*::*" "204::*::*" "201::*::*"

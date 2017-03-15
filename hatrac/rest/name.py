@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2017 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -13,8 +13,9 @@ import hatrac.core
 import web
 
 @web_url([
-     # path, name, version
-    '/((?:[^/:;]+/)*)([^/:;]+):([^/:;]+)'
+     # path, name, version, querystr
+    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+)[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+)()'
 ])
 class NameVersion (RestHandler):
     """Represent Hatrac resources addressed by version-qualified names.
@@ -26,7 +27,7 @@ class NameVersion (RestHandler):
     # client cannot specify version during PUT so no PUT method...
 
     @web_method()
-    def DELETE(self, path, name, version):
+    def DELETE(self, path, name, version, querystr):
         """Destroy object version."""
         resource = self.resolve_version(
             path, name, version
@@ -39,7 +40,7 @@ class NameVersion (RestHandler):
         return self.delete_response()
 
     # see core.RestHandler.GET and HEAD...
-    def _GET(self, path, name, version):
+    def _GET(self, path, name, version, querystr):
         """Get object version."""
         resource = self.resolve_version(
             path, name, version
@@ -52,8 +53,9 @@ class NameVersion (RestHandler):
         )
 
 @web_url([
-     # path, name
-    '/((?:[^/:;]+/)*)([^/:;]+);versions?'
+     # path, name, querystr
+    '/((?:[^/:;?]+/)*)([^/:;?]+);versions[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+);versions()'
 ])
 class NameVersions (RestHandler):
     """Represent Hatrac resources addressed by name and versions sub-resource.
@@ -65,7 +67,7 @@ class NameVersions (RestHandler):
         RestHandler.__init__(self)
 
     # see core.RestHandler.GET and HEAD...
-    def _GET(self, path, name):
+    def _GET(self, path, name, querystr):
         """Get version listing."""
         resource = self.resolve(
             path, name
@@ -81,10 +83,10 @@ class NameVersions (RestHandler):
         )
 
 @web_url([
-     # path, name
-    '/((?:[^/:;]+/)*)([^/:;]+)/?[?](.*)',
-    '/((?:[^/:;]+/)*)([^/:;]+)/?()',
+     # path, name, querystr
+    '/((?:[^/:;?]+/)*)([^/:;?]+)/?[?](.*)',
     '/()()[?](.*)',
+    '/((?:[^/:;?]+/)*)([^/:;?]+)/?()',
     '/()()()'
 ])
 class Name (RestHandler):
