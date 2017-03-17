@@ -995,7 +995,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         self.pc.perform(lambda conn, cur: self._complete_version(conn, cur, resource, version))
         return self.version_resolve(object, version)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
+    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
         job = self.storage.create_upload(object.name, nbytes, metadata)
         resource = HatracUpload(self, object, **self._create_upload(conn, cur, object, job, chunksize, nbytes, metadata))
