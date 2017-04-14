@@ -13,6 +13,7 @@ import logging
 from logging.handlers import SysLogHandler
 import web
 import json
+from collections import OrderedDict
 import random
 import base64
 import datetime
@@ -79,23 +80,15 @@ sysloghandler.setFormatter(syslogformatter)
 logger.addHandler(sysloghandler)
 logger.setLevel(logging.INFO)
 
-# some log message templates
-log_template = "%(elapsed_s)d.%(elapsed_frac)4.4ds %(client_ip)s user=%(client_identity)s req=%(reqid)s"
-log_trace_template = log_template + " -- %(tracedata)s"
-log_final_template = log_template + " (%(status)s) %(method)s %(proto)s://%(host)s%(uri)s %(range)s %(type)s"
-
 def log_parts():
     """Generate a dictionary of interpolation keys used by our logging template."""
     now = datetime.datetime.now(pytz.timezone('UTC'))
     elapsed = (now - web.ctx.hatrac_start_time)
-    client_identity = web.ctx.webauthn2_context.client if web.ctx.webauthn2_context and web.ctx.webauthn2_context.client else ''
-    if type(client_identity) is dict:
-        client_identity = json.dumps(client_identity, separators=(',',':'))
+    client_identity_obj = web.ctx.webauthn2_context and web.ctx.webauthn2_context.client or None
     parts = dict(
-        elapsed_s = elapsed.seconds, 
-        elapsed_frac = elapsed.microseconds/100,
+        elapsed = elapsed.seconds + 0.001 * (elapsed.microseconds/1000),
         client_ip = web.ctx.ip,
-        client_identity = urllib.quote(client_identity),
+        client_identity_obj = client_identity_obj,
         reqid = web.ctx.hatrac_request_guid
         )
     return parts
@@ -106,8 +99,17 @@ def request_trace(tracedata):
        tracedata: a string representation of trace event data
     """
     parts = log_parts()
-    parts['tracedata'] = tracedata
-    logger.info( (log_trace_template % parts).encode('utf-8') )
+    od = OrderedDict([
+        (k, v) for k, v in [
+            ('elapsed', parts['elapsed']),
+            ('req', parts['reqid']),
+            ('trace', tracedata),
+            ('client', parts['client_ip']),
+            ('user', parts['client_identity_obj']),
+        ]
+        if v
+    ])
+    logger.info( json.dumps(od, separators=(', ', ':')).encode('utf-8') )
 
 class RestException (web.HTTPError):
     message = None
@@ -202,8 +204,8 @@ def web_method():
             # request context init
             web.ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) )
             web.ctx.hatrac_start_time = datetime.datetime.now(pytz.timezone('UTC'))
-            web.ctx.hatrac_request_content_range = '-/-'
-            web.ctx.hatrac_content_type = 'unknown'
+            web.ctx.hatrac_request_content_range = None
+            web.ctx.hatrac_content_type = None
             web.ctx.webauthn2_manager = _webauthn2_manager
             web.ctx.webauthn2_context = webauthn2.Context() # set empty context for sanity
             web.ctx.hatrac_request_trace = request_trace
@@ -239,16 +241,25 @@ def web_method():
             finally:
                 # finalize
                 parts = log_parts()
-                parts.update(dict(
-                    status = web.ctx.status,
-                    method = web.ctx.method,
-                    proto = web.ctx.protocol,
-                    host = web.ctx.host,
-                    uri = web.ctx.env['REQUEST_URI'],
-                    range = web.ctx.hatrac_request_content_range,
-                    type = web.ctx.hatrac_content_type
-                ))
-                logger.info( (log_final_template % parts).encode('utf-8') )
+                od = OrderedDict([
+                    (k, v) for k, v in [
+                        ('elapsed', parts['elapsed']),
+                        ('req', parts['reqid']),
+                        ('scheme', web.ctx.protocol),
+                        ('host', web.ctx.host),
+                        ('status', web.ctx.status),
+                        ('method', web.ctx.method),
+                        ('path', web.ctx.env['REQUEST_URI']),
+                        ('range', web.ctx.hatrac_request_content_range),
+                        ('type', web.ctx.hatrac_content_type),
+                        ('client', parts['client_ip']),
+                        ('user', parts['client_identity_obj']),
+                        ('referrer', web.ctx.env.get('HTTP_REFERER')),
+                        ('agent', web.ctx.env.get('HTTP_USER_AGENT')),
+                    ]
+                    if v
+                ])
+                logger.info( json.dumps(od, separators=(', ', ':')).encode('utf-8') )
         return wrapper
     return helper
                 
