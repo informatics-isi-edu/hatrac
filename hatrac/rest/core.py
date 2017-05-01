@@ -241,6 +241,11 @@ def web_method():
             finally:
                 # finalize
                 parts = log_parts()
+                session = web.ctx.webauthn2_context.session
+                if session is None or isinstance(session, dict):
+                    pass
+                else:
+                    session = session.to_dict()
                 od = OrderedDict([
                     (k, v) for k, v in [
                         ('elapsed', parts['elapsed']),
@@ -256,7 +261,7 @@ def web_method():
                         ('user', parts['client_identity_obj']),
                         ('referrer', web.ctx.env.get('HTTP_REFERER')),
                         ('agent', web.ctx.env.get('HTTP_USER_AGENT')),
-                        ('session', web.ctx.webauthn2_context.session),
+                        ('session', session),
                         ('track', web.ctx.webauthn2_context.tracking),
                     ]
                     if v
