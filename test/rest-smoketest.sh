@@ -165,6 +165,35 @@ sha256check()
     hashcheck content-sha256 mysha256sum
 }
 
+urischeck()
+{
+    while read uri
+    do
+	if [[ -n "$uri" ]]
+	then
+	    if [[ "$uri" != /hatrac/* ]]
+	    then
+		echo "Response URI '${uri}' lacks /hatrac prefix"
+		return 1
+	    elif [[ "$VERBOSE" = "true" ]]
+	    then
+		echo "Response URI '${uri}' has expected /hatrac prefix"
+	    fi
+	fi
+    done
+    return 0
+}
+
+texturicheck()
+{
+    if [[ "$summary" == *::text/uri-list::* ]] && [[ "${request[0]}" != "--head" ]]
+    then
+	urischeck < "${RESPONSE_CONTENT}"
+    else
+	return 0
+    fi
+}
+
 dotest()
 {
     pattern="$1"
@@ -187,7 +216,7 @@ dotest()
 
     mismatches=()
     
-    for check in summarycheck md5check sha256check jsoncheck
+    for check in summarycheck md5check sha256check jsoncheck texturicheck
     do
 	error_text=$( "$check" )
 	if [[ $? -ne 0 ]]
@@ -265,6 +294,7 @@ dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/bar"   -X PUT -H "Content-Type
 
 # status of test namespaces
 dotest "200::application/json::*" /ns-${RUNKEY}/foo
+dotest "200::text/uri-list::*" "/ns-${RUNKEY}/foo" -H "Accept: text/uri-list"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo?cid=smoke" --head
 dotest "409::*::*" "/ns-${RUNKEY}/foo?cid=smoke" -X PUT -H "Content-Type: application/json"
 
@@ -537,6 +567,10 @@ douploadtest "/ns-${RUNKEY}/foo/obj1" "" "" "409::*::*"
 
 # check upload job for new version of existing test object... omit finalpat so we can intersperse tests
 douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "${upload_sha}" "201::text/uri-list::*" "204::*::*" "204::*::*"
+
+# test upload listing API
+dotest "200::application/json::*" "/ns-${RUNKEY}/foo2/obj1;upload"
+dotest "200::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload" -H "Accept: text/uri-list"
 
 # do some bad chunk upload tests before we finalize
 dotest "409::*::*" "${upload}/$(( ${upload_total_bytes} / ${chunk_bytes} + 2 ))" -T "$part"

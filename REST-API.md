@@ -211,8 +211,17 @@ for which a successful response is:
     
     ["/parent_path/namespace_id/child1", "/parent_path/namespace_id/child2", ...]
     
-**Note**: future revisions may add content-negotiation with
-alternative listing formats.
+If the `text/uri-list` content-type is negotiated, the response will
+include URLs for each child including the Hatrac service prefix:
+
+    200 OK
+	Content-Type: text/uri-list
+	Content-Length: N
+	ETag: etag_value
+	
+	/hatrac/parent_path/namespace_id/child1
+	/hatrac/parent_path/namespace_id/child2
+	...
 
 ### Namespace Listing Metadata Retrieval
 
@@ -1144,7 +1153,16 @@ where the successful response is:
     
     ["/namespace_path/object_name;upload/job_id", ...]
 
-representing the list of upload jobs for the given object.    
+If the `text/uri-list` content-type is negotiated, the response will
+include URLs for each job including the Hatrac service prefix:
+
+    200 OK
+	Content-Type: text/uri-list
+	Content-Length: N
+	
+	/hatrac/namespace_path/object_name;upload/job_id1
+	/hatrac/namespace_path/object_name;upload/job_id2
+    ...
 
 ### Chunk Upload
 

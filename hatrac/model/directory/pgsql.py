@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2017 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -50,7 +50,7 @@ import psycopg2
 import psycopg2.pool
 from psycopg2.extras import DictCursor
 from StringIO import StringIO
-from webauthn2.util import jsonWriterRaw
+from webauthn2.util import jsonWriterRaw, negotiated_content_type
 import hatrac.core
 from hatrac.core import coalesce, Metadata, sql_literal, sql_identifier
 
@@ -239,9 +239,19 @@ class HatracNamespace (HatracName):
 
     def get_content(self, client_context, get_data=True):
         """Return (nbytes, metadata, data_generator) for namespace."""
-        body = [ str(r) for r in self.directory.namespace_enumerate_names(self, False) ]
-        body = jsonWriterRaw(body) + '\n'
-        return (len(body), Metadata({'content-type': 'application/json'}), body)
+        uris = [ str(r) for r in self.directory.namespace_enumerate_names(self, False) ]
+        content_type = negotiated_content_type(
+            ['application/json', 'text/uri-list'],
+            'application/json'
+        )
+        if content_type == 'text/uri-list':
+            body = '\n'.join(
+                [ self.directory.prefix + uri for uri in uris ]
+            ) + '\n'
+        else:
+            body = jsonWriterRaw(uris) + '\n'
+            content_type = 'application/json'
+        return len(body), Metadata({'content-type': content_type}), body
 
 class HatracObject (HatracName):
     """Represent a bound object."""
@@ -363,8 +373,19 @@ class HatracUploads (object):
 
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner'], client_context)
-        body = jsonWriterRaw(self.object.directory.namespace_enumerate_uploads(self.object)) + '\n'
-        return len(body), Metadata({'content-type': 'application/json'}), body
+        content_type = negotiated_content_type(
+            ['application/json', 'text/uri-list'],
+            'application/json'
+        )
+        uris = self.object.directory.namespace_enumerate_uploads(self.object)
+        if content_type == 'text/uri-list':
+            body = '\n'.join(
+                [ self.object.directory.prefix + uri for uri in uris ]
+            ) + '\n'
+        else:
+            body = jsonWriterRaw(uris) + '\n'
+            content_type = 'application/json'
+        return len(body), Metadata({'content-type': content_type}), body
 
 class HatracUpload (HatracName):
     """Represent an upload job."""
