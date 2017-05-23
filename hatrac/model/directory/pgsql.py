@@ -322,7 +322,7 @@ class HatracVersions (object):
         if content_type == 'text/uri-list':
             body = '\n'.join(uris) + '\n'
         else:
-            body = jsonWriterRaw() + '\n'
+            body = jsonWriterRaw(uris) + '\n'
             content_type = 'application/json'
         return len(body), Metadata({'content-type': content_type}), body
 
