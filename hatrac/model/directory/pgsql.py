@@ -245,9 +245,7 @@ class HatracNamespace (HatracName):
             'application/json'
         )
         if content_type == 'text/uri-list':
-            body = '\n'.join(
-                [ self.directory.prefix + uri for uri in uris ]
-            ) + '\n'
+            body = '\n'.join(uris) + '\n'
         else:
             body = jsonWriterRaw(uris) + '\n'
             content_type = 'application/json'
