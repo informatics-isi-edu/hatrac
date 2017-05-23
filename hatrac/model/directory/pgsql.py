@@ -311,11 +311,20 @@ class HatracVersions (object):
 
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        body = jsonWriterRaw([
+        content_type = negotiated_content_type(
+            ['application/json', 'text/uri-list'],
+            'application/json'
+        )
+        uris = [
             "%s%s" % (self.object.directory.prefix, name)
             for name in self.object.directory.object_enumerate_versions(self.object)
-        ]) + '\n'
-        return len(body), Metadata({'content-type': 'application/json'}), body
+        ]
+        if content_type == 'text/uri-list':
+            body = '\n'.join(uris) + '\n'
+        else:
+            body = jsonWriterRaw() + '\n'
+            content_type = 'application/json'
+        return len(body), Metadata({'content-type': content_type}), body
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""

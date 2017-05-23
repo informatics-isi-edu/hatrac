@@ -547,6 +547,16 @@ for which a successful response is:
     
 representing the list of versions available for the named object.
 
+If the `text/uri-list` content-type is negotiated, the response will
+include URLs for each object version:
+
+    200 OK
+    Content-Type: text/uri-list
+    Content-Length: N
+    
+    /namespace_path/object_name:version_id
+    ...
+
 ### Object Deletion
 
 The DELETE operation is used to delete an object
