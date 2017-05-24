@@ -202,17 +202,18 @@ The GET operation is used to list direct children of a namespace:
     Host: authority_name
     If-None-Match: etag_value
 
-for which a successful response is:
+for which a successful response is a JSON array of child resource
+URLs:
 
     200 OK
     Content-Type: application/json
     Content-Length: N
     ETag: etag_value
     
-    ["/parent_path/namespace_id/child1", "/parent_path/namespace_id/child2", ...]
+    ["/hatrac/parent_path/namespace_id/child1", ...]
     
 If the `text/uri-list` content-type is negotiated, the response will
-include URLs for each child including the Hatrac service prefix:
+be a whitespace separated list of child URLs:
 
     200 OK
 	Content-Type: text/uri-list
@@ -537,24 +538,24 @@ The GET operation is used to list versions of an object:
     GET /namespace_path/object_name;versions
     Host: authority_name
     
-for which a successful response is:
+for which a successful response is a JSON array of version resource
+URLs:
 
     200 OK
     Content-Type: application/json
     Content-Length: N
     
-    ["/namespace_path/object_name:version_id", ...]
+    ["/hatrac/namespace_path/object_name:version_id", ...]
     
-representing the list of versions available for the named object.
-
-If the `text/uri-list` content-type is negotiated, the response will
-include URLs for each object version:
+If the `text/uri-list` content-type is negotiated, the response
+is a whitespace separated list of version URLs:
 
     200 OK
     Content-Type: text/uri-list
     Content-Length: N
     
-    /namespace_path/object_name:version_id
+    /hatrac/namespace_path/object_name:version1_id
+    /hatrac/namespace_path/object_name:version2_id
     ...
 
 ### Object Deletion
@@ -1155,16 +1156,16 @@ The GET operation is used to list pending upload jobs on an object:
     GET /namespace_path/object_name;upload
     Host: authority_name
 
-where the successful response is:
+where the successful response is a JSON array of job URLs:
 
     200 OK
     Content-Type: application/json
     Content-Length: N
     
-    ["/namespace_path/object_name;upload/job_id", ...]
+    ["/hatrac/namespace_path/object_name;upload/job_id", ...]
 
 If the `text/uri-list` content-type is negotiated, the response will
-include URLs for each job including the Hatrac service prefix:
+be a whitespace separated list of job URLs:
 
     200 OK
 	Content-Type: text/uri-list

@@ -74,7 +74,7 @@ class NameVersions (RestHandler):
         ).get_versions()
         # ugly but safe: hash the ordered list of versions as content ETag 
         self.set_http_etag(
-            hash_list(resource.object.directory.object_enumerate_versions(resource.object))
+            hash_list([ r.asurl() for r in resource.object.directory.object_enumerate_versions(resource.object)])
         )
         self.http_check_preconditions()
         return self.get_content(
@@ -124,7 +124,7 @@ class Name (RestHandler):
             )
         elif not resource.is_object():
             self.set_http_etag(
-                hash_list(map(str, resource.directory.namespace_enumerate_names(resource, False, False)))
+                hash_list([ r.asurl() for r in resource.directory.namespace_enumerate_names(resource, False, False)])
             )
             self.http_check_preconditions('PUT')
             resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
@@ -184,7 +184,7 @@ class Name (RestHandler):
         else:
             # check preconditions on namespace
             self.set_http_etag(
-                hash_list(map(str, resource.directory.namespace_enumerate_names(resource, False, False)))
+                hash_list([ r.asurl() for r in resource.directory.namespace_enumerate_names(resource, False, False)])
             )
             self.http_check_preconditions('DELETE')
         resource.delete(
@@ -203,7 +203,7 @@ class Name (RestHandler):
             self.set_http_etag(resource.version)
         else:
             self.set_http_etag(
-                hash_list(map(str, resource.directory.namespace_enumerate_names(resource, False, False)))
+                hash_list([ r.asurl() for r in resource.directory.namespace_enumerate_names(resource, False, False)])
             )
         self.http_check_preconditions()
         return self.get_content(

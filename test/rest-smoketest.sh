@@ -118,6 +118,11 @@ jsonload()
     python -c "import sys; import json; v = json.load(sys.stdin);" 2>&1
 }
 
+jsonarraydump()
+{
+    python -c "import sys; import json; v = json.load(sys.stdin); sys.stderr.write('\n'.join(v[:])+'\n');" 2>&1
+}
+
 jsoncheck()
 {
     if [[ "$summary" == *::application/json::* ]] && [[ "$summary" != *::*::0 ]] && [[ "${request[0]}" != '--head' ]]
@@ -128,6 +133,18 @@ jsoncheck()
 	    json_error=${json_error#*ValueError}
 	    echo "Error parsing JSON response: ${json_error}"
 	    return 1
+	fi
+	if [[ "$url" != *\;acl* ]]
+	then
+	    array_content=$(jsonarraydump < ${RESPONSE_CONTENT})
+	    if [[ $? -eq 0 ]]
+	    then
+		urischeck <<< "${array_content}"
+		if [[ $? -ne 0 ]]
+		then
+		    return 1
+		fi
+	    fi
 	fi
     fi
     return 0
@@ -175,9 +192,13 @@ urischeck()
 	    then
 		echo "Response URI '${uri}' lacks /hatrac prefix"
 		return 1
+	    elif [[ "$uri" == /hatrac/hatrac/* ]]
+	    then
+		echo "Response URI '${uri}' has doubled /hatrac prefix"
+		return 1
 	    elif [[ "$VERBOSE" = "true" ]]
 	    then
-		echo "Response URI '${uri}' has expected /hatrac prefix"
+		echo "Response URI '${uri}' has expected /hatrac prefix" >&2
 	    fi
 	fi
     done

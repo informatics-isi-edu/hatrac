@@ -118,6 +118,20 @@ class ACLs (dict):
         v.resource = self.resource
         v.access = k
 
+def negotiated_uri_list(uris, metadata={}):
+    """Returns nbytes, Metadata, body"""
+    metadata = dict(metadata)
+    metadata['content-type'] = negotiated_content_type(
+        ['application/json', 'text/uri-list'],
+        'application/json'
+    )
+    if metadata['content-type'] == 'text/uri-list':
+        body = '\n'.join(uris) + '\n'
+    else:
+        body = jsonWriterRaw(uris) + '\n'
+        metadata['content-type'] = 'application/json'
+    return len(body), Metadata(metadata), body
+
 class HatracName (object):
     """Represent a bound name."""
     _acl_names = []
@@ -239,17 +253,8 @@ class HatracNamespace (HatracName):
 
     def get_content(self, client_context, get_data=True):
         """Return (nbytes, metadata, data_generator) for namespace."""
-        uris = [ str(r) for r in self.directory.namespace_enumerate_names(self, False) ]
-        content_type = negotiated_content_type(
-            ['application/json', 'text/uri-list'],
-            'application/json'
-        )
-        if content_type == 'text/uri-list':
-            body = '\n'.join(uris) + '\n'
-        else:
-            body = jsonWriterRaw(uris) + '\n'
-            content_type = 'application/json'
-        return len(body), Metadata({'content-type': content_type}), body
+        uris = [ r.asurl() for r in self.directory.namespace_enumerate_names(self, False) ]
+        return negotiated_uri_list(uris)
 
 class HatracObject (HatracName):
     """Represent a bound object."""
@@ -311,20 +316,8 @@ class HatracVersions (object):
 
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        content_type = negotiated_content_type(
-            ['application/json', 'text/uri-list'],
-            'application/json'
-        )
-        uris = [
-            "%s%s" % (self.object.directory.prefix, name)
-            for name in self.object.directory.object_enumerate_versions(self.object)
-        ]
-        if content_type == 'text/uri-list':
-            body = '\n'.join(uris) + '\n'
-        else:
-            body = jsonWriterRaw(uris) + '\n'
-            content_type = 'application/json'
-        return len(body), Metadata({'content-type': content_type}), body
+        uris = [ r.asurl() for r in self.object.directory.object_enumerate_versions(self.object) ]
+        return negotiated_uri_list(uris)
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
@@ -380,19 +373,8 @@ class HatracUploads (object):
 
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner'], client_context)
-        content_type = negotiated_content_type(
-            ['application/json', 'text/uri-list'],
-            'application/json'
-        )
-        uris = self.object.directory.namespace_enumerate_uploads(self.object)
-        if content_type == 'text/uri-list':
-            body = '\n'.join(
-                [ self.object.directory.prefix + uri for uri in uris ]
-            ) + '\n'
-        else:
-            body = jsonWriterRaw(uris) + '\n'
-            content_type = 'application/json'
-        return len(body), Metadata({'content-type': content_type}), body
+        uris = [ r.asurl() for r in self.object.directory.namespace_enumerate_uploads(self.object) ]
+        return negotiated_uri_list(uris)
 
 class HatracUpload (HatracName):
     """Represent an upload job."""
@@ -550,13 +532,13 @@ class connection (psycopg2.extensions.connection):
           WHERE p.id = $1 AND NOT n.is_deleted ;
 
         PREPARE hatrac_object_uploads (int8) AS 
-          SELECT u.*, n.name, %(owner_acl)s
+          SELECT u.*, n.name, n.pid, n.ancestors, %(owner_acl)s
           FROM hatrac.name n
           JOIN hatrac.upload u ON (u.nameid = n.id)
           WHERE n.id = $1 ;
 
         PREPARE hatrac_namespace_uploads (int8) AS
-          SELECT u.*, n.name, %(owner_acl)s
+          SELECT u.*, n.name, n.pid, n.ancestors, %(owner_acl)s
           FROM hatrac.name n
           JOIN hatrac.upload u ON (u.nameid = n.id)
           WHERE $1 = ANY (n.ancestors);
@@ -1161,8 +1143,8 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         """Return a list of versions
         """
         return [
-            '%s:%s' % (r['name'], r['version'])
-            for r in self._version_list(conn, cur, object.id) 
+            HatracObjectVersion(self, HatracName.construct(self, subtype=1, **row), **row)
+            for row in self._version_list(conn, cur, object.id) 
         ]
 
     @db_wrap(reload_pos=1)
@@ -1175,8 +1157,8 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     @db_wrap(reload_pos=1)
     def namespace_enumerate_uploads(self, resource, recursive=True, conn=None, cur=None):
         return [
-            '%s;upload/%s' % (r['name'], r['job'])
-            for r in self._namespace_enumerate_uploads(conn, cur, resource, recursive) 
+            HatracUpload(self, HatracName.construct(self, subtype=1, **row), **row)
+            for row in self._namespace_enumerate_uploads(conn, cur, resource, recursive) 
         ]
 
     def _update_resource_metadata(self, conn, cur, resource, updates):
