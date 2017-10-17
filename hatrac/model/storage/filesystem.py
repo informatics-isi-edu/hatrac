@@ -203,8 +203,12 @@ class HatracStorage (object):
             limit = nbytes
 
         if pos != 0 or limit != nbytes:
-            # object metadata does not apply to partial read content
-            metadata = {}
+            # most object metadata does not apply to partial read content
+            metadata = {
+                k: v
+                for k, v in metadata.items()
+                if k in {'content-type'}
+            }
             
         length = limit - pos
 

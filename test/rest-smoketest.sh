@@ -356,8 +356,9 @@ cat > ${TEST_DATA} <<EOF
 application/x-bash
 EOF
 dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
-dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
-dotest "200::*::*" "${obj1_vers0};metadata/content-type"
+dotest "200::text/plain*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "200::application/x-bash::*" "${obj1_vers0}"
+dotest "206::application/x-bash::*" "${obj1_vers0}" -H "Range: bytes=2-"
 dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -X DELETE
 dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
 dotest "404::*::*" "${obj1_vers0};metadata/content-type"
