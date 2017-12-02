@@ -493,7 +493,8 @@ class connection (psycopg2.extensions.connection):
         PREPARE hatrac_chunk_list (int8, int8) AS
           SELECT *
           FROM hatrac.chunk
-          WHERE uploadid = $1 AND ($2 IS NULL OR position = $2) ;
+          WHERE uploadid = $1 AND ($2 IS NULL OR position = $2)
+          ORDER BY position ;
 
         PREPARE hatrac_object_enumerate_versions (int8) AS
           SELECT n.name, n.pid, n.ancestors, n.subtype, n.update, n."subtree-owner", n."subtree-read", v.*, %(owner_acl)s, %(read_acl)s
@@ -1386,7 +1387,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
         return [ helper(row) for row in cur ]
         
     def _chunk_list(self, conn, cur, upload, position=None):
-        cur.execute("EXECUTE hatrac_chunk_list(%d, %s);" % (
+        cur.execute("EXECUTE hatrac_chunk_list(%s, %s);" % (
             sql_literal(int(upload.id)),
             sql_literal(int(position)) if position is not None else 'NULL'
         ))

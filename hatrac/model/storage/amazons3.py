@@ -1,6 +1,5 @@
-
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2017 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -10,17 +9,15 @@ This module handles only low-level byte storage. Object and
 object-version lifecycle and authorization is handled by the caller.
 
 """
-import os
 import tempfile
 from webauthn2.util import PooledConnection
-import boto
-import boto.s3
-import boto.s3.key
-from boto.s3.connection import S3Connection
-from boto.exception import S3ResponseError
+import boto3
+from botocore.exceptions import ClientError
 from hatrac.core import BadRequest, coalesce
 import binascii
 import base64
+import logging
+
 
 class PooledS3BucketConnection (PooledConnection):
 
@@ -30,32 +27,22 @@ class PooledS3BucketConnection (PooledConnection):
            Config is a web.storage object with keys:
               s3_bucket: name of bucket
 
-              s3_connection: nested dictionary of parameters passed as
-              boto.S3Connection(**dict(s3_connection)), e.g.:
-
-                 aws_access_key_id,
-                 aws_secret_access_key,
-                 provider,
-                 security_token,
-                 anon,
-                 validate_certs
-
         """
         self.bucket_name = config['s3_bucket']
-
-        # TODO: do something better for authz than storing secret in our config data!
-        self.conn_config = config['s3_connection']
+        self.object_prefix = config['s3_object_prefix']
 
         # TODO: encode better identifiers if we ever support multiple
         # buckets or credentials and need separate sub-pools
-        self.config_tuple = (self.bucket_name,)
+        self.config_tuple = (self.bucket_name, self.object_prefix)
         PooledConnection.__init__(self, self.config_tuple)
 
     def _new_connection(self):
         """Open a new S3 connection and get bucket handle."""
-        conn = S3Connection(**self.conn_config)
-        bucket = conn.get_bucket(self.bucket_name)
-        return (conn, bucket)
+        s3 = boto3.resource('s3')
+        bucket = s3.Bucket(self.bucket_name)
+
+        return s3, bucket
+
 
 def s3_bucket_wrap(deferred_conn_reuse=False):
     """Decorate a method with pooled bucket access.
@@ -65,24 +52,30 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
        generator.
     """
     def decorator(orig_method):
-        def wrapper(*args):
+        def wrapper(*args, **kwargs):
             self = args[0]
             conn_tuple = None
             try:
                 conn_tuple = self._get_pooled_connection()
                 conn, bucket = conn_tuple
-                try:             
-                    return orig_method(*args, s3_conn=conn, s3_bucket=bucket)
-                except S3ResponseError, s3_error:
-                    raise BadRequest(s3_error.message)
-                except Exception, ev:
+                try:
+                    kwargs1 = dict(kwargs)
+                    kwargs1['s3_conn'] = conn
+                    kwargs1['s3_bucket'] = bucket
+                    return orig_method(*args, **kwargs1)
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
+                except ClientError as s3_error:
+                    logging.error("S3 client error: %s", s3_error, exc_info=True)
+                    raise BadRequest(s3_error)
+                except Exception:
                     conn_tuple = None
+                    raise
             finally:
                 if conn_tuple and not deferred_conn_reuse:
                     self._put_pooled_connection(conn_tuple)
         return wrapper
     return decorator
+
 
 class HatracStorage (PooledS3BucketConnection):
     """Implement HatracStorage API using an S3 bucket.
@@ -112,29 +105,38 @@ class HatracStorage (PooledS3BucketConnection):
         """
         PooledS3BucketConnection.__init__(self, config)
 
+    def _prefixed_name(self, name):
+        name = name.lstrip("/")
+        if self.object_prefix:
+            name = "%s/%s" % (self.object_prefix, name)
+        return name
+
     @s3_bucket_wrap()
     def create_from_file(self, name, input, nbytes, metadata={}, s3_conn=None, s3_bucket=None):
         """Create an entire file-version object from input content, returning version ID."""
-        s3_key = boto.s3.key.Key(s3_bucket, name)
-        def helper(input, headers, nbytes, md5):
-            s3_key.set_contents_from_file(input, headers, replace=True, md5=md5, size=nbytes, rewind=False)
-            return s3_key.version_id
+        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+
+        def helper(inp, content_length, md5, content_type):
+            response = s3_obj.put(Body=inp,
+                                  ContentType=content_type,
+                                  ContentLength=content_length,
+                                  ContentMD5=md5[1])
+            return response['VersionId']
+
         return self._send_content_from_stream(input, nbytes, metadata, helper)
 
     def _send_content_from_stream(self, input, nbytes, metadata, sendfunc):
         """Common file-sending logic to talk to S3."""
-        headers = {'Content-Length': str(nbytes)}
-        if 'content-type' in metadata:
-            headers['Content-Type'] = metadata['content-type']
+        content_type = metadata.get('content-type', 'application/octet-stream')
         if 'content-md5' in metadata:
             content_md5 = metadata['content-md5']
             md5 = (binascii.hexlify(content_md5), base64.b64encode(content_md5))
-            input = InputWrapper(input, nbytes)
+            inp = InputWrapper(input, nbytes)
         else:
             # let S3 backend use a temporary file to rewind and calculate MD5 if needed
             tmpf = tempfile.TemporaryFile()
             md5 = None
-            
+
             rbytes = 0
             while True:
                 if nbytes is not None:
@@ -152,18 +154,18 @@ class HatracStorage (PooledS3BucketConnection):
                     break
 
             tmpf.seek(0)
-            input = tmpf
-            
-        return sendfunc(input, headers, nbytes, md5)
+            inp = tmpf
+
+        return sendfunc(inp, nbytes, md5, content_type=content_type)
 
     def get_content(self, name, version, metadata={}):
         return self.get_content_range(name, version, metadata, None)
      
     @s3_bucket_wrap(deferred_conn_reuse=True)
     def get_content_range(self, name, version, metadata={}, get_slice=None, s3_conn=None, s3_bucket=None):
-        s3_key = boto.s3.key.Key(s3_bucket, name)
-        s3_key.version_id = version.strip()
-        nbytes = s3_key.size
+        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+        s3_obj.VersionId = version.strip()
+        nbytes = s3_obj.content_length
         
         if get_slice is not None:
             pos = coalesce(get_slice.start, 0)
@@ -173,23 +175,20 @@ class HatracStorage (PooledS3BucketConnection):
             limit = nbytes
         
         if pos != 0 or limit != nbytes:
-            headers = {'Range':'bytes=%d-%d' % (pos, limit)}
-            # object metadata does not apply to partial read content
-            metadata = {}
+            content_range = 'bytes=%d-%d' % (pos, limit)
         else:
-            headers = None
+            content_range = 'bytes=0-'
 
         length = limit - pos
 
-        # Note: version ID is not being set on the key, this forces the right version
-        s3_key.open_read(headers=headers,query_args='versionId=%s' % version)
-       
+        response = s3_obj.get(Range=content_range, VersionId=version)
+
         def data_generator():
             conn_tuple = (s3_conn, s3_bucket)
             try:
-                for bytes in s3_key:
-                    yield bytes
-            except Exception, ev:
+                for chunk in iter(lambda: response['Body'].read(self._bufsize), b''):
+                    yield chunk
+            except Exception as ev:
                 # discard connections which had errors?
                 conn_tuple = None
             finally:
@@ -201,45 +200,46 @@ class HatracStorage (PooledS3BucketConnection):
     @s3_bucket_wrap()
     def delete(self, name, version, s3_conn=None, s3_bucket=None):
         """Delete object version."""
-        s3_key = boto.s3.key.Key(s3_bucket, name)
-        s3_key.version_id = version
-        s3_key.delete()
+        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+        s3_obj.VersionId = version.strip()
+        s3_obj.delete()
 
     @s3_bucket_wrap()
     def create_upload(self, name, nbytes=None, metadata={}, s3_conn=None, s3_bucket=None):
-        upload = s3_bucket.initiate_multipart_upload(name)
-        return upload.id
+        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+        s3_upload = s3_obj.initiate_multipart_upload(
+            ContentType=metadata.get('content-type', 'application/octet-stream'))
+        return s3_upload.id
 
     @s3_bucket_wrap()
-    def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, metadata={}, s3_conn=None, s3_bucket=None):
-        upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
-        upload.key_name = name
-        upload.id = upload_id
+    def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, metadata={},
+                               s3_conn=None, s3_bucket=None):
 
-        def helper(input, headers, nbytes, md5):
-            # We have to set content-type to None to avoid boto trying to work out type
-            headers = headers if headers is not None else {}
-            headers['Content-Type'] = headers.get('Content-Type', None)
-            s3_key = upload.upload_part_from_file(input, position + 1, headers=headers, md5=md5, size=nbytes)
-            return dict(etag=s3_key.etag)
+        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+        s3_upload = s3_obj.MultipartUpload(upload_id)
+
+        def helper(input, nbytes, md5, content_type=None):
+            part = s3_upload.Part(position + 1)
+            response = part.upload(Body=input, ContentLength=nbytes)
+            return dict(etag=response['ETag'])
         
-        return self._send_content_from_stream(input, nbytes, None, metadata, helper)
+        return self._send_content_from_stream(input, nbytes, metadata, helper)
               
     @s3_bucket_wrap()
     def cancel_upload(self, name, upload_id, s3_conn=None, s3_bucket=None):
-        upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
-        upload.key_name = name
-        upload.id = upload_id
-        upload.cancel_upload()
+        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+        s3_upload = s3_obj.MultipartUpload(upload_id)
+        s3_upload.abort()
         return None
 
     @s3_bucket_wrap()
     def finalize_upload(self, name, upload_id, chunk_data, metadata={}, s3_conn=None, s3_bucket=None):
-        upload = boto.s3.multipart.MultiPartUpload(s3_bucket)
-        upload.key_name = name
-        upload.id = upload_id
-        # TODO: is chunk_data even necessary...?
-        upload = upload.complete_upload()
+        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+        s3_upload = s3_obj.MultipartUpload(upload_id)
+        parts = list()
+        for item in iter(chunk_data):
+            parts.append({'PartNumber': item['position'] + 1, 'ETag': item['aux']['etag']})
+        upload = s3_upload.complete(MultipartUpload={'Parts': parts})
         return upload.version_id
 
     def delete_namespace(self, name):
@@ -247,7 +247,8 @@ class HatracStorage (PooledS3BucketConnection):
         # nothing to do for S3 since namespaces are not explicit resources in bucket
         pass
 
-class InputWrapper():
+
+class InputWrapper:
     """Input stream file-like wrapper for uploading data to S3. 
 
     This module wraps mod_wsgi_input providing implementations of
@@ -279,15 +280,15 @@ class InputWrapper():
         
         if whence == 0:
             if offset > self.nbytes or offset < 0:
-                raise IOException("Can't seek beyond stream lenght")
+                raise IOError("Can't seek beyond stream length")
             self.current_position = offset
         elif whence == 1:
             if offset + self.current_position > self.nbytes or offset + self.current_position < 0:
-                raise IOException("Can't seek beyond stream length") 
+                raise IOError("Can't seek beyond stream length")
             self.current_position = self.current_position + offset
         else:
             if offset > 0 or self.nbytes + offset < 0:
-                raise IOException("Can't seek beyond stream length")
+                raise IOError("Can't seek beyond stream length")
             self.current_position = self.nbytes + offset
              
     def name(self):

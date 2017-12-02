@@ -7,7 +7,7 @@
 import re
 import web
 import hatrac.core
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest
+from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, LengthRequired
 from webauthn2.util import jsonReader
 
 @web_url([
