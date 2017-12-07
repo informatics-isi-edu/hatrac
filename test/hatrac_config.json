@@ -7,4 +7,22 @@
     "database_max_retries": 5,
     "403_html": "<html><body><h1>Access Forbidden</h1><p>%(message)s</p></body></html>",
     "401_html": "<html><body><h1>Authentication Required</h1><p>%(message)s</p></body></html>"
+    "s3_config": {
+        "session": {
+            "region_name":"us-west-2"
+        },
+        "buckets": {
+            "/": {
+                "bucket_name": "bucket.derivacloud.org"
+            },
+            "bucket1": {
+                "bucket_name": "bucket1.derivacloud.org",
+                "bucket_path_prefix":"hatrac/buckets/"
+            },
+            "bucket2": {
+                "bucket_name": "bucket2.derivacloud.org",
+                "bucket_path_prefix":"hatrac/buckets/"
+            }
+        }
+    }
 }

@@ -13,7 +13,7 @@ import tempfile
 from webauthn2.util import PooledConnection
 import boto3
 from botocore.exceptions import ClientError
-from hatrac.core import BadRequest, coalesce
+from hatrac.core import NotFound, BadRequest, coalesce
 import binascii
 import base64
 import logging
@@ -22,57 +22,48 @@ import logging
 class PooledS3BucketConnection (PooledConnection):
 
     def __init__(self, config):
-        """Represent a pool of S3 connections and bucket handles.
-
-           Config is a web.storage object with keys:
-              s3_bucket: name of bucket
+        """Represent a pool of S3 connections.
 
         """
-        self.bucket_name = config['s3_bucket']
-        self.object_prefix = config['s3_object_prefix']
+        self.s3_config = config['s3_config']
+        self.s3_session = self.s3_config.get('session', dict())
+        self.s3_buckets = self.s3_config.get("buckets", dict())
 
-        # TODO: encode better identifiers if we ever support multiple
-        # buckets or credentials and need separate sub-pools
-        self.config_tuple = (self.bucket_name, self.object_prefix)
+        self.config_tuple = ("s3_sessions",)
         PooledConnection.__init__(self, self.config_tuple)
 
     def _new_connection(self):
-        """Open a new S3 connection and get bucket handle."""
-        s3 = boto3.resource('s3')
-        bucket = s3.Bucket(self.bucket_name)
+        """Create a new S3 session."""
+        session = boto3.session.Session(**self.s3_session)
+        s3 = session.resource('s3')
 
-        return s3, bucket
+        return s3
 
 
 def s3_bucket_wrap(deferred_conn_reuse=False):
-    """Decorate a method with pooled bucket access.
+    """Decorate a method with S3 session access.
 
-       If deferred_conn_reuse is True, wrapped method must put back
-       (conn, bucket) pair into pool itself, e.g. at end of lazy data
-       generator.
     """
     def decorator(orig_method):
         def wrapper(*args, **kwargs):
             self = args[0]
-            conn_tuple = None
+            s3_session = None
             try:
-                conn_tuple = self._get_pooled_connection()
-                conn, bucket = conn_tuple
+                s3_session = self._get_pooled_connection()
                 try:
                     kwargs1 = dict(kwargs)
-                    kwargs1['s3_conn'] = conn
-                    kwargs1['s3_bucket'] = bucket
+                    kwargs1['s3_session'] = s3_session
                     return orig_method(*args, **kwargs1)
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
                 except ClientError as s3_error:
                     logging.error("S3 client error: %s", s3_error, exc_info=True)
                     raise BadRequest(s3_error)
                 except Exception:
-                    conn_tuple = None
+                    s3_session = None
                     raise
             finally:
-                if conn_tuple and not deferred_conn_reuse:
-                    self._put_pooled_connection(conn_tuple)
+                if s3_session and not deferred_conn_reuse:
+                    self._put_pooled_connection(s3_session)
         return wrapper
     return decorator
 
@@ -92,10 +83,6 @@ class HatracStorage (PooledS3BucketConnection):
     """
     track_chunks = True
 
-    # TODO: decide whether to map to S3 versioning or just encode
-    # Hatrac versions directly in S3 object names (seperate S3 object
-    # per Hatrac object-version)...  perhaps a config option?
-
     _bufsize = 1024**2
 
     def __init__(self, config):
@@ -105,16 +92,29 @@ class HatracStorage (PooledS3BucketConnection):
         """
         PooledS3BucketConnection.__init__(self, config)
 
-    def _prefixed_name(self, name):
-        name = name.lstrip("/")
-        if self.object_prefix:
-            name = "%s/%s" % (self.object_prefix, name)
-        return name
+    def _map_name(self, name):
+        object_name = name.lstrip("/")
+        path_root = object_name.split("/")[0].strip() if "/" in object_name else "/"
+        bucket = self.s3_buckets.get(path_root)
+        if not bucket:
+            raise NotFound("Could not find a bucket mapping for path: %s" % name)
+        bucket_name = bucket.get("bucket_name")
+        if not bucket_name:
+            raise ValueError("Invalid bucket configuration, missing required key: bucket_name")
+        prefix = bucket.get("bucket_path_prefix", "hatrac")
+        if prefix:
+            if not prefix.endswith("/"):
+                prefix += "/"
+            object_name = "%s%s" % (prefix, object_name)
+
+        return bucket_name, object_name
 
     @s3_bucket_wrap()
-    def create_from_file(self, name, input, nbytes, metadata={}, s3_conn=None, s3_bucket=None):
+    def create_from_file(self, name, input, nbytes, metadata={}, s3_session=None):
         """Create an entire file-version object from input content, returning version ID."""
-        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+        bucket_name, object_name = self._map_name(name)
+        s3_bucket = s3_session.Bucket(bucket_name)
+        s3_obj = s3_bucket.Object(object_name)
 
         def helper(inp, content_length, md5, content_type):
             response = s3_obj.put(Body=inp,
@@ -162,8 +162,10 @@ class HatracStorage (PooledS3BucketConnection):
         return self.get_content_range(name, version, metadata, None)
      
     @s3_bucket_wrap(deferred_conn_reuse=True)
-    def get_content_range(self, name, version, metadata={}, get_slice=None, s3_conn=None, s3_bucket=None):
-        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+    def get_content_range(self, name, version, metadata={}, get_slice=None, s3_session=None):
+        bucket_name, object_name = self._map_name(name)
+        s3_bucket = s3_session.Bucket(bucket_name)
+        s3_obj = s3_bucket.Object(object_name)
         s3_obj.VersionId = version.strip()
         nbytes = s3_obj.content_length
         
@@ -183,39 +185,42 @@ class HatracStorage (PooledS3BucketConnection):
 
         response = s3_obj.get(Range=content_range, VersionId=version)
 
-        def data_generator():
-            conn_tuple = (s3_conn, s3_bucket)
+        def data_generator(session):
             try:
                 for chunk in iter(lambda: response['Body'].read(self._bufsize), b''):
                     yield chunk
             except Exception as ev:
-                # discard connections which had errors?
-                conn_tuple = None
+                session = None
+                logging.error("S3 read error: %s", ev, exc_info=True)
             finally:
-                if conn_tuple:
-                    self._put_pooled_connection(conn_tuple)
+                if session:
+                    self._put_pooled_connection(session)
 
-        return length, metadata, data_generator()
+        return length, metadata, data_generator(s3_session)
 
     @s3_bucket_wrap()
-    def delete(self, name, version, s3_conn=None, s3_bucket=None):
+    def delete(self, name, version, s3_session=None):
         """Delete object version."""
-        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+        bucket_name, object_name = self._map_name(name)
+        s3_bucket = s3_session.Bucket(bucket_name)
+        s3_obj = s3_bucket.Object(object_name)
         s3_obj.VersionId = version.strip()
         s3_obj.delete()
 
     @s3_bucket_wrap()
-    def create_upload(self, name, nbytes=None, metadata={}, s3_conn=None, s3_bucket=None):
-        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+    def create_upload(self, name, nbytes=None, metadata={}, s3_session=None):
+        bucket_name, object_name = self._map_name(name)
+        s3_bucket = s3_session.Bucket(bucket_name)
+        s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.initiate_multipart_upload(
             ContentType=metadata.get('content-type', 'application/octet-stream'))
         return s3_upload.id
 
     @s3_bucket_wrap()
-    def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, metadata={},
-                               s3_conn=None, s3_bucket=None):
-
-        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+    def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, metadata={}, s3_session=None):
+        bucket_name, object_name = self._map_name(name)
+        s3_bucket = s3_session.Bucket(bucket_name)
+        s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.MultipartUpload(upload_id)
 
         def helper(input, nbytes, md5, content_type=None):
@@ -226,15 +231,19 @@ class HatracStorage (PooledS3BucketConnection):
         return self._send_content_from_stream(input, nbytes, metadata, helper)
               
     @s3_bucket_wrap()
-    def cancel_upload(self, name, upload_id, s3_conn=None, s3_bucket=None):
-        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+    def cancel_upload(self, name, upload_id, s3_session=None):
+        bucket_name, object_name = self._map_name(name)
+        s3_bucket = s3_session.Bucket(bucket_name)
+        s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.MultipartUpload(upload_id)
         s3_upload.abort()
         return None
 
     @s3_bucket_wrap()
-    def finalize_upload(self, name, upload_id, chunk_data, metadata={}, s3_conn=None, s3_bucket=None):
-        s3_obj = s3_bucket.Object(self._prefixed_name(name))
+    def finalize_upload(self, name, upload_id, chunk_data, metadata={}, s3_session=None):
+        bucket_name, object_name = self._map_name(name)
+        s3_bucket = s3_session.Bucket(bucket_name)
+        s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.MultipartUpload(upload_id)
         parts = list()
         for item in iter(chunk_data):
