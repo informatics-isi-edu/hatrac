@@ -16,7 +16,7 @@ from botocore.exceptions import ClientError
 from hatrac.core import NotFound, BadRequest, coalesce
 import binascii
 import base64
-import logging
+from hatrac.rest.core import request_trace
 
 
 class PooledS3BucketConnection (PooledConnection):
@@ -56,7 +56,7 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
                     return orig_method(*args, **kwargs1)
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
                 except ClientError as s3_error:
-                    logging.error("S3 client error: %s", s3_error, exc_info=True)
+                    request_trace("S3 client error: %s" % s3_error)
                     raise BadRequest(s3_error)
                 except Exception:
                     s3_session = None
@@ -191,7 +191,7 @@ class HatracStorage (PooledS3BucketConnection):
                     yield chunk
             except Exception as ev:
                 session = None
-                logging.error("S3 read error: %s", ev, exc_info=True)
+                request_trace("S3 read error: %s" % ev)
             finally:
                 if session:
                     self._put_pooled_connection(session)
