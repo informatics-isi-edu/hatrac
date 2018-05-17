@@ -125,12 +125,12 @@ class RestException (web.HTTPError):
         else:
             hdr = self.headers
         msg = message or self.message
-        web.HTTPError.__init__(self, self.status, hdr, msg + '\n')
+        web.HTTPError.__init__(self, self.status, hdr, msg + '\n' if msg is not None else '')
         web.ctx.hatrac_content_type = hdr['Content-Type']
 
 class NotModified (RestException):
     status = '304 Not Modified'
-    message = 'Resource not modified.'
+    message = None
 
 class BadRequest (RestException):
     status = '400 Bad Request'
