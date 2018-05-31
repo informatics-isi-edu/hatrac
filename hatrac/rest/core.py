@@ -27,6 +27,7 @@ import sys
 import traceback
 import hashlib
 from webauthn2.util import context_from_environment
+from webauthn2.rest import get_log_parts, request_trace_json, request_final_json
 
 _webauthn2_manager = webauthn2.Manager()
 
@@ -82,34 +83,14 @@ logger.setLevel(logging.INFO)
 
 def log_parts():
     """Generate a dictionary of interpolation keys used by our logging template."""
-    now = datetime.datetime.now(pytz.timezone('UTC'))
-    elapsed = (now - web.ctx.hatrac_start_time)
-    client_identity_obj = web.ctx.webauthn2_context and web.ctx.webauthn2_context.client or None
-    parts = dict(
-        elapsed = elapsed.seconds + 0.001 * (elapsed.microseconds/1000),
-        client_ip = web.ctx.ip,
-        client_identity_obj = client_identity_obj,
-        reqid = web.ctx.hatrac_request_guid
-        )
-    return parts
-    
+    return get_log_parts('hatrac_start_time', 'hatrac_request_guid', 'hatrac_request_content_range', 'hatrac_content_type')
+
 def request_trace(tracedata):
     """Log one tracedata event as part of a request's audit trail.
 
        tracedata: a string representation of trace event data
     """
-    parts = log_parts()
-    od = OrderedDict([
-        (k, v) for k, v in [
-            ('elapsed', parts['elapsed']),
-            ('req', parts['reqid']),
-            ('trace', tracedata),
-            ('client', parts['client_ip']),
-            ('user', parts['client_identity_obj']),
-        ]
-        if v
-    ])
-    logger.info( json.dumps(od, separators=(', ', ':')).encode('utf-8') )
+    logger.info( request_trace_json(tracedata, log_parts()) )
 
 class RestException (web.HTTPError):
     message = None
@@ -240,42 +221,7 @@ def web_method():
                 raise Conflict(str(ev))
             finally:
                 # finalize
-                parts = log_parts()
-                session = web.ctx.webauthn2_context.session
-                if session is None or isinstance(session, dict):
-                    pass
-                else:
-                    session = session.to_dict()
-
-                try:
-                    dcctx = web.ctx.env.get('HTTP_DERIVA_CLIENT_CONTEXT', 'null')
-                    dcctx = urllib.unquote(dcctx)
-                    dcctx = json.loads(dcctx)
-                except:
-                    dcctx = None
-
-                od = OrderedDict([
-                    (k, v) for k, v in [
-                        ('elapsed', parts['elapsed']),
-                        ('req', parts['reqid']),
-                        ('scheme', web.ctx.protocol),
-                        ('host', web.ctx.host),
-                        ('status', web.ctx.status),
-                        ('method', web.ctx.method),
-                        ('path', web.ctx.env['REQUEST_URI']),
-                        ('range', web.ctx.hatrac_request_content_range),
-                        ('type', web.ctx.hatrac_content_type),
-                        ('client', parts['client_ip']),
-                        ('user', parts['client_identity_obj']),
-                        ('referrer', web.ctx.env.get('HTTP_REFERER')),
-                        ('agent', web.ctx.env.get('HTTP_USER_AGENT')),
-                        ('session', session),
-                        ('track', web.ctx.webauthn2_context.tracking),
-                        ('dcctx', dcctx),
-                    ]
-                    if v
-                ])
-                logger.info( json.dumps(od, separators=(', ', ':')).encode('utf-8') )
+                logger.info( request_final_json(log_parts()) )
         return wrapper
     return helper
                 
