@@ -22,7 +22,7 @@ regression test suite covering all core API features.
 
 ## Using Hatrac
 
-As a protocol, the [Hatrac REST API](REST-API.md) can be easily
+As a protocol, the [Hatrac REST API](docs/REST-API.md) can be easily
 accessed by browser-based applications or any basic HTTP client
 library. The API can also be easily re-implemented by other services
 if interoperability is desired. As a piece of software and reference
@@ -51,7 +51,7 @@ distribution with Python 2.7. It has a conventional web service stack:
 
 ### Installation
 
-There is not much installation automation yet. Please see our [detailed installation instructions](INSTALL.md)
+There is not much installation automation yet. Please see our [detailed installation instructions](docs/INSTALL.md)
 
 ### Operational Model
 
@@ -161,21 +161,20 @@ our scientific peers, we adopt several additional implementation
 requirements:
 
 1. Integrate into conventional web architectures
-  - Use URL structure for naming data objects in a federated universe
-  - Use HTTP protocol for accessing and managing data objects
-1. Flexible deployment scenarios
-  - Run in a traditional server or workstation for small groups with
-    local resources
-  - Run in a conventional hosted/colocated server
-  - Run in a cloud/scale-out environment
-1. Configurable client identity and role providers
-  - Standalone database
-  - Enterprise directory
-  - Cloud-hosted identity and group providers
-1. Configurable storage and "bring your own disks" scenarios
-  - Store objects as files in a regular filesystem
-  - Store objects in an existing object system (such as Amazon S3)
-  - Allow communities to mix and match these options
+   - Use URL structure for naming data objects in a federated universe
+   - Use HTTP protocol for accessing and managing data objects
+2. Flexible deployment scenarios
+   - Run in a traditional server or workstation for small groups with local resources
+   - Run in a conventional hosted/colocated server
+   - Run in a cloud/scale-out environment
+3. Configurable client identity and role providers
+   - Standalone database
+   - Enterprise directory
+   - Cloud-hosted identity and group providers
+4. Configurable storage and "bring your own disks" scenarios
+   - Store objects as files in a regular filesystem
+   - Store objects in an existing object system (such as Amazon S3)
+   - Allow communities to mix and match these options
 
 ### Why not Amazon S3?
 
@@ -223,10 +222,6 @@ HTTPD, so we can build different services and applications that share
 data resources without adding a private, back-end data store to each
 one.
 
-### Why not WebDAV?
-
-TBD
-
 ## Help and Contact
 
 Please direct questions and comments to the [project issue
@@ -243,9 +238,4 @@ information.
 
 Hatrac is developed in the
 [Informatics group](http://www.isi.edu/research_groups/informatics/home)
-at the [USC Information Sciences Institute](http://www.isi.edu). The
-primary design team is:
-
-- Karl Czajkowski
-- Carl Kesselman
-- Rob Schuler
+at the [USC Information Sciences Institute](http://www.isi.edu).
