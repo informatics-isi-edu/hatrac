@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  
+  <link rel="shortcut icon" href="../img/favicon.ico">
+  <title>Installing on Red Hat-derived Linux - Hatrac Documentation</title>
+  <link href='https://fonts.googleapis.com/css?family=Lato:400,700|Roboto+Slab:400,700|Inconsolata:400,700' rel='stylesheet' type='text/css'>
+
+  <link rel="stylesheet" href="../css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../css/theme_extra.css" type="text/css" />
+  <link rel="stylesheet" href="../css/highlight.css">
+  <link href="../css/extra.css" rel="stylesheet">
+  
+  <script>
+    // Current page data
+    var mkdocs_page_name = "Installing on Red Hat-derived Linux";
+    var mkdocs_page_input_path = "INSTALL.md";
+    var mkdocs_page_url = "/INSTALL/";
+  </script>
+  
+  <script src="../js/jquery-2.1.1.min.js"></script>
+  <script src="../js/modernizr-2.8.3.min.js"></script>
+  <script type="text/javascript" src="../js/highlight.pack.js"></script> 
+  
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+      <div class="wy-side-nav-search">
+        <a href="./" class="icon icon-home"> Hatrac Documentation</a>
+        <div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+	<ul class="current">
+	  
+          
+            <li class="toctree-l1">
+		
+    <span class="caption-text">User Docs</span>
+    <ul class="subnav">
+                <li class=" current">
+                    
+    <a class="current" href="./">Installing on Red Hat-derived Linux</a>
+    <ul class="subnav">
+            
+    <li class="toctree-l3"><a href="#hatrac-installation">Hatrac Installation</a></li>
+    
+        <ul>
+        
+            <li><a class="toctree-l4" href="#install-code">Install code</a></li>
+        
+            <li><a class="toctree-l4" href="#basic-testing">Basic testing</a></li>
+        
+            <li><a class="toctree-l4" href="#configure-web-stack">Configure web stack</a></li>
+        
+            <li><a class="toctree-l4" href="#example-hatrac-configuration">Example Hatrac configuration</a></li>
+        
+            <li><a class="toctree-l4" href="#rest-api-testing">REST API testing</a></li>
+        
+            <li><a class="toctree-l4" href="#example-webauthn2-configuration">Example Webauthn2 configuration</a></li>
+        
+            <li><a class="toctree-l4" href="#example-apache-configuration">Example Apache configuration</a></li>
+        
+            <li><a class="toctree-l4" href="#working-with-se-linux">Working with SE-Linux</a></li>
+        
+        </ul>
+    
+
+    </ul>
+                </li>
+                <li class="">
+                    
+    <a class="" href="../HOWTO/">Other HOWTO information</a>
+                </li>
+    </ul>
+	    </li>
+          
+            <li class="toctree-l1">
+		
+    <a class="" href="../REST-API/">Hatrac API and Service Semantics</a>
+	    </li>
+          
+        </ul>
+      </div>
+      &nbsp;
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+        <a href="./">Hatrac Documentation</a>
+      </nav>
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="./">Docs</a> &raquo;</li>
+    
+      
+        
+          <li>User Docs &raquo;</li>
+        
+      
+    
+    <li>Installing on Red Hat-derived Linux</li>
+    <li class="wy-breadcrumbs-aside">
+      
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main">
+            <div class="section">
+              
+                <h1 id="hatrac-installation">Hatrac Installation<a class="headerlink" href="#hatrac-installation" title="Permanent link">&para;</a></h1>
+<p><a href="http://github.com/informatics-isi-edu/hatrac">Hatrac</a> (pronounced
+"hat rack") is a simple object storage service for web-based,
+data-oriented collaboration.</p>
+<h2 id="install-code">Install code<a class="headerlink" href="#install-code" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Check out the development code from GitHub.</li>
+<li>Install prerequisites:</li>
+<li>Apache HTTPD</li>
+<li>PostgreSQL</li>
+<li>Python</li>
+<li>web.py</li>
+<li>webauthn2</li>
+<li>Install hatrac Python package from top-level of development code.</li>
+<li><code>python setup.py install</code></li>
+<li>Run <a href="#basic-testing">basic tests</a> or continue to <a href="#configure-web-stack">configure the web stack</a>.</li>
+</ol>
+<h2 id="basic-testing">Basic testing<a class="headerlink" href="#basic-testing" title="Permanent link">&para;</a></h2>
+<p>You can perform some local testing of Hatrac without configuring the
+whole web service stack, daemon account, nor daemon account configuration data:</p>
+<pre><code># make sure Hatrac is installed
+% python setup.py install
+
+# get rid of any previous test data
+% dropdb hatrac_test
+% rm -rf hatrac_test_data
+
+# create empty test database
+% createdb hatrac_test
+
+# run tests
+% python test/smoketest.py
+</code></pre>
+<p>The test script should run to completion without printing anything. If
+it encounters errors, diagnostics will be printed and the script will
+exit.  You MUST start with an empty test database and empty test data
+directory prior to each run of the test.</p>
+<h2 id="configure-web-stack">Configure web stack<a class="headerlink" href="#configure-web-stack" title="Permanent link">&para;</a></h2>
+<p>These steps continue following the basic
+<a href="#install-code">code installation</a>. For installations using SE-Linux,
+please see <a href="#working-with-selinux">working with SE-Linux</a> below.</p>
+<ol>
+<li>Create <code>hatrac</code> daemon account.</li>
+<li>E.g. <code>useradd --create-home --system hatrac</code> (as root)</li>
+<li>Create <code>hatrac</code> PostgreSQL role.</li>
+<li>E.g. <code>createuser -d hatrac</code> (as PostgreSQL superuser)</li>
+<li>Configure <code>~hatrac/hatrac_config.json</code></li>
+<li>See <a href="#example-hatrac-configuration">example Hatrac configuration</a> below.</li>
+<li>Create and initialize <code>hatrac</code> database.</li>
+<li>E.g. <code>createdb hatrac</code> (as <code>hatrac</code> user)</li>
+<li>E.g. <code>hatrac-deploy your_username_or_group</code> (as <code>hatrac</code> user)</li>
+<li>Create file storage directory under Apache</li>
+<li>E.g. <code>mkdir /var/www/hatrac &amp;&amp; chown hatrac /var/www/hatrac</code> (as root)</li>
+<li>Configure <code>~hatrac/webauthn2_config.json</code></li>
+<li>See <a href="#example-webauthn2-configuration">example Webauthn2 configuration</a> below.</li>
+<li>Configure <code>mod_wsgi</code> to run Hatrac</li>
+<li>See <a href="#example-apache-configuration">example Apache configuration</a> below.</li>
+</ol>
+<p>The <code>hatrac-deploy</code> step above depends on having a proper
+<code>~hatrac/hatrac_config.json</code> file already populated and an empty
+database already created. It simply initializes the database schema.</p>
+<p>If working in a SELinux environment see section below to SELinux specific additional steps needed before running the tests</p>
+<h2 id="example-hatrac-configuration">Example Hatrac configuration<a class="headerlink" href="#example-hatrac-configuration" title="Permanent link">&para;</a></h2>
+<p>This configuration works on a Fedora and Ubuntu host for a filesystem deployment:</p>
+<pre><code>{
+    "storage_backend": "filesystem",
+    "storage_path": "/var/www/hatrac",
+    "database_type": "postgres",
+    "database_dsn": "dbname=hatrac",
+    "database_schema": "hatrac",
+    "database_max_retries": 5,
+    "403_html": "&lt;html&gt;&lt;body&gt;&lt;h1&gt;Access Forbidden&lt;/h1&gt;&lt;p&gt;%(message)s&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;",
+    "401_html": "&lt;html&gt;&lt;body&gt;&lt;h1&gt;Authentication Required&lt;/h1&gt;&lt;p&gt;%(message)s&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;"
+}
+</code></pre>
+<p>This configuration works for an Amazon AWS S3 deployment:</p>
+<pre><code>{
+    "backend": "amazons3",
+    "s3_bucket" : &lt;S3_BUCKET_NAME&gt;,
+    "s3_connection": {
+    "aws_access_key_id" : &lt;AWS_ACCESS_KEY_ID&gt;,
+        "aws_secret_access_key": &lt;AWS_SECRET_ACCESS_KEY&gt;
+    },
+    "database_type": "postgres",
+    "database_dsb": "dbname=hatrac",
+    "database_schema": "hatrac",
+    "database_max_retries": 5
+}
+</code></pre>
+<h2 id="rest-api-testing">REST API testing<a class="headerlink" href="#rest-api-testing" title="Permanent link">&para;</a></h2>
+<p>You can perform system testing of the whole web service stack, if
+configured with cookie-based authentication (such as using a companion
+ERMrest installation as described in the subsequent configration
+examples of this document):</p>
+<pre><code># manually create a session cookie
+% curl -b cookie -c cookie \
+   -d username=testuser -d password=testpassword \
+   https://$(hostname)/ermrest/auth/session
+
+# run the test script
+% COOKIES=cookie bash test/rest-smoketest.sh
+</code></pre>
+<h2 id="example-webauthn2-configuration">Example Webauthn2 configuration<a class="headerlink" href="#example-webauthn2-configuration" title="Permanent link">&para;</a></h2>
+<p>This configuration allows Hatrac to share an existing Webauthn2
+deployment from an ERMrest installation (if ERMrest is configured with
+the same cookie name and path settings):</p>
+<pre><code>{
+      "require_client": true,
+      "require_attributes": true, 
+      "listusers_permit": ["admin"], 
+      "listattributes_permit": ["admin"], 
+      "manageusers_permit": ["admin"], 
+      "manageattributes_permit": ["admin"],
+
+      "session_expiration_minutes": 30, 
+      "def_passwd_len": 10, 
+      "hash_passwd_reps": 1000,
+
+      "sessionids_provider": "webcookie", 
+      "sessionstates_provider": "database", 
+      "clients_provider": "database", 
+      "attributes_provider": "database",
+
+      "handler_uri_usersession": "/ermrest/authn/session",
+
+      "web_cookie_name": "ermrest", 
+      "web_cookie_path": "/", 
+      "web_cookie_secure": true, 
+      "setheader": false,
+
+      "database_schema": "webauthn2", 
+      "database_type": "postgres", 
+      "database_dsn": "dbname=ermrest", 
+      "database_max_retries": 5
+}
+</code></pre>
+<p>You will also have to grant ermrest permissions to the hatrac role:
+GRANT ermrest TO hatrac ; (as postgres user)</p>
+<p><strong>Note</strong>: at present, Hatrac does not expose any Webauthn2 REST APIs
+so you MUST share an existing deployment as above if you want to use a
+local account and session-based login for testing.  Additionally, you
+must then grant the <code>ermrest</code> role to the <code>hatrac</code> role in PostgreSQL
+so that Hatrac can look up client authentication information at
+runtime.</p>
+<h2 id="example-apache-configuration">Example Apache configuration<a class="headerlink" href="#example-apache-configuration" title="Permanent link">&para;</a></h2>
+<p>See the sample <code>wsgi_hatrac.conf</code> file in the git repo, which would be
+installed under <code>/etc/httpd/conf.d/</code> on Red Hat flavored machines:</p>
+<pre><code>AllowEncodedSlashes On
+
+WSGIPythonOptimize 1
+WSGIDaemonProcess hatrac processes=4 threads=4 user=hatrac maximum-requests=2000
+WSGIScriptAlias /hatrac /usr/lib/python2.7/site-packages/hatrac/hatrac.wsgi
+WSGIPassAuthorization On
+
+WSGISocketPrefix /var/run/wsgi/wsgi
+
+&lt;Location /hatrac&gt;
+
+   AuthType webauthn
+   Require webauthn-optional
+
+   WSGIProcessGroup hatrac
+
+&lt;/Location&gt;
+</code></pre>
+<h2 id="working-with-se-linux">Working with SE-Linux<a class="headerlink" href="#working-with-se-linux" title="Permanent link">&para;</a></h2>
+<p>The following is an example set of commands to allow Hatrac to write
+to the filesystem in a Fedora installation.  On other distributions,
+the appropriate path and SE-Linux contexts might vary slightly:</p>
+<pre><code>setsebool -P httpd_can_network_connect_db on
+semanage fcontext --add --type httpd_sys_rw_content_t "/var/www/hatrac(/.*)?"
+restorecon -rv /var/www/hatrac
+semanage fcontext --add --type httpd_sys_content_t "/home/hatrac(/.*)?"
+restorecon -rv /home/hatrac
+</code></pre>
+<h3 id="errors-regarding-wsgi-socket">Errors regarding WSGI socket<a class="headerlink" href="#errors-regarding-wsgi-socket" title="Permanent link">&para;</a></h3>
+<p>On some versions of Fedora and CentOS, you may encounter errors in the
+Apache SSL server log similar to <code>Unable to connect to WSGI daemon
+process on '/var/run/wsgi/wsgi.1331.1.1.sock'</code>.</p>
+<p>A workaround is to configure the SE-Linux context:</p>
+<pre><code>semanage fcontext --add --type httpd_var_run_t "/var/run/wsgi"
+restorecon -rv /var/run/wsgi
+</code></pre>
+              
+            </div>
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="../HOWTO/" class="btn btn-neutral float-right" title="Other HOWTO information">Next <span class="icon icon-circle-arrow-right"></span></a>
+      
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+    
+      <p>Copyright &copy; 2018 <a href="http://github.com/informatics-isi-edu/ermrest">Hatrac Project</a>.</p>
+    
+  </div>
+
+  Built with <a href="http://www.mkdocs.org">MkDocs</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+      
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" style="cursor: pointer">
+    <span class="rst-current-version" data-toggle="rst-current-version">
+      
+      
+      
+        <span style="margin-left: 15px"><a href="../HOWTO/" style="color: #fcfcfc">Next &raquo;</a></span>
+      
+    </span>
+</div>
+    <script>var base_url = '..';</script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/require.js"></script>
+      <script src="../search/search.js"></script>
+
+</body>
+</html>

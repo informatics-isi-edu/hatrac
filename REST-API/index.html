@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  
+  <link rel="shortcut icon" href="../img/favicon.ico">
+  <title>Hatrac API and Service Semantics - Hatrac Documentation</title>
+  <link href='https://fonts.googleapis.com/css?family=Lato:400,700|Roboto+Slab:400,700|Inconsolata:400,700' rel='stylesheet' type='text/css'>
+
+  <link rel="stylesheet" href="../css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../css/theme_extra.css" type="text/css" />
+  <link rel="stylesheet" href="../css/highlight.css">
+  <link href="../css/extra.css" rel="stylesheet">
+  
+  <script>
+    // Current page data
+    var mkdocs_page_name = "Hatrac API and Service Semantics";
+    var mkdocs_page_input_path = "REST-API.md";
+    var mkdocs_page_url = "/REST-API/";
+  </script>
+  
+  <script src="../js/jquery-2.1.1.min.js"></script>
+  <script src="../js/modernizr-2.8.3.min.js"></script>
+  <script type="text/javascript" src="../js/highlight.pack.js"></script> 
+  
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+      <div class="wy-side-nav-search">
+        <a href="../INSTALL/" class="icon icon-home"> Hatrac Documentation</a>
+        <div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+	<ul class="current">
+	  
+          
+            <li class="toctree-l1">
+		
+    <span class="caption-text">User Docs</span>
+    <ul class="subnav">
+                <li class="">
+                    
+    <a class="" href="../INSTALL/">Installing on Red Hat-derived Linux</a>
+                </li>
+                <li class="">
+                    
+    <a class="" href="../HOWTO/">Other HOWTO information</a>
+                </li>
+    </ul>
+	    </li>
+          
+            <li class="toctree-l1 current">
+		
+    <a class="current" href="./">Hatrac API and Service Semantics</a>
+    <ul class="subnav">
+            
+    <li class="toctree-l2"><a href="#hatrac-rest-api">Hatrac REST API</a></li>
+    
+        <ul>
+        
+            <li><a class="toctree-l3" href="#contents">Contents</a></li>
+        
+            <li><a class="toctree-l3" href="#url-conventions">URL Conventions</a></li>
+        
+            <li><a class="toctree-l3" href="#resource-naming-and-lifecycle-rules">Resource Naming and Lifecycle Rules</a></li>
+        
+            <li><a class="toctree-l3" href="#root-namespace-resource">Root Namespace Resource</a></li>
+        
+            <li><a class="toctree-l3" href="#nested-namespace-resources">Nested Namespace Resources</a></li>
+        
+            <li><a class="toctree-l3" href="#object-resources">Object Resources</a></li>
+        
+            <li><a class="toctree-l3" href="#object-version-resources">Object Version Resources</a></li>
+        
+            <li><a class="toctree-l3" href="#metadata-sub-resources">Metadata Sub-Resources</a></li>
+        
+            <li><a class="toctree-l3" href="#access-control-list-sub-resources">Access Control List Sub-Resources</a></li>
+        
+            <li><a class="toctree-l3" href="#chunked-upload-resources">Chunked Upload Resources</a></li>
+        
+        </ul>
+    
+
+    </ul>
+	    </li>
+          
+        </ul>
+      </div>
+      &nbsp;
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+        <a href="../INSTALL/">Hatrac Documentation</a>
+      </nav>
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../INSTALL/">Docs</a> &raquo;</li>
+    
+      
+    
+    <li>Hatrac API and Service Semantics</li>
+    <li class="wy-breadcrumbs-aside">
+      
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main">
+            <div class="section">
+              
+                <h1 id="hatrac-rest-api">Hatrac REST API<a class="headerlink" href="#hatrac-rest-api" title="Permanent link">&para;</a></h1>
+<p><a href="http://github.com/informatics-isi-edu/hatrac">Hatrac</a> (pronounced
+"hat rack") is a simple object storage service for web-based,
+data-oriented collaboration. It presents a simple HTTP REST API with
+the following characteristics:</p>
+<h2 id="contents">Contents<a class="headerlink" href="#contents" title="Permanent link">&para;</a></h2>
+<h3 id="main-topics">Main Topics<a class="headerlink" href="#main-topics" title="Permanent link">&para;</a></h3>
+<p>This documentation is broken down into the following general topics:</p>
+<ol>
+<li><a href="#url-conventions">URL Conventions</a></li>
+<li><a href="#resource-naming-and-lifecycle-rules">Resource Types Overview</a></li>
+<li><a href="#root-namespace-resource">Root Namespace</a></li>
+<li><a href="#nested-namespace-resources">Nested Namespaces</a></li>
+<li><a href="#object-resources">Objects</a></li>
+<li><a href="#object-version-resources">Object Versions</a></li>
+<li><a href="#metadata-sub-resources">Metadata</a></li>
+<li><a href="#access-control-list-sub-resources">Access Control Lists</a></li>
+<li><a href="#chunked-upload-resources">Chunked Uploads</a></li>
+</ol>
+<h3 id="quick-links-to-operations">Quick Links to Operations<a class="headerlink" href="#quick-links-to-operations" title="Permanent link">&para;</a></h3>
+<p>The REST API supports the following operations.</p>
+<ol>
+<li>Namespace operations</li>
+<li><a href="#namespace-listing-retrieval">Get namespace listing</a></li>
+<li><a href="#nested-namespace-creation">Create nested namespace</a></li>
+<li><a href="#nested-namespace-deletion">Delete nested namespace</a></li>
+<li>Object operations</li>
+<li><a href="#object-creation-and-update">Create or update object</a></li>
+<li><a href="#object-retrieval">Get object content</a></li>
+<li><a href="#object-deletion">Delete object</a></li>
+<li>Object version operations</li>
+<li><a href="#object-version-list-retrieval">Get object version list</a></li>
+<li><a href="#object-creation-and-update">Create object version</a></li>
+<li><a href="#object-version-retrieval">Get object version content</a></li>
+<li><a href="#object-version-deletion">Delete object version</a></li>
+<li>Metadata management operations</li>
+<li><a href="#metadata-collection-retrieval">Get metadata collection</a></li>
+<li><a href="#metadata-value-retrieval">Get metadata value</a></li>
+<li><a href="#metadata-value-creation-and-update">Create or update metadata value</a></li>
+<li><a href="#metadata-value-deletion">Delete metadata value</a></li>
+<li>Access control list operations</li>
+<li><a href="#access-control-retrieval">Get access controls</a></li>
+<li><a href="#access-control-list-update">Update access control list</a></li>
+<li><a href="#access-control-list-deletion">Clear access control list</a></li>
+<li>Chunked upload operations</li>
+<li><a href="#chunked-upload-job-listing-retrieval">Get upload job listing</a></li>
+<li><a href="#chunked-upload-job-creation">Create upload job</a></li>
+<li><a href="#chunked-upload-job-status-retrieval">Get upload job status</a></li>
+<li><a href="#chunk-upload">Upload data chunk</a></li>
+<li><a href="#chunked-upload-job-finalization">Finalize upload job</a></li>
+<li><a href="#chunked-upload-job-cancellation">Cancel upload job</a></li>
+</ol>
+<h2 id="url-conventions">URL Conventions<a class="headerlink" href="#url-conventions" title="Permanent link">&para;</a></h2>
+<p>Any Hatrac URL is a valid HTTP URL and contains user-generated content
+which may need to be escaped. Several reserved characters from RFC
+3986 are used as meta-syntax in Hatrac and MUST be escaped if they are
+meant to be part of a user-generated name value and MUST NOT be
+escaped if they are meant to indicate the Hatrac meta-syntax:
+- The '/' or forward-slash, used as a path separator character
+- The ':' or colon, used to separate object names from version IDs
+- The ';' or semi-colon, used to separate resource names and sub-resource keywords</p>
+<p>All other reserved characters should be escaped in user-generated
+content in URLs, but have no special meaning to Hatrac when appearing
+in unescaped form.</p>
+<h2 id="resource-naming-and-lifecycle-rules">Resource Naming and Lifecycle Rules<a class="headerlink" href="#resource-naming-and-lifecycle-rules" title="Permanent link">&para;</a></h2>
+<p>The hierarchical Hatrac naming model defines three main types of resource:</p>
+<ol>
+<li>Namespace</li>
+<li>Object</li>
+<li>Object Version</li>
+</ol>
+<p>The model supports a hierarchy of nested namespaces while objects and
+their versions appear only at the leaves of the tree. A particular
+hierarchical name has a three-phase lifecycle that can oscillate in
+the latter two phases:</p>
+<ol>
+<li>Undefined, until the name is bound</li>
+<li>Defined, from the moment the name is bound until deleted</li>
+<li>Namespaces: a name bound as a namespace will always be a namespace
+    if available to access.</li>
+<li>Objects: a name bound as an object will always be an object if
+    available to access.  </li>
+<li>Deleted, from the moment the name is deleted until restored to its
+   previous definition.</li>
+</ol>
+<p>An implementation MAY permit <em>restoration</em> of a deleted namespace or
+object, but it is not required to do so. An implementation MUST
+prevent other reuse of names.  The definition of restoration is that
+all of the following hold:
+- The name is defined as the same type of resource that was previous
+  defined prior to deleted;
+- At the moment of restoration, the parent namespace encoded in the
+  name is still a defined namespace;
+- When an object name is restored, the constraints on object version
+  naming continue to hold as if the object had never been deleted;
+- When a namespace is restored, any child namespace or object MAY be
+  restored and MAY remain deleted. Any child restoration MUST follow
+  the same restoration rules, recursively.</p>
+<h3 id="object-version-naming">Object Version Naming<a class="headerlink" href="#object-version-naming" title="Permanent link">&para;</a></h3>
+<p>A particular object name can be qualified with a version identifier
+having a three-phase lifecycle that can oscillate on the latter two
+phases:</p>
+<ol>
+<li>Undefined, until the version identifier is issued to a content
+value</li>
+<li>Defined, from the moment a version is created until the version is
+deleted</li>
+<li>Unavailable, from the moment a version is deleted until it is
+restored with the same content value</li>
+</ol>
+<p>Hatrac allows object versions to be deleted in order to reclaim
+backing storage resources, as an alternative to simply making versions
+unavailable by restricting their access control settings.</p>
+<h3 id="referential-stability">Referential Stability<a class="headerlink" href="#referential-stability" title="Permanent link">&para;</a></h3>
+<p>A particular namespace or object name denotes the same abstract
+container from the point of definition into the indefinite future, but
+that container can change.  Namespaces can gain or lose children
+(nested namespaces and objects) and objects can gain or lose object
+versions.</p>
+<p>A particular object version reference (name plus version identifier)
+is a permanent, immutable reference to a specific content value. Such
+a referenced content value MAY become unavailable if the object
+version is deleted or its access control rules are
+restrictive. However, when and if it becomes available, it MUST always
+denote the same content value for all clients able to access it at any
+point in time. To guarantee this stability for clients while giving
+some freedom to implementers, the following rules are defined for
+version identifiers:</p>
+<ul>
+<li>Version identifiers are opaque, local qualifiers for a specific
+  object name. An implementation MAY use globally distinct version
+  identifiers but clients SHOULD NOT compare version identifiers
+  associated with different object names.</li>
+<li>Any two distinct content values applied as updates to the same
+  object MUST be issued distinct version identifiers.  Hence, any two
+  reference URLs with identical object name and version identifier
+  MUST denote the same content value.</li>
+<li>Any two updates applied to the same object with identical content
+  value are subject to more complex rules depending on the sequencing
+  of operations:</li>
+<li>If the first update yields an object version which is deleted
+  prior to the second update operation<ul>
+<li>The implementation MAY reuse the same version identifier used
+  for the previously deleted object version which denoted the same
+  content value.</li>
+<li>The implementation MAY issue a distinct version identifier for
+  each object version that has non-overlapping lifetimes while
+  denoting the same content value.</li>
+</ul>
+</li>
+<li>If the first update yields an object version which is still
+  defined prior to the second update operation<ul>
+<li>The second operation MAY fail with a conflict if the
+  implementation does not support storage and tracking of
+  duplicate content values</li>
+<li>The second operation MAY issue a new, distinct version
+  identifier</li>
+</ul>
+</li>
+<li>Simultaneous update must be logically resolved as if one of the
+     updates occurred before the other, satisfying the preceding
+     rules.</li>
+</ul>
+<p>These rules allow a broad range of implementation techniques while
+preventing collaboration hazards such as unstable references denoting
+different data values at different times or data value collisions
+causing ambiguous object ownership and privileges.</p>
+<h2 id="root-namespace-resource">Root Namespace Resource<a class="headerlink" href="#root-namespace-resource" title="Permanent link">&para;</a></h2>
+<p>The root of a Hatrac deployment is an HTTPS URL of the form:</p>
+<ul>
+<li>https:// <em>authority</em> / <em>prefix</em> </li>
+</ul>
+<p>Where <em>authority</em> is a DNS hostname and optional port number, and
+<em>prefix</em> is a '/' separated string of any length.  A deployment MAY
+use a fixed path to route HTTP requests to Hatrac alongside other
+services in the same authority (host and port), or it MAY use an empty
+prefix if the entire HTTP namespace of the authority is dedicated to
+Hatrac resources.</p>
+<p>In all documentation below, the "/ <em>prefix</em>" is considered to be part
+of the <em>parent path</em> URL path elements.  Therefore every example URL
+will be a hierarchical name starting with a "/" character.</p>
+<h3 id="namespace-listing-retrieval">Namespace Listing Retrieval<a class="headerlink" href="#namespace-listing-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is used to list direct children of a namespace:</p>
+<pre><code>GET /parent_path/namespace_id
+Host: authority_name
+If-None-Match: etag_value
+</code></pre>
+<p>for which a successful response is a JSON array of child resource
+URLs:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+ETag: etag_value
+
+["/hatrac/parent_path/namespace_id/child1", ...]
+</code></pre>
+<p>If the <code>text/uri-list</code> content-type is negotiated, the response will
+be a whitespace separated list of child URLs:</p>
+<pre><code>200 OK
+Content-Type: text/uri-list
+Content-Length: N
+ETag: etag_value
+
+/hatrac/parent_path/namespace_id/child1
+/hatrac/parent_path/namespace_id/child2
+...
+</code></pre>
+<h3 id="namespace-listing-metadata-retrieval">Namespace Listing Metadata Retrieval<a class="headerlink" href="#namespace-listing-metadata-retrieval" title="Permanent link">&para;</a></h3>
+<p>The HEAD operation is used to get basic status information:</p>
+<pre><code>HEAD /parent_path/namespace_id
+Host: authority_name
+</code></pre>
+<p>for which a successful response is:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+</code></pre>
+<p>indicating that an <code>N</code> byte JSON representation is available.  This
+operation is essentially equivalent to the GET operation but with the
+actual child listing elided.</p>
+<h3 id="deletion-of-root-namespace-forbidden">Deletion of Root Namespace Forbidden<a class="headerlink" href="#deletion-of-root-namespace-forbidden" title="Permanent link">&para;</a></h3>
+<p>The root namespace of a Hatrac deployment SHOULD forbid delete
+operations. It is nonsensical to have a Hatrac deployment without a
+root namespace.</p>
+<h2 id="nested-namespace-resources">Nested Namespace Resources<a class="headerlink" href="#nested-namespace-resources" title="Permanent link">&para;</a></h2>
+<p>Any hierarchical namespace in Hatrac has an HTTPS URL of the form:</p>
+<ul>
+<li>https:// <em>authority</em> / <em>parent path</em> / <em>namespace id</em></li>
+</ul>
+<p>Where <em>parent path</em> is the name of the enclosing namespace and
+<em>namespace id</em> is the relative name of the nested namespace. Of
+course, the enclosing namespace may be the root namespace of the
+deployment, e.g. <code>/hatrac</code>, or another nested namespace,
+e.g. <code>/hatrac/some/ancestors</code>.</p>
+<h3 id="nested-namespace-creation">Nested Namespace Creation<a class="headerlink" href="#nested-namespace-creation" title="Permanent link">&para;</a></h3>
+<p>The PUT operation is used to create a new nested namespace:</p>
+<pre><code>PUT /parent_path/namespace_id
+Host: authority_name
+Content-Type: application/x-hatrac-namespace
+</code></pre>
+<p>which may also be modified with the <code>parents</code> query parameter:</p>
+<pre><code>PUT /parent_path/namespace_id?parents=true
+Host: authority_name
+Content-Type: application/x-hatrac-namespace
+</code></pre>
+<p>to request automatic creation of missing ancestors in <em>parent path</em>.
+In either case, a successful response is:</p>
+<pre><code>201 Created
+Location: /parent_path/namespace_id
+Content-Type: text/uri-list
+Content-Length: N
+
+/parent_path/namespace_id
+</code></pre>
+<p><strong>Note</strong>: see related object resource interface for pragmatic
+discussion of the use of Content-Type to disambiguate namespace and
+object creation requests.</p>
+<p>Typical PUT error responses would be:
+- <strong>401 Unauthorized</strong>: the client is not authenticated and
+  anonymous creation of such a namespace is not supported.
+- <strong>403 Forbidden</strong>: the client is authenticated but does not have
+  sufficient privilege to create or update the namespace.
+- <strong>404 Not Found</strong>: the parent namespace does not exist and
+  <code>parents=true</code> query parameter was not supplied to request automatic
+  creation of missing ancestors.
+- <strong>409 Conflict</strong>: the namespace cannot be created due to a
+  conflict with existing state of the service:
+  - The <em>parent path</em> does not denote a namespace
+  - The namespace already exists</p>
+<h3 id="nested-namespace-listing-retrieval">Nested Namespace Listing Retrieval<a class="headerlink" href="#nested-namespace-listing-retrieval" title="Permanent link">&para;</a></h3>
+<p>The same GET and HEAD operations documented above for the Root
+Namespace Resource can also list direct children of any nested
+namespace.</p>
+<p>For nested namespaces, typical GET or HEAD error responses would be:
+- <strong>404 Not Found</strong>: the name does not map to an available resource on
+  the server.</p>
+<p><strong>Note</strong>: since nested namespaces and objects share the same
+hierarchical name structure, a GET operation on a name might resolve
+to an object rather a namespace. As such, error responses applicable
+to an object might be encountered as well.</p>
+<h3 id="nested-namespace-deletion">Nested Namespace Deletion<a class="headerlink" href="#nested-namespace-deletion" title="Permanent link">&para;</a></h3>
+<p>The DELETE operation is used to delete a nested namespace</p>
+<pre><code>DELETE /parent_path/namespace_id
+Host: authority_name
+</code></pre>
+<p>for which a successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>An implementation SHOULD NOT allow deletion of non-empty
+namespaces. It is RECOMMENDED that deletion of non-empty namespaces be
+rejected, but an implementation MAY treat it as a bulk request by the
+same client to delete everything contained in the namespace prior to
+deleting the namespace itself.  It is further RECOMMENDED that such a
+deletion be processed atomically, considering all client privileges in
+advance, but an implementation MAY partially delete contents before
+failing due to an authorization error on some subset of contents.</p>
+<p>Typical DELETE error responses would be:
+- <strong>401 Unauthorized</strong>: the client is not authenticated and
+  anonymous deletion of such a resource is not supported.
+- <strong>403 Forbidden</strong>: the client is authenticated but does not have
+  sufficient privilege to delete the resource.
+- <strong>404 Not Found</strong>: the name does not denote an existing resource.
+- <strong>409 Conflict</strong>: the resource cannot be deleted at this time,
+    i.e. because the namespace is not empty.</p>
+<h2 id="object-resources">Object Resources<a class="headerlink" href="#object-resources" title="Permanent link">&para;</a></h2>
+<p>Any unversioned object name in Hatrac has an HTTPS URL of the form:</p>
+<ul>
+<li>https:// <em>authority</em> / <em>namespace path</em> / <em>object name</em></li>
+</ul>
+<p>Where <em>namespace path</em> is the name of the enclosing namespace and
+<em>object name</em> is the relative name of the object.</p>
+<h3 id="object-creation-and-update">Object Creation and Update<a class="headerlink" href="#object-creation-and-update" title="Permanent link">&para;</a></h3>
+<p>The PUT operation is used to create a new object or a new version of
+an existing object.  Literal object content is provided as input:</p>
+<pre><code>PUT /namespace_path/object_name
+Host: authority_name
+Content-Type: text/plain
+Content-Length: 14
+Content-MD5: ZXS/CYPMeEBJpBYNGYhyjA==
+Content-SHA256: 5+aEMqzlEZxe9xPaDUZ0GyBvTUaZf4s0yMpPgV/0yt0=
+Content-Disposition: filename*=UTF-8''test.txt
+If-Match: etag_value
+If-None-Match: *
+
+...content...
+</code></pre>
+<p>This example has metadata consistent with an object containing a
+single Unix-style text line <code>...content...\n</code> inclusive of the
+line-terminator.</p>
+<p>As with nested namespace creation, an optional query parameter may be
+included to enable automatic namespace creation:</p>
+<pre><code>PUT /namespace_path/object_name?parents=true
+...
+</code></pre>
+<p>The optional <code>If-Match</code> and <code>If-None-Match</code> headers MAY be specified
+to limit object update to specific scenarios. In a normal situation,
+only one of these two headers is specified in a single request:
+  - An <em>etag value</em> with the <code>If-Match</code> header requires that the current version of the object on the server match the version indicated by the <em>etag value</em> in order for the object to be updated as per the request <em>content</em>.
+  - An <code>*</code> with the <code>If-None-Match</code> header requires that the object lack a current version on the server in order for the object to be created or updated as per the request <em>content</em>.</p>
+<p>Without either <code>If-Match</code> or <code>If-None-Match</code> headers in the request,
+the update will be unconditionally applied if allowed by policy and
+the current state of the server. When supplied, they select HTTP
+standard conditional request processing.</p>
+<p>The optional <code>Content-MD5</code> and <code>Content-SHA256</code> headers can carry an
+MD5 or SHA-256 <em>hash value</em>, respectively. The <em>hash value</em> SHOULD be
+the base64 encoded representation of the underlying bit sequence
+defined by the relevant hash algorithm standard. Either or both, if
+supplied, will be stored and returned with data retrieval responses,
+useful for end-to-end data integrity checks by clients. An
+implementation MAY checksum the supplied <em>content</em> and reject the
+request if it mismatches any supplied <em>hash value</em> or if any <em>hash
+value</em> is malformed. An implementation MAY recognize and accept
+hex-encoded <em>hash value</em> or MAY reject it as a bad request, but in
+either case it MUST always return proper base64-encoded <em>hash value</em>
+in any service-issued <code>Content-MD5</code> or <code>Content-SHA256</code> response
+header.</p>
+<p>The optional <code>Content-Disposition</code> header will be stored and returned
+with data retrieval responses. An implementation MAY restrict which
+values are acceptable as content disposition instructions. Every
+implementation SHOULD support the <code>filename*=UTF-8''</code> <em>filename</em>
+syntax where <em>filename</em> is a basename with no path separator
+characters. According to the web standards, the <em>filename</em> component
+embedded in this header MUST be UTF-8 which is then URL-escaped
+(percent-encoded) on an octet by octet basis, just like URL components
+in this REST API.</p>
+<p>A successful response is:</p>
+<pre><code>201 Created
+Location: /namespace_path/object_name:version_id
+Content-Type: text/uri-list
+Content-Length: N
+
+/namespace_path/object_name:version_id
+</code></pre>
+<p>The successful response includes the <em>version id</em> qualified name of
+the newly updated object.</p>
+<p>Typical PUT error responses would be:
+  - <strong>400 Bad Request</strong>: the client supplied a <code>Content-MD5</code> header
+      with a <em>hash value</em> that does not match the entity <em>content</em>
+      which was recieved.
+  - <strong>401 Unauthorized</strong>: the client is not authenticated and
+      anonymous creation of such an object is not supported.
+  - <strong>403 Forbidden</strong>: the client is authenticated but does not have
+      sufficient privilege to create the object.
+  - <strong>404 Not Found</strong>: the <em>parent path</em> does not exist and the
+    <code>parents=true</code> query parameter was not supplied to request
+    automatic creation of missing ancestors.
+  - <strong>409 Conflict</strong>: the object cannot be created due to a
+      conflict with existing state of the service:
+    - The <em>namespace path</em> may not denote a namespace
+    - The <em>object name</em> may already be in use as a namespace,
+      therefore preventing its use as an object.
+  - <strong>412 Precondition Failed</strong>: the object cannot be created or updated due to its current state on the server not meeting the requirements indicated by the <code>If-Match</code> and/or <code>If-None-Match</code> request headers.</p>
+<p><strong>Note</strong>: There is ambiguity in the meaning of a URL when creating a
+new object or nested namespace because they have the same syntactic
+structure.  Hatrac disambiguates such requests in a decision process:</p>
+<ol>
+<li>If the full path denotes an existing object, the PUT request MUST
+   denote a request to update the content of the existing object,
+   regardless of what <code>Content-Type</code> is present.</li>
+<li>If <code>Content-Type</code> is <code>application/x-hatrac-namespace</code>, the PUT
+   request MUST denote a request to create a new nested namespace.</li>
+<li>Any other PUT request not matching the above is considered an
+   object creation request.</li>
+</ol>
+<p>This set of rules makes it simple to create any common object or
+namespace. In the degenerate case where one wishes to create an object
+with content that looks exactly like a namespace request input, the
+solution is to first create an empty object (e.g. with <code>Content-Type:
+text/plan</code>) and then immediately update its content with the desired
+content.</p>
+<h3 id="object-retrieval">Object Retrieval<a class="headerlink" href="#object-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is used to retrieve the current version of an object:</p>
+<pre><code>GET /namespace_path/object_name
+Host: authority_name
+Accept: *
+If-None-Match: etag_value
+</code></pre>
+<p>The optional <code>If-None-Match</code> header MAY supply an <code>ETag</code> value
+obtained from a previous retrieval operation, to inform the server
+that the client already has a copy of a particular version of the
+object.</p>
+<p>for which a successful response is:</p>
+<pre><code>200 OK
+Content-Type: content_type
+Content-Length: N
+Content-MD5: hash_value
+Content-SHA256: hash_value
+Content-Disposition: filename*=UTF-8''filename
+Content-Location: /namespace_path/object_name:version
+ETag: etag_value
+
+...content...
+</code></pre>
+<p>The optional <code>Content-MD5</code>, <code>Content-SHA256</code>, and
+<code>Content-Disposition</code> headers MUST be present if supplied during
+object creation and MAY be present if the service computes missing
+values in other cases. The <code>Content-Location</code> header SHOULD be present and
+specifies the URL for the version of the object which was retrieved.</p>
+<p>It is RECOMMENDED that a Hatrac server return an <code>ETag</code> indicating the version of the <em>content</em> returned to the client.</p>
+<p>Typical GET error responses would be:
+  - <strong>304 Not Modified</strong>: the <em>etag value</em> supplied in the <code>If-None-Match</code> header matches the current object version on the server.
+  - <strong>401 Unauthorized</strong>: the client is not authenticated and
+      anonymous retrieval of such an object is not supported.
+  - <strong>403 Forbidden</strong>: the client is authenticated but does not have
+      sufficient privilege to retrieve the object.
+  - <strong>404 Not Found</strong>: the name does not denote a defined object.
+  - <strong>409 Conflict</strong>: the object cannot be retrieved at this time,
+      e.g. there are currently no object versions defined.</p>
+<h3 id="object-metadata-retrieval">Object Metadata Retrieval<a class="headerlink" href="#object-metadata-retrieval" title="Permanent link">&para;</a></h3>
+<p>The HEAD operation is used to retrieve information about the current
+version of an object:</p>
+<pre><code>HEAD /namespace_path/object_name
+Host: authority_name
+Accept: *
+</code></pre>
+<p>for which a successful response is:</p>
+<pre><code>200 OK
+Content-Type: content_type
+Content-Length: N
+Content-MD5: hash_value
+Content-SHA256: hash_value
+Content-Disposition: filename*=UTF-8''filename
+Content-Location: /namespace_path/object_name:version
+</code></pre>
+<p>The HEAD operation is essentially equivalent to the GET operation but
+with the actual object content elided.</p>
+<h3 id="object-version-list-retrieval">Object Version List Retrieval<a class="headerlink" href="#object-version-list-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is used to list versions of an object:</p>
+<pre><code>GET /namespace_path/object_name;versions
+Host: authority_name
+</code></pre>
+<p>for which a successful response is a JSON array of version resource
+URLs:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+
+["/hatrac/namespace_path/object_name:version_id", ...]
+</code></pre>
+<p>If the <code>text/uri-list</code> content-type is negotiated, the response
+is a whitespace separated list of version URLs:</p>
+<pre><code>200 OK
+Content-Type: text/uri-list
+Content-Length: N
+
+/hatrac/namespace_path/object_name:version1_id
+/hatrac/namespace_path/object_name:version2_id
+...
+</code></pre>
+<h3 id="object-deletion">Object Deletion<a class="headerlink" href="#object-deletion" title="Permanent link">&para;</a></h3>
+<p>The DELETE operation is used to delete an object</p>
+<pre><code>DELETE /namespace_path/object_name
+Host: authority_name
+If-Match: etag_value
+</code></pre>
+<p>The optional <code>If-Match</code> header MAY be specified to prevent object deletion unless the current object version on the server matches the version indicated by the <em>etag value</em>.</p>
+<p>for which a successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>An implementation SHOULD NOT allow deletion of objects with existing
+object versions. It is RECOMMENDED that an implementation treat
+deletion as a bulk request by the same client to delete all versions
+of the object prior to deleting the object itself, however an
+implementation MAY signal an error when object versions exist.  It is
+further RECOMMENDED that such a deletion be processed atomically,
+considering all client privileges in advance, but an implementation
+MAY partially delete versions before failing due to an authorization
+error on some subset of the versions.</p>
+<p>Typical DELETE error responses would be:
+- <strong>401 Unauthorized</strong>: the client is not authenticated and
+  anonymous deletion of such a resource is not supported.
+- <strong>403 Forbidden</strong>: the client is authenticated but does not have
+  sufficient privilege to delete the resource.
+- <strong>404 Not Found</strong>: the name does not denote an existing resource.
+- <strong>409 Conflict</strong>: the resource cannot be deleted at this time,
+    i.e. because object versions still exist.
+- <strong>412 Precondition Failed</strong>: the deletion was aborted because the current object version on the server does not match the version indicated by the <code>If-Match</code> request header.</p>
+<h2 id="object-version-resources">Object Version Resources<a class="headerlink" href="#object-version-resources" title="Permanent link">&para;</a></h2>
+<p>Any versioned object name in Hatrac has an HTTPS URL of the form:</p>
+<ul>
+<li>https:// <em>authority</em> / <em>namespace path</em> / <em>object name</em> : <em>version id</em></li>
+</ul>
+<p>Where <em>version id</em> is the service-issued identifier for a particular
+version of the named object.</p>
+<h3 id="object-version-creation">Object Version Creation<a class="headerlink" href="#object-version-creation" title="Permanent link">&para;</a></h3>
+<p>See the previous section on Object Creation and Update. Object
+versions are created by performing an update on the unversioned object
+URL.</p>
+<h3 id="object-version-retrieval">Object Version Retrieval<a class="headerlink" href="#object-version-retrieval" title="Permanent link">&para;</a></h3>
+<p>A particular version of an object can be retrieved using the GET
+operation whether or not it is the current version of the object:</p>
+<pre><code>GET /namespace_path/object_name:version_id
+Host: authority_name
+If-None-Match: etag_value
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: content_type
+Content-MD5: hash_value
+Content-SHA256: hash_value
+Content-Disposition: filename*=UTF-8''filename
+Content-Length: N
+ETag: etag_value
+
+...content...
+</code></pre>
+<p>with the same interpretation as documented for Object Retrieval above.</p>
+<p>The <code>ETag</code> and <code>If-None-Match</code> headers allow client-side caching of object versions. Because a Hatrac object version is immutable, the <em>etag value</em> for a given object version SHOULD NOT change over its lifetime.</p>
+<h3 id="object-version-metadata-retrieval">Object Version Metadata Retrieval<a class="headerlink" href="#object-version-metadata-retrieval" title="Permanent link">&para;</a></h3>
+<p>Metadata for a particular version of an object can be retrieved using
+the HEAD operation whether or not it is the current version of the
+object:</p>
+<pre><code>HEAD /namespace_path/object_name:version_id
+Host: authority_name
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: content_type
+Content-MD5: hash_value
+Content-SHA256: hash_value
+Content-Disposition: filename*=UTF-8''filename
+Content-Length: N
+</code></pre>
+<p>with the same interpretation as documented for Object Metadata
+Retrieval above.</p>
+<h3 id="object-version-deletion">Object Version Deletion<a class="headerlink" href="#object-version-deletion" title="Permanent link">&para;</a></h3>
+<p>The DELETE operation is used to delete an object version</p>
+<pre><code>DELETE /namespace_path/object_name:version_id
+Host: authority_name
+</code></pre>
+<p>for which a successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>For completeness in the protocol, an <code>If-Match</code> header MAY be specified to control deletion of object versions, but it is redundant since object versions are immutable and their content cannot be in a different state than observed on a previous access.</p>
+<p>Typical DELETE error responses would be:
+- <strong>401 Unauthorized</strong>: the client is not authenticated and
+  anonymous deletion of such a resource is not supported.
+- <strong>403 Forbidden</strong>: the client is authenticated but does not have
+  sufficient privilege to delete the resource.
+- <strong>404 Not Found</strong>: the name does not denote an existing resource.
+- <strong>412 Precondition Failed</strong>: the <code>If-Match</code> request header was specified with an <em>etag value</em> which does not match this object version.</p>
+<p>Versions of objects can be deleted whether or not they are the current
+version:</p>
+<ul>
+<li>Deletion of any version MUST make that version unavailable.</li>
+<li>Deletion of any version MAY permanently discard content. An
+    implementation MAY retain deleted content to allow restoration
+    procedures not documented here.</li>
+<li>Deletion of the current version will cause the next most recent
+    version of the object to become its new current version.</li>
+<li>An object may be left empty, i.e. with no current version, if all
+    versions have been deleted.  A subsequent update can reintroduce
+    content for the object.</li>
+</ul>
+<h2 id="metadata-sub-resources">Metadata Sub-Resources<a class="headerlink" href="#metadata-sub-resources" title="Permanent link">&para;</a></h2>
+<p>The service also exposes sub-resources for metadata management on
+existing object versions:</p>
+<ul>
+<li>https:// <em>authority</em> / <em>resource name</em> ;metadata</li>
+<li>https:// <em>authority</em> / <em>resource name</em> ;metadata/ <em>fieldname</em></li>
+</ul>
+<p>Where <em>resource name</em> is currently restricted to object version names
+as described above. The <em>fieldname</em> is a lower-case string which
+matches an HTTP request header suitable for describing content
+metadata. The currently recognized <em>fieldnames</em> include:</p>
+<ul>
+<li><code>content-type</code></li>
+<li><code>content-disposition</code></li>
+<li><code>content-md5</code></li>
+<li><code>content-sha256</code></li>
+</ul>
+<h3 id="lifecycle-and-ownership">Lifecycle and Ownership<a class="headerlink" href="#lifecycle-and-ownership" title="Permanent link">&para;</a></h3>
+<p>Metadata are sub-resources of the main resource identified in the
+<em>resource name</em> in the URL, and their lifetime is bounded by the
+lifetime of that main resource.</p>
+<ol>
+<li>Initial metadata MAY be specified during object creation and update.</li>
+<li>Immutable checksums MAY be added on existing object versions.</li>
+<li>Mutable metadata MAY be added, removed, or modified on existing object versions.</li>
+</ol>
+<h3 id="metadata-collection-retrieval">Metadata Collection Retrieval<a class="headerlink" href="#metadata-collection-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is used to retrieve all metadata sub-resources en masse
+as a document:</p>
+<pre><code>GET /resource_name;metadata
+Host: authority_name
+Accept: application/json
+If-None-Match: etag_value
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+ETag: etag_value
+
+{"content-type": content_type, 
+ "content-md5": hash_value,
+ "content-sha256": hash_value,
+ "content-disposition": disposition}
+</code></pre>
+<p>The standard
+<a href="#object-version-metadata-retrieval">object version metadata retrieval</a>,
+operation uses the <code>HEAD</code> method on the main resource to retrieve this
+same metadata as HTTP response headers.</p>
+<h3 id="metadata-value-retrieval">Metadata Value Retrieval<a class="headerlink" href="#metadata-value-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is used to retrieve one metadata sub-resource as a
+text value:</p>
+<pre><code>GET /resource_name;metadata/fieldname
+Host: authority_name
+Accept: text/plain
+If-None-Match: etag_value
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: text/plain
+Content-Length: N
+ETag: etag_value
+
+value
+</code></pre>
+<p>The textual <em>value</em> is identical to what would be present in the HTTP
+response header value when retrieving the main resource content.</p>
+<h3 id="metadata-value-creation-and-update">Metadata Value Creation and Update<a class="headerlink" href="#metadata-value-creation-and-update" title="Permanent link">&para;</a></h3>
+<p>The PUT operation is used to create or update one metadata sub-resource as a
+text value:</p>
+<pre><code>PUT /resource_name;metadata/fieldname
+Host: authority_name
+Content-Type: text/plain
+If-Match: etag_value
+
+value
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>The textual <em>value</em> is identical to what would be present in the HTTP
+request header value when creating the main resource content.</p>
+<h3 id="metadata-value-deletion">Metadata Value Deletion<a class="headerlink" href="#metadata-value-deletion" title="Permanent link">&para;</a></h3>
+<p>The DELETE operation is used to create or update one metadata sub-resource as a
+text value:</p>
+<pre><code>DELETE /resource_name;metadata/fieldname
+Host: authority_name
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<h2 id="access-control-list-sub-resources">Access Control List Sub-Resources<a class="headerlink" href="#access-control-list-sub-resources" title="Permanent link">&para;</a></h2>
+<p>An access control policy sub-resource has an HTTPS URL of the form:</p>
+<ul>
+<li>https:// <em>authority</em> / <em>resource name</em> ;acl</li>
+<li>(for a list of all ACLs on the resource)</li>
+<li>https:// <em>authority</em> / <em>resource name</em> ;acl/ <em>access</em></li>
+<li>(for a specific ACL)</li>
+<li>https:// <em>authority</em> / <em>resource name</em> ;acl/ <em>access</em> / <em>entry</em></li>
+<li>(for a specific ACL entry)</li>
+</ul>
+<p>Where <em>resource name</em> is a namespace, object, or object version name
+as described above, <em>access</em> is a specific access mode that is
+applicable to that type of resource, and <em>entry</em> is a specific <em>role</em>
+name or the <code>*</code> wildcard.  The full set of access control lists for
+each resource type is:
+- Namespace
+  - <code>owner</code>: lists roles considered to be owners of the namespace.
+  - <code>create</code>: lists roles permitted to create new children in the namespace.
+  - <code>subtree-owner</code>: lists roles considered to be owners of the namespace or any namespace, object, or object version beneath the namespace.
+  - <code>subtree-create</code>: lists roles permitted to create new children of the namespace or of any namespace beneath the namespace.
+  - <code>subtree-update</code>: lists roles permitted to update data on any object beneath the namespace.
+  - <code>subtree-read</code>: lists roles permitted to read any object version beneath the namespace.
+- Object
+  - <code>owner</code>: lists roles considered to be owners of the object.
+  - <code>update</code>: lists roles permitted to update object with new versions.
+  - <code>subtree-owner</code>: lists roles considered to be owners of any object version for the object.
+  - <code>subtree-read</code>: lists roles permitted to read any object version for the object.
+- Object Version
+  - <code>owner</code>: lists roles considered to be owners of the object version.
+  - <code>read</code>: lists roles permitted to read the object version.</p>
+<h3 id="lifecycle-and-ownership_1">Lifecycle and Ownership<a class="headerlink" href="#lifecycle-and-ownership_1" title="Permanent link">&para;</a></h3>
+<p>Access control lists are sub-resources of the main resource identified
+by the <em>resource name</em> in the URL, and they exist for the entire
+lifetime of the main resource.</p>
+<ol>
+<li>The root namespace is configured out of band with initial ACL
+   content when a service is deployed.</li>
+<li>When a client creates a nested namespace or a new object, the
+   ownership of the new resource is set to the authenticated client by
+   default, but the client may specified an alternative owner list as
+   part of the creation request.  In the case of a new object, the
+   initial object version gets the same ACL settings as the newly
+   created object. <strong>TODO:</strong> define header to control initial ACLs
+   during PUT.</li>
+</ol>
+<h3 id="access-control-retrieval">Access Control Retrieval<a class="headerlink" href="#access-control-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is used to retrieve ACL settings en masse:</p>
+<pre><code>GET /resource_name;acl
+Host: authority_name
+Accept: application/json
+If-None-Match: etag_value
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+ETag: etag_value
+
+{"access": ["role", ...], ...}
+</code></pre>
+<p>where response contains a JSON object with one field per <em>access</em> mode
+and an array of <em>role</em> names and/or the <code>*</code> wildcard for each such access
+list.</p>
+<p>The HEAD operation can likewise retrieve en masse ACL metadata:</p>
+<pre><code>HEAD /resource_name;acl
+Host: authority_name
+Accept: application/json
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+</code></pre>
+<h3 id="access-control-list-retrieval">Access Control List Retrieval<a class="headerlink" href="#access-control-list-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is also used to retrieve a specific ACL:</p>
+<pre><code>GET /resource_name;acl/access
+Host: authority_name
+Accept: application/json
+If-None-Match: etag_value
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+ETag: etag_value
+
+["role",...]
+</code></pre>
+<p>where the response contains just one array of <em>role</em> names or the <code>*</code>
+wildcard.</p>
+<p>The HEAD operation can likewise retrieve individual ACL metadata:</p>
+<pre><code>HEAD /resource_name;acl/access
+Host: authority_name
+Accept: application/json
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+</code></pre>
+<h3 id="access-control-list-entry-retrieval">Access Control List Entry Retrieval<a class="headerlink" href="#access-control-list-entry-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is also used to retrieve a specific ACL entry:</p>
+<pre><code>GET /resource_name;acl/access/role
+Host: authority_name
+Accept: application/json
+If-None-Match: etag_value
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: text/plain
+Content-Length: N
+ETag: etag_value
+
+role
+</code></pre>
+<p>where the response contains just one <em>role</em> name or <code>*</code> wildcard entry.</p>
+<p>The HEAD operation is also used to retrieve metadata for a specific
+ACL entry:</p>
+<pre><code>HEAD /resource_name;acl/access/entry
+Host: authority_name
+Accept: application/json
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: text/plain
+Content-Length: N
+</code></pre>
+<p>For all of the ACL sub-resource retrieval operations, an <code>If-None-Match</code> header MAY be specified with an <em>etag value</em> to indicate that the client already possesses a copy of the sub-resource which was returned with an <code>ETag</code> header containing that same <em>etag value</em>. This is useful for cache control. The <em>etag value</em>, if returned by the server, MUST indicate a specific configuration of the ACL sub-resource such that proper caching and precondition-protected updates are possible using the related HTTP protocol features.</p>
+<p>Typical GET error responses would be:
+  - <strong>401 Unauthorized</strong>: the client is not authenticated and
+      anonymous retrieval of such a policy is not supported.
+  - <strong>403 Forbidden</strong>: the client is authenticated but does not have
+      sufficient privilege to retrieve the policy.
+  - <strong>404 Not Found</strong>: the namespace or object resource or ACL
+      subresource is not found.
+  - <strong>304 Not Modified</strong>: the current state of the ACL sub-resource matches the <em>etag value</em> specified in the <code>If-None-Match</code> request header.</p>
+<h3 id="access-control-list-update">Access Control List Update<a class="headerlink" href="#access-control-list-update" title="Permanent link">&para;</a></h3>
+<p>The PUT operation is used to rewrite a specific ACL:</p>
+<pre><code>PUT /resource_name;acl/access
+Host: authority_name
+Content-Type: application/json
+If-Match: etag_value
+
+["role", ...]
+</code></pre>
+<p>The optional <code>If-Match</code> header MAY be specified with the <em>etag value</em> corresponding to the last retrieved ACL sub-resource configuration, in order to prevent update in the case that another client has simultaneously updated the same ACL sub-resource while this request was being prepared and submitted.</p>
+<p>The successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>where the input JSON array completely replaces the existing ACL.</p>
+<p>It is RECOMMENDED that the implementation reject changes
+which would strip too many permissions, e.g. leaving a resource with
+no <code>owner</code>.</p>
+<p>The PUT operation is also used to add one entry to a specific ACL:</p>
+<pre><code>PUT /resource_name;acl/access/entry
+Host: authority_name
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>where the <em>entry</em> role name or <code>*</code> wildcard is now present in the ACL.</p>
+<p>Typical PUT error responses would be:
+- <strong>400 Bad Request</strong>: the resource cannot be updates as requested,
+    i.e. because insufficient permissions would remain.
+- <strong>401 Unauthorized</strong>: the client is not authenticated and
+  anonymous update of such a resource is not supported.
+- <strong>403 Forbidden</strong>: the client is authenticated but does not have
+  sufficient privilege to update the resource.
+- <strong>404 Not Found</strong>: the name does not denote an existing resource.
+- <strong>412 Precondition Failed</strong>: the update was aborted because the ACL sub-resource state on the server did not match the <em>etag value</em> present in an <code>If-Match</code> request header.</p>
+<h3 id="access-control-list-deletion">Access Control List Deletion<a class="headerlink" href="#access-control-list-deletion" title="Permanent link">&para;</a></h3>
+<p>The DELETE operation is used to clear a specific ACL:</p>
+<pre><code>DELETE /resource_name;acl/access
+Host: authority_name
+If-Match: etag_value
+</code></pre>
+<p>The optional <code>If-Match</code> header MAY be specified with the <em>etag value</em> corresponding to the last retrieved ACL sub-resource configuration, in order to prevent deletion in the case that anohter client has simultaneously updated the same ACL sub-resource while this request was being prepared and submitted.</p>
+<p>The successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>where the ACL is now empty.</p>
+<p>It is RECOMMENDED that the implementation reject changes which would
+strip too many permissions, e.g. leaving a resource with no <code>owner</code>.</p>
+<p>The DELETE operation is also used to remove one entry from a specific ACL:</p>
+<pre><code>GET /resource_name;acl/access/entry
+Host: authority_name
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>where the <em>entry</em> role name or <code>*</code> wildcard is no longer present in
+the ACL.</p>
+<p>Typical DELETE error responses would be:
+- <strong>400 Bad Request</strong>: the resource cannot be changed as requested,
+    i.e. because insufficient permissions would remain.
+- <strong>401 Unauthorized</strong>: the client is not authenticated and
+  anonymous update of such a resource is not supported.
+- <strong>403 Forbidden</strong>: the client is authenticated but does not have
+  sufficient privilege to update the resource.
+- <strong>404 Not Found</strong>: the name does not denote an existing resource.
+- <strong>412 Precondition Failed</strong>: the deletion was aborted because the ACL sub-resource state on the server did not match the <em>etag value</em> present in an <code>If-Match</code> request header.</p>
+<h2 id="chunked-upload-resources">Chunked Upload Resources<a class="headerlink" href="#chunked-upload-resources" title="Permanent link">&para;</a></h2>
+<p>To efficiently support restartable transfer for very large object
+content, a stateful job management sub-resource exposes URLs for the
+form:</p>
+<ul>
+<li>https:// <em>authority</em> / <em>namespace path</em> / <em>object name</em> ;upload</li>
+<li>(the set of upload jobs for a given object)</li>
+<li>https:// <em>authority</em> / <em>namespace path</em> / <em>object name</em> ;upload / <em>job id</em></li>
+<li>(a single upload job)</li>
+<li>https:// <em>authority</em> / <em>namespace path</em> / <em>object name</em> ;upload / <em>job id</em> / <em>chunk number</em></li>
+<li>(a single chunk of data)</li>
+</ul>
+<p>where <em>job id</em> is a service-issued identifier for one transfer job,
+and <em>chunk number</em> is a zero-based ordinal for the chunk within the
+series of chunks where chunk number <em>n</em> starts at byte-offset <em>n</em> *
+<em>K</em> for a job using <em>K</em> byte chunk size.</p>
+<p>To allow different implementations, the upload job processes a set of
+chunks of equal size determined at the time the job is
+created. Arbitrary byte offsets are <em>not</em> allowed. The final chunk may
+be less than the chunk size to account for arbitrary length jobs.</p>
+<p>The three-phase chunked upload job has an effect equivalent to a
+single PUT request on an object:</p>
+<ol>
+<li>Create service-side transfer job state</li>
+<li>Send set of idempotent chunks</li>
+<li>Signal job completion</li>
+</ol>
+<p>The benefit of this technique is that individual HTTP requests can be
+kept to a reasonable size to prevent timeouts, and in the face of
+transient communication failures the data transfer can easily resume
+in the middle.  Only chunks that were partially in flight need to be
+retransmitted.</p>
+<p>This interface has been designed to accomodate two important
+implementation strategies:
+- The fixed chunk size and ordinal position can be used to compute a
+  byte offset for direct assembly of data into sparse files in a
+  filesystem.  The chunks are non-overlapping byte ranges at fixed
+  offsets. Idempotent retransmission of chunks is permitted, but a
+  client SHOULD NOT send different content for multiple requests using
+  the same <em>chunk number</em>. An implementation MAY mix content of multiple
+  transmissions for the same <em>chunk number</em>.  An implementation MAY accept
+  completion of an upload job that has missing chunks.
+- The individual requests easily map to similar chunked upload
+  interfaced in object systems such as Amazon S3, allowing a thin
+  proxy to implement Hatrac on top of such services. Retransmission or
+  out-of-order transmission of chunks is permitted, but a client
+  SHOULD NOT skip any chunks. An implementation MAY reject
+  completion of an upload job that has missing chunks.</p>
+<p>Hence, it is the client's responsibility to track acknowledged of
+individual chunk transfers and defer completion of an upload job until
+all chunks have been successfully transmitted.</p>
+<h3 id="chunked-upload-job-creation">Chunked Upload Job Creation<a class="headerlink" href="#chunked-upload-job-creation" title="Permanent link">&para;</a></h3>
+<p>The POST operation is used to create a new upload job:</p>
+<pre><code>POST /namespace_path/object_name;upload
+Host: authority_name
+Content-Type: application/json
+
+{"chunk-length": K, 
+ "content-length": N,
+ "content-type": "content_type",
+ "content-md5": "hash_value",
+ "content-sha256": "hash_value",
+ "content-disposition": "disposition"}
+</code></pre>
+<p>where the JSON attributes <code>chunk-length</code> and <code>content-length</code> are
+mandatory to describe the shape of the data upload, while
+<code>content-type</code>, <code>content-disposition</code>, <code>content-md5</code>, and
+<code>content-sha256</code> are optional and provide additional metadata for the
+completed object, with the same semantics as if the object had been
+created as a simple object (without the upload job API) and those same
+fields had been provided as HTTP PUT request headers. For backwards
+compatibility, these JSON attribute names are also supported as
+aliases:</p>
+<ul>
+<li><code>chunk_bytes</code>: deprecated alias for <code>chunk-length</code></li>
+<li><code>total_bytes</code>: deprecated alias for <code>content-length</code></li>
+<li><code>content_md5</code>: deprecated alias for <code>content-md5</code></li>
+</ul>
+<p>As with object and namespace creation, an optional query parameter may
+be supplied to request automatic creation of ancestor namespaces:</p>
+<pre><code>POST /namespace_path/object_name;upload?parents=true
+...
+</code></pre>
+<p>In either case, the successful response is:</p>
+<pre><code>201 Created
+Location /namespace_path/object_name;upload/job_id
+Content-Type: text/uri-list
+Content-Length: N
+
+/namespace_path/object_name;upload/job_id
+</code></pre>
+<p>where the new job is ready to receive data chunks.</p>
+<p>Typical PUT error responses would be:
+  - <strong>401 Unauthorized</strong>: the client is not authenticated and
+      anonymous creation of a job is not supported.
+  - <strong>403 Forbidden</strong>: the client is authenticated but does not have
+      sufficient privilege to create the job.
+  - <strong>409 Conflict</strong>: the object name is unavailable for such use.</p>
+<h3 id="chunked-upload-job-listing-retrieval">Chunked Upload Job Listing Retrieval<a class="headerlink" href="#chunked-upload-job-listing-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is used to list pending upload jobs on an object:</p>
+<pre><code>GET /namespace_path/object_name;upload
+Host: authority_name
+</code></pre>
+<p>where the successful response is a JSON array of job URLs:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+
+["/hatrac/namespace_path/object_name;upload/job_id", ...]
+</code></pre>
+<p>If the <code>text/uri-list</code> content-type is negotiated, the response will
+be a whitespace separated list of job URLs:</p>
+<pre><code>200 OK
+Content-Type: text/uri-list
+Content-Length: N
+
+/hatrac/namespace_path/object_name;upload/job_id1
+/hatrac/namespace_path/object_name;upload/job_id2
+...
+</code></pre>
+<h3 id="chunk-upload">Chunk Upload<a class="headerlink" href="#chunk-upload" title="Permanent link">&para;</a></h3>
+<p>The PUT operation is used to send data chunks for an existing job:</p>
+<pre><code>PUT /namespace_path/object_name;upload/job_id/chunknumber
+Host: authority_name
+Content-Type: application/octet-stream
+Content-Length: K
+
+...data...
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>where the data was received and stored.</p>
+<p>Typical PUT error responses would be:
+  - <strong>401 Unauthorized</strong>: the client is not authenticated and
+      anonymous upload of the chunk is not supported.
+  - <strong>403 Forbidden</strong>: the client is authenticated but does not have
+      sufficient privilege to upload the chunk.
+  - <strong>400 Bad Request</strong>: the chunk number is not a non-negative integer.
+  - <strong>409 Conflict</strong>: the chunk number is too large for the defined job.</p>
+<h3 id="chunked-upload-job-finalization">Chunked Upload Job Finalization<a class="headerlink" href="#chunked-upload-job-finalization" title="Permanent link">&para;</a></h3>
+<p>The POST operation is used to signal completion of an upload job:</p>
+<pre><code>POST /namespace_path/object_name;upload/job_id
+Host: authority_name
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>201 Created
+Location: /namespace_path/object_name:version_id
+Content-Type: text/uri-list
+Content-Length: N
+
+/namespace_path/object_name:version_id
+</code></pre>
+<p>where <code>Location</code> includes the URL of the newly created object version
+that is comprised of all the uploaded data chunks as if it had been
+created by a corresponding PUT request:</p>
+<pre><code>PUT /namespace_path/object_name
+Host: authority_name
+Content-Type: content_type
+Content-MD5: hash_value
+Content-Length: N
+
+...content...
+</code></pre>
+<p>Typical POST error responses would be:
+  - <strong>401 Unauthorized</strong> the client is not authenticated
+  - <strong>403 Forbidden</strong> the client is authenticated but does not have
+    sufficient privilege to finalize the upload.
+  - <strong>409 Conflict</strong> the currently uploaded content does not match the
+    <code>Content-MD5</code> header of the original upload job. An implementation
+    MAY skip this validation but it is RECOMMENDED to perform this
+    validation rather than create broken objects.</p>
+<h3 id="chunked-upload-job-status-retrieval">Chunked Upload Job Status Retrieval<a class="headerlink" href="#chunked-upload-job-status-retrieval" title="Permanent link">&para;</a></h3>
+<p>The GET operation is used to view the status of a pending upload:</p>
+<pre><code>GET /namespace_path/object_name;upload/job_id
+Host: authority_name
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>200 OK
+Content-Type: application/json
+Content-Length: N
+
+{"url": "/namespace_path/object_name;upload/job_id",
+ "owner": ["role"...],
+ "target": "/namespace_path/object_name"
+ "chunk-length": K,
+ "content-length": N,
+ ...
+}
+</code></pre>
+<p>summarizing the parameters set when the job was created including
+optional object metadata such as <code>content-type</code>. Note, there is no
+support for determining which chunks have or have not been uploaded as
+such tracking is not a requirement placed on Hatrac implementations.</p>
+<h3 id="chunked-upload-job-cancellation">Chunked Upload Job Cancellation<a class="headerlink" href="#chunked-upload-job-cancellation" title="Permanent link">&para;</a></h3>
+<p>The DELETE method can be used to cancel an upload job that has not yet
+been finalized:</p>
+<pre><code>DELETE /namespace_path/object_name;upload/job_id
+Host: authority_name
+</code></pre>
+<p>for which the successful response is:</p>
+<pre><code>204 No Content
+</code></pre>
+<p>Once canceled, the job resource no longer exists and associated
+storage SHOULD be reclaimed.</p>
+              
+            </div>
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+      
+        <a href="../HOWTO/" class="btn btn-neutral" title="Other HOWTO information"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+    
+      <p>Copyright &copy; 2018 <a href="http://github.com/informatics-isi-edu/ermrest">Hatrac Project</a>.</p>
+    
+  </div>
+
+  Built with <a href="http://www.mkdocs.org">MkDocs</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+      
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" style="cursor: pointer">
+    <span class="rst-current-version" data-toggle="rst-current-version">
+      
+      
+        <span><a href="../HOWTO/" style="color: #fcfcfc;">&laquo; Previous</a></span>
+      
+      
+    </span>
+</div>
+    <script>var base_url = '..';</script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/require.js"></script>
+      <script src="../search/search.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  
+  <link rel="shortcut icon" href="../img/favicon.ico">
+  <title>Other HOWTO information - Hatrac Documentation</title>
+  <link href='https://fonts.googleapis.com/css?family=Lato:400,700|Roboto+Slab:400,700|Inconsolata:400,700' rel='stylesheet' type='text/css'>
+
+  <link rel="stylesheet" href="../css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../css/theme_extra.css" type="text/css" />
+  <link rel="stylesheet" href="../css/highlight.css">
+  <link href="../css/extra.css" rel="stylesheet">
+  
+  <script>
+    // Current page data
+    var mkdocs_page_name = "Other HOWTO information";
+    var mkdocs_page_input_path = "HOWTO.md";
+    var mkdocs_page_url = "/HOWTO/";
+  </script>
+  
+  <script src="../js/jquery-2.1.1.min.js"></script>
+  <script src="../js/modernizr-2.8.3.min.js"></script>
+  <script type="text/javascript" src="../js/highlight.pack.js"></script> 
+  
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+      <div class="wy-side-nav-search">
+        <a href="../INSTALL/" class="icon icon-home"> Hatrac Documentation</a>
+        <div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+	<ul class="current">
+	  
+          
+            <li class="toctree-l1">
+		
+    <span class="caption-text">User Docs</span>
+    <ul class="subnav">
+                <li class="">
+                    
+    <a class="" href="../INSTALL/">Installing on Red Hat-derived Linux</a>
+                </li>
+                <li class=" current">
+                    
+    <a class="current" href="./">Other HOWTO information</a>
+    <ul class="subnav">
+            
+    <li class="toctree-l3"><a href="#hatrac-how-to">Hatrac How-to</a></li>
+    
+        <ul>
+        
+            <li><a class="toctree-l4" href="#background">Background</a></li>
+        
+            <li><a class="toctree-l4" href="#examples">Examples</a></li>
+        
+        </ul>
+    
+
+    </ul>
+                </li>
+    </ul>
+	    </li>
+          
+            <li class="toctree-l1">
+		
+    <a class="" href="../REST-API/">Hatrac API and Service Semantics</a>
+	    </li>
+          
+        </ul>
+      </div>
+      &nbsp;
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+        <a href="../INSTALL/">Hatrac Documentation</a>
+      </nav>
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../INSTALL/">Docs</a> &raquo;</li>
+    
+      
+        
+          <li>User Docs &raquo;</li>
+        
+      
+    
+    <li>Other HOWTO information</li>
+    <li class="wy-breadcrumbs-aside">
+      
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main">
+            <div class="section">
+              
+                <h1 id="hatrac-how-to">Hatrac How-to<a class="headerlink" href="#hatrac-how-to" title="Permanent link">&para;</a></h1>
+<p>This document assumes a basic familiarity with:</p>
+<ul>
+<li>HTTP protocol and web concepts</li>
+<li>Object storage concepts</li>
+<li>Command-line environments and the <code>curl</code> utility</li>
+</ul>
+<p>See the <a href="../REST-API/">REST API documentation</a> for a complete overview
+of the supported resources and operations with detailed HTTP protocol
+information.</p>
+<h2 id="background">Background<a class="headerlink" href="#background" title="Permanent link">&para;</a></h2>
+<p>Hatrac provides a client-controlled namespace hierarchy with
+client-named objects containing arbitrary data content. In short, a
+Hatrac namespace is similar to a directory in a traditional
+filesystem, while a Hatrac object is similar to a file.</p>
+<p>However, a single Hatrac object name may have multiple content
+versions. Each version is given a unique, psuedo-random version
+identifier when it is created. Any particular object version is
+immutable and can only ever be seen with the same content that was
+provided atomically when it was created. The bare object name
+implicitly references the <em>latest</em> available version, while
+version-qualified names reference the particular version no matter
+what other updates are performed on the object.</p>
+<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
+<p>In the following examples, let's assume that Hatrac is deployed with a
+webauthn2 configuration that uses local database
+providers. Furthermore, assume that a test user <code>test-user-1</code> is
+defined and has been assigned an attribute <code>my-admin-group</code>. For this
+deployment, assume the hostname <code>server.example.org</code> is hosting the
+service stack.</p>
+<h3 id="deploying">Deploying<a class="headerlink" href="#deploying" title="Permanent link">&para;</a></h3>
+<p>This command initializes the deployment so that users with the
+<code>my-admin-group</code> attribute are granted full privileges on the root
+namespace:</p>
+<pre><code>hatrac-deploy "my-admin-group"
+</code></pre>
+<h3 id="authentication-using-database-providers">Authentication using Database Providers<a class="headerlink" href="#authentication-using-database-providers" title="Permanent link">&para;</a></h3>
+<p>Hatrac currently depends on a sibling ERMrest deployment to have
+access to its embedded webauthn2 security service for login. With the
+webauthn2 <code>database</code> providers, we can login via the command-line by
+sending an HTTP POST request with login form fields populated:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  -d username=test-user-1 \
+  -d password="my secret" \
+  https://server.example.org/ermrest/authn/session
+</code></pre>
+<p>This command prints out the new session information as a JSON response
+(with modified whitespace here for readability):</p>
+<pre><code>{
+  "attributes": [
+    {"display_name": "my-admin-group", "id": "my-admin-group"}, 
+    {"display_name": "test-user-1", "id": "test-user-1"}
+  ], 
+  "seconds_remaining": 1799, 
+  "since": "2016-05-06 23:38:15.798275+00:00", 
+  "expires": "2016-05-07 00:08:15.798275+00:00", 
+  "client": {"display_name": "test-user-1", "id": "test-user-1"}
+}
+</code></pre>
+<p>With other security providers, more effort is required to obtain the
+equivalent <code>~/cookie</code> file needed for the rest of the examples below.</p>
+<h3 id="listing-the-root-namespace">Listing the Root Namespace<a class="headerlink" href="#listing-the-root-namespace" title="Permanent link">&para;</a></h3>
+<p>The root namespace is listed with an HTTP GET on the namespace URL:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  https://server.example.org/hatrac/
+</code></pre>
+<p>The response represents the currently empty root namespace:</p>
+<pre><code>[]
+</code></pre>
+<h3 id="creating-a-nested-namespace">Creating a Nested Namespace<a class="headerlink" href="#creating-a-nested-namespace" title="Permanent link">&para;</a></h3>
+<p>The HTTP PUT operation with a special <code>Content-Type</code> header allows us
+to create a new namespace with our own chosen name:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  -H "Content-Type: application/x-hatrac-namespace" \
+  -X PUT
+  https://server.example.org/hatrac/folder1
+</code></pre>
+<p>The response repeats the name we have chosen for the new namespace:</p>
+<pre><code>/hatrac/folder1
+</code></pre>
+<p>If you repeat the namespace listing step for the root namespace, this
+time the response will enumerate the single child namespace:</p>
+<pre><code>["/hatrac/folder1"]
+</code></pre>
+<h3 id="creating-an-object">Creating an Object<a class="headerlink" href="#creating-an-object" title="Permanent link">&para;</a></h3>
+<p>First, let's create a test data file:</p>
+<pre><code>cat &gt; hello.txt &lt;&lt;EOF
+&gt; Line 1: Hello, World!
+&gt; Line 2: That's all, Folks!
+EOF
+</code></pre>
+<p>Now, let's upload it using the built-in support for file upload via
+HTTP PUT using curl's <code>-T</code> transfer mode:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  -H "Content-Type: text/plain" \
+  -T hello.txt \
+  https://server.example.org/hatrac/folder1/object1
+</code></pre>
+<p>The response repeats the object name we have chosen but qualifies it
+with a server-generated <em>version ID</em>:</p>
+<pre><code>/hatrac/folder1/object1:SP274AQOOO3TOXIS2BVSDA5HCE
+</code></pre>
+<h3 id="retrieving-an-object">Retrieving an Object<a class="headerlink" href="#retrieving-an-object" title="Permanent link">&para;</a></h3>
+<p>A simple HTTP GET will retrieve an existing object's <em>current version</em>:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  https://server.example.org/hatrac/folder1/object1
+</code></pre>
+<p>The response contains the object content itself:</p>
+<pre><code>Line 1: Hello, World!
+Line 2: That's all, Folks!
+</code></pre>
+<h4 id="retrieving-object-metadata-too">Retrieving Object Metadata Too<a class="headerlink" href="#retrieving-object-metadata-too" title="Permanent link">&para;</a></h4>
+<p>We can also ask <code>curl</code> to dump the protocol headers with the response
+on standard output using the <code>-D</code> flag:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  -D - \
+  https://server.example.org/hatrac/folder1/object1
+</code></pre>
+<p>The response contains the object content itself:</p>
+<pre><code>HTTP/1.1 200 OK
+Date: Fri, 06 May 2016 23:55:28 GMT
+Content-Length: 49
+Content-Disposition: filename*=UTF-8''object1
+ETag: "SP274AQOOO3TOXIS2BVSDA5HCE"
+Vary: cookie
+Content-Type: text/plain; charset=UTF-8
+
+Line 1: Hello, World!
+Line 2: That's all, Folks!
+</code></pre>
+<p>The <code>ETag</code> header is used to inform the HTTP client about cache
+validity. It happens to repeat the actual version ID but you SHOULD
+NOT rely on this in any client application. The Hatrac service MAY use
+other means for cache management in future revisions.</p>
+<h3 id="updating-an-object">Updating an Object<a class="headerlink" href="#updating-an-object" title="Permanent link">&para;</a></h3>
+<p>First, let's modify our existing data file:</p>
+<pre><code>cat &gt;&gt; hello.txt &lt;&lt;EOF
+&gt; Line 3: Well, I spoke too soon...
+&gt; EOF
+</code></pre>
+<p>Now, let's upload it the same as before. The server will automatically
+create a new version and update the <em>current version</em> to point to this
+new one:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  -H "Content-Type: text/plain" \
+  -T hello.txt \
+  https://server.example.org/hatrac/folder1/object1
+</code></pre>
+<p>The response repeats the object name we have chosen but qualifies it
+with a server-generated <em>version ID</em>:</p>
+<pre><code>/hatrac/folder1/object1:3VJO6XIPAGVBAGPUIOMG546SWU
+</code></pre>
+<p>If you repeat the step to retrieve object and metadata, you will see
+the new content:</p>
+<pre><code>HTTP/1.1 200 OK
+Date: Sat, 07 May 2016 00:00:05 GMT
+Content-Length: 83
+Content-Disposition: filename*=UTF-8''object1
+ETag: "3VJO6XIPAGVBAGPUIOMG546SWU"
+Vary: cookie
+Content-Type: text/plain; charset=UTF-8
+
+Line 1: Hello, World!
+Line 2: That's all, Folks!
+Line 3: Well, I spoke too soon...
+</code></pre>
+<h3 id="retrieving-an-object-version">Retrieving an Object Version<a class="headerlink" href="#retrieving-an-object-version" title="Permanent link">&para;</a></h3>
+<p>Simply by using the full version-qualified URL for the object, you can
+retrieve the older version of the object:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  -D - \
+  https://server.example.org/hatrac/folder1/object1:SP274AQOOO3TOXIS2BVSDA5HCE
+</code></pre>
+<p>The response will familiar:</p>
+<pre><code>HTTP/1.1 200 OK
+Date: Sat, 07 May 2016 00:04:55 GMT
+Content-Length: 49
+Content-Disposition: filename*=UTF-8''object1
+ETag: "SP274AQOOO3TOXIS2BVSDA5HCE"
+Vary: cookie
+Content-Type: text/plain; charset=UTF-8
+
+Line 1: Hello, World!
+Line 2: That's all, Folks!
+</code></pre>
+<h3 id="deleting-an-object-version">Deleting an Object Version<a class="headerlink" href="#deleting-an-object-version" title="Permanent link">&para;</a></h3>
+<p>You can delete a specific object version and it will no longer be
+available for retrieval.  If you delete the <em>current version</em>, the
+object will automatically revert to the <em>latest</em> remaining version as
+its new current version:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  -X DELETE \
+  https://server.example.org/hatrac/folder1/object1:3VJO6XIPAGVBAGPUIOMG546SWU
+</code></pre>
+<p>This operation has no response content.  If you now retrieve the
+unqualified object name, you'll get the previous version again.</p>
+<h3 id="deleting-an-object">Deleting an Object<a class="headerlink" href="#deleting-an-object" title="Permanent link">&para;</a></h3>
+<p>You can delete the entire object and all of its versions at once:</p>
+<pre><code>curl -b ~/cookie -c ~/cookie \
+  -X DELETE \
+  https://server.example.org/hatrac/folder1/object1
+</code></pre>
+<p>This operation has no response content.  If you now retrieve the
+unqualified object name, you'll get a <code>404 Not Found</code> HTTP error.</p>
+              
+            </div>
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="../REST-API/" class="btn btn-neutral float-right" title="Hatrac API and Service Semantics">Next <span class="icon icon-circle-arrow-right"></span></a>
+      
+      
+        <a href="../INSTALL/" class="btn btn-neutral" title="Installing on Red Hat-derived Linux"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+    
+      <p>Copyright &copy; 2018 <a href="http://github.com/informatics-isi-edu/ermrest">Hatrac Project</a>.</p>
+    
+  </div>
+
+  Built with <a href="http://www.mkdocs.org">MkDocs</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+      
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" style="cursor: pointer">
+    <span class="rst-current-version" data-toggle="rst-current-version">
+      
+      
+        <span><a href="../INSTALL/" style="color: #fcfcfc;">&laquo; Previous</a></span>
+      
+      
+        <span style="margin-left: 15px"><a href="../REST-API/" style="color: #fcfcfc">Next &raquo;</a></span>
+      
+    </span>
+</div>
+    <script>var base_url = '..';</script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/require.js"></script>
+      <script src="../search/search.js"></script>
+
+</body>
+</html>
