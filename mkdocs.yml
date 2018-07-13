@@ -1,12 +1,13 @@
 site_name: Hatrac Documentation
 site_description: Documentation for Hatrac web-service codebase in the DERIVA framework.
+site_url: https://informatics-isi-edu.github.io/hatrac/
 theme: readthedocs
 extra_css: 
   - css/extra.css
 
 
 pages:
-- Welcome to the documentation: ../README.md
+#- Welcome to the documentation: ../README.md
 - User Docs:
     - Installing on Red Hat-derived Linux: INSTALL.md
     - Other HOWTO information: HOWTO.md
