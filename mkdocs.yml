@@ -7,7 +7,7 @@ extra_css:
 
 
 pages:
-#- Welcome to the documentation: ../README.md
+- Hatrac Documentation: index.md
 - User Docs:
     - Installing on Red Hat-derived Linux: INSTALL.md
     - Other HOWTO information: HOWTO.md
