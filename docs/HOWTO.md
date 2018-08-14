@@ -1,5 +1,5 @@
 
-# Hatrac How-to
+# How-tos
 
 This document assumes a basic familiarity with:
 

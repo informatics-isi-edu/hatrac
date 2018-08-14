@@ -1,4 +1,4 @@
-# Hatrac REST API
+# REST API
 
 [Hatrac](http://github.com/informatics-isi-edu/hatrac) (pronounced
 "hat rack") is a simple object storage service for web-based,
