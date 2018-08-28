@@ -1,4 +1,4 @@
-Hatrac
+Object Storage (Hatrac)
 ========
 
 .. toctree::
