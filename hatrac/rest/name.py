@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2017 University of Southern California
+# Copyright 2015-2018 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -47,6 +47,8 @@ class NameVersion (RestHandler):
         )
         self.set_http_etag(resource.version)
         self.http_check_preconditions()
+        if self.get_body is False and resource.is_object():
+            web.header("Accept-Range", "bytes")
         return self.get_content(
             resource,
             web.ctx.webauthn2_context
@@ -206,6 +208,8 @@ class Name (RestHandler):
                 hash_list([ r.asurl() for r in resource.directory.namespace_enumerate_names(resource, False, False)])
             )
         self.http_check_preconditions()
+        if self.get_body is False and resource.is_object():
+            web.header("Accept-Range", "bytes")
         return self.get_content(
             resource,
             web.ctx.webauthn2_context

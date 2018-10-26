@@ -236,7 +236,7 @@ for which a successful response is:
     200 OK
     Content-Type: application/json
     Content-Length: N
-    
+
 indicating that an `N` byte JSON representation is available.  This
 operation is essentially equivalent to the GET operation but with the
 actual child listing elided.
@@ -521,6 +521,7 @@ version of an object:
 for which a successful response is:
 
     200 OK
+    Accept-Range: bytes
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
@@ -644,6 +645,7 @@ object:
 for which the successful response is:
 
     200 OK
+    Accept-Range: bytes
     Content-Type: content_type
     Content-MD5: hash_value
 	Content-SHA256: hash_value
