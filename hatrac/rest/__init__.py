@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -9,13 +9,13 @@ import itertools
 import web
 import urllib
 
-import core
+from . import core
 
 # these modify core.dispatch_rules
-import acl
-import metadata
-import name
-import transfer
+from . import acl
+from . import metadata
+from . import name
+from . import transfer
 
 rules = list(core.dispatch_rules.items())
 
@@ -53,7 +53,7 @@ class Dispatcher (object):
 
     def METHOD(self, methodname):
         handler, matchgroups = self.prepare_dispatch()
-        matchgroups = map(urllib.unquote, matchgroups)
+        matchgroups = map(urllib.parse.unquote, matchgroups)
 
         if not hasattr(handler, methodname):
             raise core.NoMethod()

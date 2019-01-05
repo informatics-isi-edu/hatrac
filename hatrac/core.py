@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -12,8 +12,10 @@ import binascii
 import base64
 import re
 import urllib
+import web
+import json
 
-from webauthn2 import merge_config, jsonWriterRaw
+from webauthn2 import merge_config, jsonWriter
 
 config = merge_config(
     jsonFileName='hatrac_config.json'
@@ -30,7 +32,7 @@ def _string_wrap(s, escape=u'\\', protect=[]):
         for c in set(protect):
             s = s.replace(c, escape + c)
         return s
-    except Exception, e:
+    except Exception as e:
         #web.debug('_string_wrap', s, escape, protect, e)
         raise
 
@@ -77,13 +79,13 @@ def _make_bin_decoder(nbytes, context=''):
         if len(orig) == nbytes * 2:
             try:
                 data = binascii.unhexlify(orig)
-            except Exception, e:
-                raise BadRequest('Could not hex-decode "%s". %s' % (orig, str(e)))
+            except Exception as e:
+                raise BadRequest('Could not hex-decode "%s". %s' % (orig, e))
         else:
             try:
                 data = base64.b64decode(orig)
-            except Exception, e:
-                raise BadRequest('Could not base64 decode "%s". %s' % (orig, str(e)))
+            except Exception as e:
+                raise BadRequest('Could not base64 decode "%s". %s' % (orig, e))
                 
         if len(data) != nbytes:
             raise BadRequest(
@@ -106,19 +108,12 @@ def _test_content_disposition(orig):
     n = m.groupdict()['name']
     
     try:
-        n = urllib.unquote(str(n))
-    except Exception, e:
+        n = urllib.parse.unquote(n)
+    except Exception as e:
         raise BadRequest(
             'Invalid URL encoding of content-disposition filename component. %s.' % e
         )
     
-    try:
-        n = n.decode('utf8')
-    except Exception, e:
-        raise BadRequest(
-            'Invalid UTF-8 encoding of content-disposition filename component. %s.' % e
-        )
-
     if n.find("/") >= 0 or n.find("\\") >= 0:
         raise BadRequest(
             'Invalid occurrence of path divider in content-disposition filename component "%s" after URL and UTF-8 decoding.' % n
@@ -134,6 +129,18 @@ class MetadataValue (str):
         self.container.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = self + '\n'
         return len(body), Metadata({'content-type': 'text/plain'}), body
+
+class MetadataBytes (bytes):
+    def is_object(self):
+        return False
+
+    def get_content(self, client_context, get_data=True):
+        self.container.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        body = base64.b64encode(self) + b'\n'
+        return len(body), Metadata({'content-type': 'text/plain'}), body
+
+    def encode(self):
+        return self
 
 class Metadata (dict):
 
@@ -152,11 +159,11 @@ class Metadata (dict):
     # { key: (coder, decoder)... }
     _sql_codecs = {
         'content-md5': (
-            binascii.hexlify,
+            lambda s: binascii.hexlify(s.encode()).decode(),
             binascii.unhexlify
         ),
         'content-sha256': (
-            binascii.hexlify,
+            lambda s: binascii.hexlify(s.encode()).decode(),
             binascii.unhexlify
         )
     }
@@ -168,11 +175,11 @@ class Metadata (dict):
             _test_content_disposition
         ),
         'content-md5': (
-            base64.b64encode,
+            lambda s: base64.b64encode(s).decode(),
             _make_bin_decoder(16, ' for content-md5')
         ),
         'content-sha256': (
-            base64.b64encode,
+            lambda s: base64.b64encode(s).decode(),
             _make_bin_decoder(32, ' for content-sha256')
         )
     }
@@ -181,13 +188,13 @@ class Metadata (dict):
         dict.__init__(self)
         for k, v in src.items():
             self[k] = v
-    
+
     def is_object(self):
         return False
 
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        body = jsonWriterRaw(self.to_http()) + '\n'
+        body = jsonWriter(self.to_http()) + b'\n'
         nbytes = len(body)
         return nbytes, Metadata({'content-type': 'application/json'}), body
     
@@ -198,7 +205,7 @@ class Metadata (dict):
     def _sql_decoded_val(self, k, v):
         enc, dec = self._sql_codecs.get(k, (lambda x: x, lambda x: x))
         return dec(v)
-    
+
     def _http_encoded_val(self, k, v):
         enc, dec = self._http_codecs.get(k, (lambda x: x, lambda x: x))
         return enc(v)
@@ -208,7 +215,7 @@ class Metadata (dict):
         return dec(v)
     
     def to_sql(self):
-        return jsonWriterRaw(
+        return json.dumps(
             {
                 k: self._sql_encoded_val(k, v)
                 for k, v in self.items()
@@ -251,7 +258,11 @@ class Metadata (dict):
         k = k.lower()
         if k not in self._all_keys:
             raise BadRequest('Unknown metadata key %s' % k)
-        v = MetadataValue(v)
+        if k in self._write_once_keys and isinstance(v, bytes):
+            # HACK: checksums are write-once, stored in memory as bytes, and externalized as base64...
+            v = MetadataBytes(v)
+        else:
+            v = MetadataValue(v)
         v.container = self
         if k in self._write_once_keys and k in self:
             raise Conflict(

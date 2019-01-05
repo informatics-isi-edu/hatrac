@@ -1,12 +1,13 @@
 
 #
-# Copyright 2015 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, hash_list, hash_dict
-from webauthn2.util import jsonWriterRaw, jsonReader
 import web
+from webauthn2.util import jsonReader
+
+from .core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, hash_list, hash_dict
 
 @web_url([
     # path, name, version, access, role
@@ -78,11 +79,11 @@ class ACL (RestHandler):
             acl = jsonReader(web.ctx.env['wsgi.input'].read())
         except:
             raise BadRequest('Error reading JSON input.')
-        if type(acl) != list:
+        if not isinstance(acl, list):
             raise BadRequest('ACL input must be a flat JSON array.')
         for entry in acl:
-            if type(acl) in [str, unicode]:
-                raise BadRequest('ACL entry "%s" is not a string.' % entry)
+            if not isinstance(entry, str):
+                raise BadRequest('ACL entry "%s" is not a string.' % (entry,))
         resource = self.resolve_name_or_version(
             path, name, version
         )

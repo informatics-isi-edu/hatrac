@@ -1,12 +1,12 @@
 
 #
-# Copyright 2016-2017 University of Southern California
+# Copyright 2016-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, hash_value, hash_dict
-from webauthn2.util import jsonWriterRaw, jsonReader
 import web
+
+from .core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, hash_value, hash_dict
 
 @web_url([
     # path, name, version, fieldname, querystr
@@ -29,7 +29,7 @@ class Metadata (RestHandler):
         if in_content_type != 'text/plain':
             raise BadRequest('Only text/plain input is accepted for metadata.')
 
-        value = web.ctx.env['wsgi.input'].read()
+        value = web.ctx.env['wsgi.input'].read().decode()
 
         if version:
             resource = self.resolve_version(path, name, version)

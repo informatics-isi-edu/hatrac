@@ -1,14 +1,14 @@
 
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
 import sys
-import core
-import model
-import rest
 import psycopg2
+
+from . import core
+from . import model
 
 def instantiate(config):
     """Return a directory service instance for config."""
@@ -23,6 +23,8 @@ try:
     directory = instantiate(core.config)
 except psycopg2.OperationalError:
     directory = None
+
+from . import rest
 
 # TODO: conditionalize this if we ever have alternate directory impls
 def deploy_cli(argv, config=None):

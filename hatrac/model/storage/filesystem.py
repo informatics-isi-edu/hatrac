@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2016 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -16,9 +16,9 @@ import base64
 import binascii
 import random
 import struct
-from StringIO import StringIO
+import io
 
-from hatrac.core import BadRequest, Conflict, coalesce
+from ...core import BadRequest, Conflict, coalesce
 
 def make_file(dirname, relname, accessmode):
     """Create and open file with accessmode, including missing parents.
@@ -30,7 +30,7 @@ def make_file(dirname, relname, accessmode):
     filename = "%s/%s" % (dirname, relname)
 
     if not os.path.exists(dirname):
-        os.makedirs(dirname, mode=0755)
+        os.makedirs(dirname, mode=0o755)
 
     return open(filename, accessmode, 0)
 
@@ -83,7 +83,7 @@ class HatracStorage (object):
         version = base64.b32encode( 
             (struct.pack('Q', random.getrandbits(64))
              + struct.pack('Q', random.getrandbits(64)))[0:26]
-        ).replace('=', '') # strip off '=' padding
+        ).decode().replace('=', '') # strip off '=' padding
 
         dirname, relname = self._dirname_relname(name, version)
         f = make_file(dirname, relname, 'wb')
@@ -93,7 +93,7 @@ class HatracStorage (object):
         return version
 
     def create_upload(self, name, nbytes=None, metadata={}):
-        upload_id = self.create_from_file(name, StringIO(''), 0)
+        upload_id = self.create_from_file(name, io.BytesIO(b''), 0)
         return upload_id
 
     def cancel_upload(self, name, upload_id):
@@ -180,8 +180,9 @@ class HatracStorage (object):
             received_md5 = hasher.digest()
             if metadata['content-md5'] != received_md5:
                 raise BadRequest(
-                    'Received content MD5 %s does not match expected %s.' 
-                    % (binascii.hexlify(received_md5), binascii.hexlify(metadata['content-md5']))
+                    'Received content MD5 %r does not match expected %r.' 
+                    % (received_md5, metadata['content-md5'])
+                    #% (binascii.hexlify(received_md5), binascii.hexlify(metadata['content-md5'].encode()))
                 )
 
         return "test"
