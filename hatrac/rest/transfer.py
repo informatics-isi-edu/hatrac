@@ -110,7 +110,7 @@ class ObjectTransfers (RestHandler):
         if in_content_type != 'application/json':
             raise BadRequest('Only application/json input is accepted for upload jobs.')
         try:
-            job = jsonReader(web.ctx.env['wsgi.input'].read())
+            job = jsonReader(web.ctx.env['wsgi.input'].read().decode())
         except ValueError as ev:
             raise BadRequest('Error reading JSON input:' % ev)
         if type(job) != dict:
