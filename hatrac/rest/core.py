@@ -186,7 +186,7 @@ def web_method():
     def helper(original_method):
         def wrapper(*args):
             # request context init
-            web.ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) )
+            web.ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) ).decode()
             web.ctx.hatrac_start_time = datetime.datetime.now(timezone.utc)
             web.ctx.hatrac_request_content_range = None
             web.ctx.hatrac_content_type = None
