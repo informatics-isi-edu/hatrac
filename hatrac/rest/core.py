@@ -181,6 +181,10 @@ class NotImplemented (RestException):
     status = '501 Not Implemented'
     message = 'Request not implemented for this resource.'
 
+class ServerError (RestException):
+    status = '500 Internal Server Error'
+    message = 'The request encountered an error on the server: %s.'
+
 def web_method():
     """Augment web handler method with common service logic."""
     def helper(original_method):
@@ -222,6 +226,15 @@ def web_method():
                 raise NotFound(str(ev))
             except core.Conflict as ev:
                 raise Conflict(str(ev))
+            except Exception as ev:
+                # log and rethrow all errors so web.ctx reflects error prior to request_final_log below...
+                et, ev2, tb = sys.exc_info()
+                web.debug(
+                    'Got unhandled exception in web_method()',
+                    ev,
+                    traceback.format_exception(et, ev2, tb),
+                )
+                raise ServerError(str(ev))
             finally:
                 # finalize
                 logger.info( request_final_json(log_parts()) )
