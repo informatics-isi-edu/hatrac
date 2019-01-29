@@ -6,6 +6,7 @@
 
 import sys
 import psycopg2
+import os
 
 from . import core
 from . import model
@@ -62,3 +63,37 @@ for the deployment.
         )
         return 1
 
+def sample_httpd_config():
+    """Emit sample wsgi_hatrac.conf to standard output."""
+    path = __path__[0]
+    if path[0] != '/':
+        path = '%s/%s' % (
+            os.path.dirname(loader.get_filename('hatrac')),
+            path
+        )
+    sys.stdout.write("""
+# this file must be loaded (alphabetically) after wsgi.conf
+AllowEncodedSlashes On
+
+WSGIPythonOptimize 1
+WSGIDaemonProcess hatrac processes=4 threads=4 user=hatrac maximum-requests=2000
+WSGIScriptAlias /hatrac %(hatrac_location)s/hatrac.wsgi
+WSGIPassAuthorization On
+
+WSGISocketPrefix /var/run/httpd/wsgi
+
+<Location /hatrac>
+
+   AuthType webauthn
+   Require webauthn-optional
+
+   WSGIProcessGroup hatrac
+    
+   # site can disable redundant service logging by adding env=!dontlog to their CustomLog or similar directives
+   SetEnv dontlog
+
+</Location>
+""" % {
+    'hatrac_location': path,
+}
+    )
