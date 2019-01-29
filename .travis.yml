@@ -67,11 +67,11 @@ install:
   - sudo -H -u hatrac createdb hatrac
   - sudo cp test/hatrac_config.json ~hatrac/
   - sudo -H -u hatrac hatrac-deploy admin
+  - sudo su -c 'python3 -c "import hatrac as m;print(m.sample_httpd_config())"' - hatrac
   - sudo su -c 'python3 -c "import hatrac as m;print(m.sample_httpd_config())"' - hatrac > ../wsgi_hatrac.conf
   - sudo cp ../wsgi_hatrac.conf /etc/apache2/conf.d/wsgi_hatrac.conf
   - sudo mkdir /var/www/hatrac
   - sudo chown hatrac /var/www/hatrac
-  - sudo service apache2 restart
 
 before_script:
   - sudo -H -u webauthn webauthn2-manage adduser test1
@@ -80,6 +80,7 @@ before_script:
   - sudo -H -u webauthn webauthn2-manage assign test1 admin
 
 script:
+  - sudo service apache2 restart
   - curl --fail -k -b $COOKIES -c $COOKIES -d username=test1 -d password=dummypassword https://${HOSTNAME}/authn/session
   - bash ./test/rest-smoketest.sh
 
