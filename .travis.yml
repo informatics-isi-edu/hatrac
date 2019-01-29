@@ -90,5 +90,6 @@ after_failure:
   - sudo ls -lR /var/log/apache2
   - sudo cat /etc/apache2/conf.d/webauthn.conf
   - sudo cat /etc/apache2/conf.d/wsgi_webauthn2.conf
-  - sudo cat /etc/apache2/conf.d/wsgi_hatrac_travis.conf
+  - sudo cat /etc/apache2/conf.d/wsgi_hatrac.conf
   - sudo cat ${HTTPD_ERROR_LOG}
+  - sudo systemctl status apache2 -l
