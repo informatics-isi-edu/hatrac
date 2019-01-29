@@ -67,7 +67,7 @@ install:
   - sudo -H -u hatrac createdb hatrac
   - sudo cp test/hatrac_config.json ~hatrac/
   - sudo -H -u hatrac hatrac-deploy admin
-  - sudo -H -u hatrac su -c 'python3 -c "import hatrac as m;print(m.sample_httpd_config())"' > /etc/apache2/conf.d/wsgi_hatrac.conf
+  - sudo -H -u hatrac su -c 'python3 -c "import hatrac as m;print(m.sample_httpd_config())"' | sudo cat > /etc/apache2/conf.d/wsgi_hatrac.conf
   - sudo mkdir /var/www/hatrac
   - sudo chown hatrac /var/www/hatrac
   - sudo service apache2 restart
