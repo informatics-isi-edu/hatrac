@@ -1,14 +1,16 @@
 
 #
-# Copyright 2015-2017 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
 import re
 import web
-import hatrac.core
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, LengthRequired
+
 from webauthn2.util import jsonReader
+
+from .. import core
+from .core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, LengthRequired
 
 @web_url([
     # path, name, job, chunk, querystr
@@ -108,8 +110,8 @@ class ObjectTransfers (RestHandler):
         if in_content_type != 'application/json':
             raise BadRequest('Only application/json input is accepted for upload jobs.')
         try:
-            job = jsonReader(web.ctx.env['wsgi.input'].read())
-        except ValueError, ev:
+            job = jsonReader(web.ctx.env['wsgi.input'].read().decode())
+        except ValueError as ev:
             raise BadRequest('Error reading JSON input:' % ev)
         if type(job) != dict:
             raise BadRequest('Job input must be a flat JSON object.')
@@ -118,16 +120,16 @@ class ObjectTransfers (RestHandler):
             try:
                 # backwards-compatibility
                 chunksize = int(job['chunk_bytes'])
-            except KeyError, ev:
+            except KeyError as ev:
                 chunksize = int(job['chunk-length'])
             try:
                 # backwards-compatibility
                 nbytes = int(job['total_bytes'])
-            except KeyError, ev:
+            except KeyError as ev:
                 nbytes = int(job['content-length'])
-        except KeyError, ev:
+        except KeyError as ev:
             raise BadRequest('Missing required field %s.' % ev)
-        except ValueError, ev:
+        except ValueError as ev:
             raise BadRequest('Invalid count: %s.' % ev)
 
         metadata = {}
@@ -152,10 +154,10 @@ class ObjectTransfers (RestHandler):
                 make_parents,
                 web.ctx.webauthn2_context
             )
-        except hatrac.core.Conflict, ev:
+        except core.Conflict as ev:
             try:
                 resource = self.resolve(path, name).get_uploads()
-            except hatrac.core.NotFound, ev:
+            except core.NotFound as ev:
                 raise Conflict('Name %s is not available for use.' % self._fullname(path, name))
                 
         # say resource_exists=False as we always create a new one...

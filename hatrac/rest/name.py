@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2018 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -8,9 +8,10 @@
 
 """
 
-from core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, hash_list
-import hatrac.core
 import web
+
+from .. import core
+from .core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, hash_list
 
 @web_url([
      # path, name, version, querystr
@@ -137,7 +138,7 @@ class Name (RestHandler):
                 version = resource.get_current_version()
                 self.set_http_etag(version.version)
                 self.http_check_preconditions('PUT')
-            except hatrac.core.Conflict:
+            except core.Conflict:
                 # check precondition for current state of version not existing
                 self.http_check_preconditions('PUT', False)
 
@@ -158,7 +159,7 @@ class Name (RestHandler):
 
             if 'HTTP_CONTENT_DISPOSITION' in web.ctx.env:
                 metadata['content-disposition'] = web.ctx.env.get('HTTP_CONTENT_DISPOSITION').strip()
-                
+
             resource = resource.create_version_from_file(
                 web.ctx.env['wsgi.input'],
                 web.ctx.webauthn2_context,
@@ -180,7 +181,7 @@ class Name (RestHandler):
                 version = resource.get_current_version()
                 self.set_http_etag(version.version)
                 self.http_check_preconditions('DELETE')
-            except hatrac.core.Conflict:
+            except core.Conflict:
                 # check preconditions with no version existing
                 self.http_check_preconditions('DELETE', False)
         else:

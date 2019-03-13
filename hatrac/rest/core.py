@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2017 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -17,27 +17,30 @@ from collections import OrderedDict
 import random
 import base64
 import datetime
-import pytz
-import webauthn2
+from datetime import timezone
 import struct
 import urllib
-import hatrac
-import hatrac.core
+
 import sys
 import traceback
 import hashlib
+
+import webauthn2
 from webauthn2.util import context_from_environment
 from webauthn2.rest import get_log_parts, request_trace_json, request_final_json
+
+from .. import core
+from .. import directory
 
 _webauthn2_manager = webauthn2.Manager()
 
 def hash_value(d):
-    return base64.b64encode(hashlib.md5(d).digest())
+    return base64.b64encode(hashlib.md5(d.encode()).digest()).decode()
 
 def hash_multi(d):
     if d is None:
         return '_'
-    elif isinstance(d, (str, unicode)):
+    elif isinstance(d, str):
         return hash_value(d)
     elif isinstance(d, (list, set)):
         return hash_list(d)
@@ -124,15 +127,15 @@ class TemplatedRestException (RestException):
         # filter types to those for which we have a response template, or text/plain which we always support
         supported_content_types = [
             content_type for content_type in self.supported_content_types
-            if "%s_%s" % (self.error_type, content_type.split('/')[-1]) in hatrac.core.config or content_type == 'text/plain'
+            if "%s_%s" % (self.error_type, content_type.split('/')[-1]) in core.config or content_type == 'text/plain'
         ]
         default_content_type = supported_content_types[0]
         # find client's preferred type
         content_type = webauthn2.util.negotiated_content_type(supported_content_types, default_content_type)
         # lookup template and use it if available
         template_key = '%s_%s' % (self.error_type, content_type.split('/')[-1])
-        if template_key in hatrac.core.config:
-            message = hatrac.core.config[template_key] % dict(message=message)
+        if template_key in core.config:
+            message = core.config[template_key] % dict(message=message)
         RestException.__init__(self, message, headers)
         web.header('Content-Type', content_type)
         
@@ -178,23 +181,27 @@ class NotImplemented (RestException):
     status = '501 Not Implemented'
     message = 'Request not implemented for this resource.'
 
+class ServerError (RestException):
+    status = '500 Internal Server Error'
+    message = 'The request encountered an error on the server: %s.'
+
 def web_method():
     """Augment web handler method with common service logic."""
     def helper(original_method):
         def wrapper(*args):
             # request context init
-            web.ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) )
-            web.ctx.hatrac_start_time = datetime.datetime.now(pytz.timezone('UTC'))
+            web.ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) ).decode()
+            web.ctx.hatrac_start_time = datetime.datetime.now(timezone.utc)
             web.ctx.hatrac_request_content_range = None
             web.ctx.hatrac_content_type = None
             web.ctx.webauthn2_manager = _webauthn2_manager
             web.ctx.webauthn2_context = webauthn2.Context() # set empty context for sanity
             web.ctx.hatrac_request_trace = request_trace
-            web.ctx.hatrac_directory = hatrac.directory
+            web.ctx.hatrac_directory = directory
 
-            if hatrac.directory.prefix is None:
+            if directory.prefix is None:
                 # set once from web context if administrator did not specify in config
-                hatrac.directory.prefix = web.ctx.env['SCRIPT_NAME']
+                directory.prefix = web.ctx.env['SCRIPT_NAME']
             
             try:
                 # get client authentication context
@@ -202,23 +209,35 @@ def web_method():
                 if web.ctx.webauthn2_context is None:
                     web.debug("falling back to _webauthn2_manager.get_request_context() after failed context_from_environment(False)")
                     web.ctx.webauthn2_context = _webauthn2_manager.get_request_context()
-            except (ValueError, IndexError), ev:
+            except (ValueError, IndexError) as ev:
                 raise Unauthorized('service access requires client authentication')
 
             try:
                 # run actual method
                 return original_method(*args)
 
-            except hatrac.core.BadRequest, ev:
+            except core.BadRequest as ev:
                 raise BadRequest(str(ev))
-            except hatrac.core.Unauthenticated, ev:
+            except core.Unauthenticated as ev:
                 raise Unauthorized(str(ev))
-            except hatrac.core.Forbidden, ev:
+            except core.Forbidden as ev:
                 raise Forbidden(str(ev))
-            except hatrac.core.NotFound, ev:
+            except core.NotFound as ev:
                 raise NotFound(str(ev))
-            except hatrac.core.Conflict, ev:
+            except core.Conflict as ev:
                 raise Conflict(str(ev))
+            except RestException as ev:
+                # pass through rest exceptions already generated by handlers
+                raise
+            except Exception as ev:
+                # log and rethrow all errors so web.ctx reflects error prior to request_final_log below...
+                et, ev2, tb = sys.exc_info()
+                web.debug(
+                    'Got unhandled exception in web_method()',
+                    ev,
+                    traceback.format_exception(et, ev2, tb),
+                )
+                raise ServerError(str(ev))
             finally:
                 # finalize
                 logger.info( request_final_json(log_parts()) )
@@ -437,9 +456,9 @@ class RestHandler (object):
                         # whole-entity
                         get_slice = None
              
-            except (BadRange, NotImplemented), ev:
+            except (BadRange, NotImplemented) as ev:
                 raise ev
-            except Exception, ev:
+            except Exception as ev:
                 # HTTP spec says to ignore a Range header w/ syntax errors
                 web.debug('Ignoring HTTP Range header %s due to error: %s' % (get_range, ev))
                 pass
@@ -460,7 +479,7 @@ class RestHandler (object):
 
         web.header('Content-Length', nbytes)
 
-        metadata = hatrac.core.Metadata(metadata)
+        metadata = core.Metadata(metadata)
         if 'content-type' in metadata:
             web.ctx.hatrac_content_type = metadata['content-type']
 
@@ -472,7 +491,7 @@ class RestHandler (object):
         if resource.is_object() and resource.is_version():
             web.header('Content-Location', resource.asurl())
             if 'content-disposition' not in resource.metadata:
-                web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.quote(str(resource.object).split("/")[-1]))
+                web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.parse.quote(str(resource.object).split("/")[-1]))
             
         if self.http_etag:
             web.header('ETag', self.http_etag)

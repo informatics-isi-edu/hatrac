@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2017 University of Southern California
+# Copyright 2015-2019 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -49,10 +49,11 @@ import datetime
 import psycopg2
 import psycopg2.pool
 from psycopg2.extras import DictCursor
-from StringIO import StringIO
-from webauthn2.util import jsonWriterRaw, negotiated_content_type
-import hatrac.core
-from hatrac.core import coalesce, Metadata, sql_literal, sql_identifier
+
+from webauthn2.util import jsonWriter, negotiated_content_type
+
+from ...core import coalesce, Metadata, sql_literal, sql_identifier
+from ... import core
 
 def regexp_escape(s):
     safe = set(
@@ -85,12 +86,12 @@ class ACL (set):
 
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        body = jsonWriterRaw(list(self)) + '\n'
+        body = jsonWriter(list(self)) + b'\n'
         return len(body), Metadata({'content-type': 'application/json'}), body
 
     def __getitem__(self, role):
         if role not in self:
-            raise hatrac.core.NotFound(
+            raise core.NotFound(
                 'ACL member %s;acl/%s/%s not found.' % (self.resource, self.access, role)
             )
         entry = ACLEntry(role + '\n')
@@ -103,7 +104,7 @@ class ACLs (dict):
 
     def get_content(self, client_context, get_data=True):
         self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        body = jsonWriterRaw(self.resource.get_acls()) + '\n'
+        body = jsonWriter(self.resource.get_acls()) + b'\n'
         nbytes = len(body)
         return nbytes, Metadata({'content-type': 'application/json'}), body
 
@@ -111,7 +112,7 @@ class ACLs (dict):
         try:
             return dict.__getitem__(self, k)
         except KeyError:
-            raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (k, self.resource))
+            raise core.BadRequest('Invalid ACL name %s for %s.' % (k, self.resource))
 
     def __setitem__(self, k, v):
         dict.__setitem__(self, k, v)
@@ -128,7 +129,7 @@ def negotiated_uri_list(uris, metadata={}):
     if metadata['content-type'] == 'text/uri-list':
         body = '\n'.join(uris) + '\n'
     else:
-        body = jsonWriterRaw(uris) + '\n'
+        body = jsonWriter(uris) + b'\n'
         metadata['content-type'] = 'application/json'
     return len(body), Metadata(metadata), body
 
@@ -163,7 +164,7 @@ class HatracName (object):
         return self.directory.prefix + self.name
 
     def asurl(self):
-        return self.directory.prefix + '/'.join(map(lambda s: urllib.quote(s, ''), self.name.split('/')))
+        return self.directory.prefix + '/'.join(map(lambda s: urllib.parse.quote(s, ''), self.name.split('/')))
 
     def _reload(self, conn, cur, raise_notfound=True):
         result = self.directory._name_lookup(conn, cur, self.name, raise_notfound)
@@ -185,10 +186,10 @@ class HatracName (object):
         ])
 
     def get_uploads(self):
-        raise hatrac.core.NotFound('Uploads sub-resource on %s not available.' % self)
+        raise core.NotFound('Uploads sub-resource on %s not available.' % self)
 
     def get_versions(self):
-        raise hatrac.core.NotFound('Versions sub-resource on %s not available.' % self)
+        raise core.NotFound('Versions sub-resource on %s not available.' % self)
 
     def is_object(self):
         raise NotImplementedError()
@@ -208,9 +209,9 @@ class HatracName (object):
            or acl.intersection(attributes):
             return True
         elif client_context.client is not None:
-            raise hatrac.core.Forbidden('Access to %s forbidden.' % self)
+            raise core.Forbidden('Access to %s forbidden.' % self)
         else:
-            raise hatrac.core.Unauthenticated('Authentication required for access to %s' % self)
+            raise core.Unauthenticated('Authentication required for access to %s' % self)
 
     def delete(self, client_context):
         """Delete resource and its children."""
@@ -338,7 +339,7 @@ class HatracObjectVersion (HatracName):
         return '%s:%s' % (self.object, self.version)
 
     def asurl(self):
-        return '%s:%s' % (self.object.asurl(), urllib.quote(self.version, ''))
+        return '%s:%s' % (self.object.asurl(), urllib.parse.quote(self.version, ''))
 
     def _reload(self, conn, cur):
         object1 = self.object._reload(conn, cur)
@@ -397,7 +398,7 @@ class HatracUpload (HatracName):
         return "%s;upload/%s" % (self.object, self.job)
 
     def asurl(self):
-        return '%s;upload/%s' % (self.object.asurl(), urllib.quote(self.job, ''))
+        return '%s;upload/%s' % (self.object.asurl(), urllib.parse.quote(self.job, ''))
 
     def _reload(self, conn, cur):
         object = self.object._reload(conn, cur)
@@ -424,7 +425,7 @@ class HatracUpload (HatracName):
         }:
             if hdr in metadata:
                 body[hdr] = metadata[hdr]
-        body = jsonWriterRaw(body) + '\n'
+        body = jsonWriter(body) + b'\n'
         return len(body), Metadata({'content-type': 'application/json'}), body
 
     def finalize(self, client_context):
@@ -631,12 +632,12 @@ class PooledConnection (object):
                 result = bodyfunc(conn, cur)
                 conn.commit()
                 return finalfunc(result)
-            except psycopg2.InterfaceError, e:
+            except psycopg2.InterfaceError as e:
                 # reset bad connection
                 used_pool.putconn(conn, close=True)
                 conn = None
                 raise e
-            except GeneratorExit, e:
+            except GeneratorExit as e:
                 # happens normally at end of result yielding sequence
                 raise
             except:
@@ -644,7 +645,7 @@ class PooledConnection (object):
                     conn.rollback()
                 if verbose:
                     et, ev, tb = sys.exc_info()
-                    web.debug(u'got exception "%s" during PooledConnection.perform()' % unicode(ev),
+                    web.debug(u'got exception "%s" during PooledConnection.perform()' % (ev,),
                               traceback.format_exception(et, ev, tb))
                 raise
         finally:
@@ -802,7 +803,7 @@ SELECT bool_or(True) AS has_ancestors FROM information_schema.columns
 WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'ancestors' ;
 """
         )
-        if not cur.next()[0]:
+        if not cur.fetchone()[0]:
             cur.execute("""
 ALTER TABLE hatrac."name" ADD COLUMN ancestors int8[];
 UPDATE hatrac."name" SET ancestors = ARRAY[]::int8[];
@@ -816,7 +817,7 @@ SELECT max( array_length(regexp_split_to_array(substring(n.name from 2), '/'), 1
 FROM name n
 WHERE id > 1;
 """)[0].maxdepth
-            maxdepth = cur.next()[0]
+            maxdepth = cur.fetchone()[0]
             
             for i in range(maxdepth):
                 cur.execute("""
@@ -838,7 +839,7 @@ SELECT bool_or(True) AS has_pid FROM information_schema.columns
 WHERE table_schema = 'hatrac' AND table_name = 'name' AND column_name = 'pid';
 """
         )
-        if not cur.next()[0]:
+        if not cur.fetchone()[0]:
             cur.execute("""
 ALTER TABLE hatrac."name" ADD COLUMN "pid" int8 REFERENCES "name" (id);
 UPDATE hatrac."name" c SET pid = p.id
@@ -910,22 +911,22 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         parname = "/" + "/".join(nameparts[0:-1])
         relname = nameparts[-1]
         if relname in [ '.', '..' ]:
-            raise hatrac.core.BadRequest('Illegal name "%s".' % relname)
+            raise core.BadRequest('Illegal name "%s".' % relname)
 
         try:
             resource = HatracName.construct(self, **self._name_lookup(conn, cur, name, False))
             if resource.is_deleted:
-                raise hatrac.core.Conflict('Name %s not available.' % resource)
+                raise core.Conflict('Name %s not available.' % resource)
             else:
-                raise hatrac.core.Conflict('Name %s already in use.' % resource)
-        except hatrac.core.NotFound, ev:
+                raise core.Conflict('Name %s already in use.' % resource)
+        except core.NotFound as ev:
             pass
 
         try:
             parent = HatracName.construct(self, **self._name_lookup(conn, cur, parname))
             if parent.is_object():
-                raise hatrac.core.Conflict('Parent %s is not a namespace.' % (self.prefix + parname))
-        except hatrac.core.NotFound:
+                raise core.Conflict('Parent %s is not a namespace.' % (self.prefix + parname))
+        except core.NotFound:
             if make_parents:
                 parent = self.create_name(parname, False, True, client_context, conn=conn, cur=cur)
             else:
@@ -940,7 +941,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     def delete_name(self, resource, client_context, conn=None, cur=None):
         """Delete an existing namespace or object resource."""
         if resource.name == '/':
-            raise hatrac.core.Forbidden('Root service namespace %s cannot be deleted.' % resource)
+            raise core.Forbidden('Root service namespace %s cannot be deleted.' % resource)
 
         # test ACLs and map out recursive delete
         deleted_uploads = []
@@ -1019,11 +1020,11 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         remainder = upload.nbytes % upload.chunksize
         assert position >= 0
         if position < (nchunks - 1) and nbytes != upload.chunksize:
-            raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match job chunk size %s.' % (nbytes, upload.chunksize))
+            raise core.Conflict('Uploaded chunk byte count %s does not match job chunk size %s.' % (nbytes, upload.chunksize))
         if remainder and position == nchunks and nbytes != remainder:
-            raise hatrac.core.Conflict('Uploaded chunk byte count %s does not match final chunk size %s.' % (nbytes, remainder))
+            raise core.Conflict('Uploaded chunk byte count %s does not match final chunk size %s.' % (nbytes, remainder))
         if position > nchunks or position == nchunks and remainder == 0:
-            raise hatrac.core.Conflict('Uploaded chunk number %s out of range.' % position)
+            raise core.Conflict('Uploaded chunk number %s out of range.' % position)
         aux = self.storage.upload_chunk_from_file(
             upload.object.name, 
             upload.job, 
@@ -1063,7 +1064,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     def get_version_content_range(self, object, objversion, get_slice, client_context, get_data=True, conn=None, cur=None):
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
-            raise hatrac.core.NotFound('Resource %s is not available.' % objversion)
+            raise core.NotFound('Resource %s is not available.' % objversion)
         if get_data:
             nbytes, metadata, data = self.storage.get_content_range(object.name, objversion.version, objversion.metadata, get_slice)
         else:
@@ -1082,7 +1083,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         """
         try:
             return HatracName.construct(self, **self._name_lookup(conn, cur, name))
-        except hatrac.core.NotFound, ev:
+        except core.NotFound as ev:
             if raise_notfound:
                 raise ev
 
@@ -1111,7 +1112,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         if results:
             return HatracObjectVersion(self, object, **results[0])
         else:
-            raise hatrac.core.Conflict('Object %s currently has no content.' % object)
+            raise core.Conflict('Object %s currently has no content.' % object)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
     def update_resource_metadata(self, resource, updates, client_context, conn=None, cur=None):
@@ -1128,7 +1129,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def drop_resource_acl_role(self, resource, access, role, client_context, conn=None, cur=None):
         if role not in resource.acls[access]:
-            raise hatrac.core.NotFound('Resource %s;acl/%s/%s not found.' % (resource, access, role))
+            raise core.NotFound('Resource %s;acl/%s/%s not found.' % (resource, access, role))
         self._drop_resource_acl_role(conn, cur, resource, access, role)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
@@ -1190,7 +1191,7 @@ WHERE n.id = %(id)s ;
         
     def _set_resource_acl_role(self, conn, cur, resource, access, role):
         if access not in resource._acl_names:
-            raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
+            raise core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
         role = role['id'] if type(role) is dict else role
         # need to use raw SQL to compute modified array in database
         cur.execute("""
@@ -1209,7 +1210,7 @@ WHERE n.id = %(id)s
 
     def _drop_resource_acl_role(self, conn, cur, resource, access, role):
         if access not in resource._acl_names:
-            raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
+            raise core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
         role = role['id'] if type(role) is dict else role
         # need to use raw SQL to compute modified array in database
         cur.execute("""
@@ -1228,7 +1229,7 @@ WHERE n.id = %(id)s
 
     def _set_resource_acl(self, conn, cur, resource, access, acl):
         if access not in resource._acl_names:
-            raise hatrac.core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
+            raise core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
         cur.execute("""
 UPDATE hatrac.%(table)s r 
 SET %(acl)s = ARRAY[%(roles)s]::text[]
@@ -1297,7 +1298,7 @@ RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS
         sql_fields = dict(
             uploadid=sql_literal(upload.id),
             position=sql_literal(int(position)),
-            aux=sql_literal(jsonWriterRaw(aux))
+            aux=sql_literal(jsonWriter(aux))
         )
         
         try:
@@ -1309,7 +1310,7 @@ WHERE uploadid = %(uploadid)s AND position = %(position)s
 """ % sql_fields
             )
             
-        except hatrac.core.NotFound:
+        except core.NotFound:
             cur.execute("""
 INSERT INTO hatrac.chunk
 (uploadid, position, aux)
@@ -1344,7 +1345,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
         ))
         for row in list(cur):
             return row
-        raise hatrac.core.NotFound('Resource %s not found.' % (self.prefix + name))
+        raise core.NotFound('Resource %s not found.' % (self.prefix + name))
         
     def _version_lookup(self, conn, cur, object, version, allow_deleted=True):
         cur.execute("EXECUTE hatrac_version_lookup(%s, %s);" % (
@@ -1353,11 +1354,11 @@ EXECUTE hatrac_delete_upload(%(id)s);
         ))
         for row in list(cur):
             if row['is_deleted'] and not allow_deleted:
-                raise hatrac.core.NotFound("Resource %s:%s not available." % (object, version))
+                raise core.NotFound("Resource %s:%s not available." % (object, version))
             else:
                 row['metadata'] = Metadata.from_sql(row['metadata'])
                 return row
-        raise hatrac.core.NotFound("Resource %s:%s not found." % (object, version))
+        raise core.NotFound("Resource %s:%s not found." % (object, version))
 
     def _upload_lookup(self, conn, cur, object, job):
         cur.execute("EXECUTE hatrac_upload_lookup(%s, %s);" % (
@@ -1367,12 +1368,12 @@ EXECUTE hatrac_delete_upload(%(id)s);
         for row in list(cur):
             row['metadata'] = Metadata.from_sql(row['metadata'])
             return row
-        raise hatrac.core.NotFound("Resource %s;upload/%s not found." % (object, job))
+        raise core.NotFound("Resource %s;upload/%s not found." % (object, job))
         
     def _chunk_lookup(self, conn, cur, upload, position):
         result = self._chunk_list(conn, cur, upload, position)
         if not result:
-            raise hatrac.core.NotFound("Resource %s/%s not found." % (upload, position))
+            raise core.NotFound("Resource %s/%s not found." % (upload, position))
         return result[0]
         
     def _version_list(self, conn, cur, nameid, limit=None):
@@ -1393,7 +1394,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
         ))
         result = list(cur)
         if not result:
-            raise hatrac.core.NotFound("Chunk data %s/%s not found." % (upload, position))
+            raise core.NotFound("Chunk data %s/%s not found." % (upload, position))
         return result
 
     def _namespace_enumerate_versions(self, conn, cur, resource):
