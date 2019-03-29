@@ -579,7 +579,7 @@ class PoolManager (object):
 
         """
         # abandon old pools so they can be garbage collected
-        for key in self.pools.keys():
+        for key in list(self.pools.keys()):
             try:
                 pair = self.pools.pop(key)
                 delta = (datetime.datetime.now() - pair[1])
