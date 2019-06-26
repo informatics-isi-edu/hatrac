@@ -521,7 +521,7 @@ version of an object:
 for which a successful response is:
 
     200 OK
-    Accept-Range: bytes
+    Accept-Ranges: bytes
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
@@ -645,7 +645,7 @@ object:
 for which the successful response is:
 
     200 OK
-    Accept-Range: bytes
+    Accept-Ranges: bytes
     Content-Type: content_type
     Content-MD5: hash_value
 	Content-SHA256: hash_value

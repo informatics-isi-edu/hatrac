@@ -49,7 +49,7 @@ class NameVersion (RestHandler):
         self.set_http_etag(resource.version)
         self.http_check_preconditions()
         if self.get_body is False and resource.is_object():
-            web.header("Accept-Range", "bytes")
+            web.header("Accept-Ranges", "bytes")
         return self.get_content(
             resource,
             web.ctx.webauthn2_context
@@ -210,7 +210,7 @@ class Name (RestHandler):
             )
         self.http_check_preconditions()
         if self.get_body is False and resource.is_object():
-            web.header("Accept-Range", "bytes")
+            web.header("Accept-Ranges", "bytes")
         return self.get_content(
             resource,
             web.ctx.webauthn2_context
