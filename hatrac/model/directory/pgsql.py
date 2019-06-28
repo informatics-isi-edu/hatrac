@@ -123,11 +123,13 @@ def negotiated_uri_list(uris, metadata={}):
     """Returns nbytes, Metadata, body"""
     metadata = dict(metadata)
     metadata['content-type'] = negotiated_content_type(
-        ['application/json', 'text/uri-list'],
+        ['application/json', 'text/uri-list', 'text/html'],
         'application/json'
     )
     if metadata['content-type'] == 'text/uri-list':
         body = '\n'.join(uris) + '\n'
+    elif metadata['content-type'] == 'text/html':
+        body = '<html>\n' + '<br/>\n'.join(['<a href="%s">%s</a>' % (uri, uri) for uri in uris]) + '</html>\n'
     else:
         body = jsonWriter(uris) + b'\n'
         metadata['content-type'] = 'application/json'
