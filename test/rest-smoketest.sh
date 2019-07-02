@@ -316,6 +316,7 @@ dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/bar"   -X PUT -H "Content-Type
 # status of test namespaces
 dotest "200::application/json::*" /ns-${RUNKEY}/foo
 dotest "200::text/uri-list::*" "/ns-${RUNKEY}/foo" -H "Accept: text/uri-list"
+dotest "200::text/html::*" "/ns-${RUNKEY}/foo" -H "Accept: text/html"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo?cid=smoke" --head
 dotest "409::*::*" "/ns-${RUNKEY}/foo?cid=smoke" -X PUT -H "Content-Type: application/json"
 
@@ -448,6 +449,7 @@ dohdrtest 'content-location' "\([^[:space:]]\+\)" "/hatrac${obj1_vers1}"
 dotest "200::application/json::[1-9]*" "/ns-${RUNKEY}/foo2/obj1;versions"
 dotest "200::application/json::[1-9]*" "/ns-${RUNKEY}/foo2/obj1;versions?cid=smoke"
 dotest "404::*::*" "/ns-${RUNKEY}/foo2;versions"
+dotest "200::text/html::[1-9]*" "/ns-${RUNKEY}/foo2/obj1;versions" -H "Accept: text/html"
 
 # test partial GET
 dotest "200::*::${script_size}" /ns-${RUNKEY}/foo2/obj1 -H "Range: bytes=0-"
@@ -593,6 +595,7 @@ douploadtest "/ns-${RUNKEY}/foo2/obj1" "${upload_md5}" "${upload_sha}" "201::tex
 # test upload listing API
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo2/obj1;upload"
 dotest "200::text/uri-list::*" "/ns-${RUNKEY}/foo2/obj1;upload" -H "Accept: text/uri-list"
+dotest "200::text/html::*" "/ns-${RUNKEY}/foo2/obj1;upload" -H "Accept: text/html"
 
 # do some bad chunk upload tests before we finalize
 dotest "409::*::*" "${upload}/$(( ${upload_total_bytes} / ${chunk_bytes} + 2 ))" -T "$part"
