@@ -38,6 +38,7 @@ version of any particular object.
 
 """
 
+import os
 import sys
 import web
 import urllib
@@ -119,15 +120,21 @@ class ACLs (dict):
         v.resource = self.resource
         v.access = k
 
-def negotiated_uri_list(uris, metadata={}):
+def negotiated_uri_list(parent, resources, metadata={}):
     """Returns nbytes, Metadata, body"""
     metadata = dict(metadata)
     metadata['content-type'] = negotiated_content_type(
-        ['application/json', 'text/uri-list'],
+        ['application/json', 'text/uri-list', 'text/html'],
         'application/json'
     )
+    uris = [r.asurl() for r in resources]
     if metadata['content-type'] == 'text/uri-list':
         body = '\n'.join(uris) + '\n'
+    elif metadata['content-type'] == 'text/html':
+        body = "<!DOCTYPE html>\n<html>\n  <h1>Index of {parent}</h1>\n{children}\n</html>".format(
+            parent=parent.asurl(),
+            children='<br/>\n'.join(['  <a href="%s">%s</a>' % (uri, os.path.basename(uri)) for uri in uris])
+        )
     else:
         body = jsonWriter(uris) + b'\n'
         metadata['content-type'] = 'application/json'
@@ -254,8 +261,7 @@ class HatracNamespace (HatracName):
 
     def get_content(self, client_context, get_data=True):
         """Return (nbytes, metadata, data_generator) for namespace."""
-        uris = [ r.asurl() for r in self.directory.namespace_enumerate_names(self, False) ]
-        return negotiated_uri_list(uris)
+        return negotiated_uri_list(self, self.directory.namespace_enumerate_names(self, False))
 
 class HatracObject (HatracName):
     """Represent a bound object."""
@@ -315,10 +321,12 @@ class HatracVersions (object):
     def __init__(self, objresource):
         self.object = objresource
 
+    def asurl(self):
+        return self.object.asurl()
+
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner', 'ancestor_owner'], client_context)
-        uris = [ r.asurl() for r in self.object.directory.object_enumerate_versions(self.object) ]
-        return negotiated_uri_list(uris)
+        return negotiated_uri_list(self, self.object.directory.object_enumerate_versions(self.object))
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
@@ -369,13 +377,15 @@ class HatracUploads (object):
     def __init__(self, objresource):
         self.object = objresource
 
+    def asurl(self):
+        return self.object.asurl()
+
     def create_version_upload_job(self, *args):
         return self.object.create_version_upload_job(*args)
 
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner'], client_context)
-        uris = [ r.asurl() for r in self.object.directory.namespace_enumerate_uploads(self.object) ]
-        return negotiated_uri_list(uris)
+        return negotiated_uri_list(self, self.object.directory.namespace_enumerate_uploads(self.object))
 
 class HatracUpload (HatracName):
     """Represent an upload job."""
