@@ -816,7 +816,7 @@ each resource type is:
 - Namespace
   - `owner`: lists roles considered to be owners of the namespace.
   - `create`: lists roles permitted to create new children in the namespace.
-  - `subtree-owner`: lists roles considered to be owners of the namespace or any namespace, object, or object version beneath the namespace.
+  - `subtree-owner`: lists roles considered to be owners of any namespace, object, or object version beneath the namespace.
   - `subtree-create`: lists roles permitted to create new children of the namespace or of any namespace beneath the namespace.
   - `subtree-update`: lists roles permitted to update data on any object beneath the namespace.
   - `subtree-read`: lists roles permitted to read any object version beneath the namespace.
