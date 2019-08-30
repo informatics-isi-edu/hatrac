@@ -127,7 +127,7 @@ def negotiated_uri_list(parent, resources, metadata={}):
         ['application/json', 'text/uri-list', 'text/html'],
         'application/json'
     )
-    uris = [r.asurl() for r in resources]
+    uris = sorted([r.asurl() for r in resources])
     if metadata['content-type'] == 'text/uri-list':
         body = '\n'.join(uris) + '\n'
     elif metadata['content-type'] == 'text/html':
