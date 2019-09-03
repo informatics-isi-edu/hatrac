@@ -511,49 +511,57 @@ class connection (psycopg2.extensions.connection):
           SELECT n.name, n.pid, n.ancestors, n.subtype, n.update, n."subtree-owner", n."subtree-read", v.*, %(owner_acl)s, %(read_acl)s
           FROM hatrac.name n
           JOIN hatrac.version v ON (v.nameid = n.id)
-          WHERE v.nameid = $1 AND NOT v.is_deleted ;
+          WHERE v.nameid = $1 AND NOT v.is_deleted
+          ORDER BY n.id, v.id ;
 
         PREPARE hatrac_namepattern_enumerate_versions (text) AS
           SELECT n.name, n.pid, n.ancestors, n.subtype, n.update, n."subtree-owner", n."subtree-read", v.*, %(owner_acl)s, %(read_acl)s
           FROM hatrac.name n
           JOIN hatrac.version v ON (v.nameid = n.id)
-          WHERE n.name ~ $1 AND NOT v.is_deleted ;
+          WHERE n.name ~ $1 AND NOT v.is_deleted
+          ORDER BY n.name, v.id ;
 
         PREPARE hatrac_namespace_children_noacl (int8) AS
           SELECT n.*
           FROM hatrac.name p
           JOIN hatrac.name n ON (n.pid = p.id)
-          WHERE p.id = $1 AND NOT n.is_deleted ;
+          WHERE p.id = $1 AND NOT n.is_deleted
+          ORDER BY n.name ;
 
         PREPARE hatrac_namespace_children_acl (int8) AS
           SELECT n.*, %(owner_acl)s, %(update_acl)s, %(read_acl)s, %(create_acl)s
           FROM hatrac.name p
           JOIN hatrac.name n ON (n.pid = p.id)
-          WHERE p.id = $1 AND NOT n.is_deleted ;
+          WHERE p.id = $1 AND NOT n.is_deleted
+          ORDER BY n.name ;
 
         PREPARE hatrac_namespace_subtree_noacl (int8) AS
           SELECT n.*
           FROM hatrac.name p
           JOIN hatrac.name n ON (p.id = ANY( n.ancestors ))
-          WHERE p.id = $1 AND NOT n.is_deleted ;
+          WHERE p.id = $1 AND NOT n.is_deleted
+          ORDER BY n.name ;
 
         PREPARE hatrac_namespace_subtree_acl (int8) AS
           SELECT n.*, %(owner_acl)s, %(update_acl)s, %(read_acl)s, %(create_acl)s
           FROM hatrac.name p
           JOIN hatrac.name n ON (p.id = ANY( n.ancestors ))
-          WHERE p.id = $1 AND NOT n.is_deleted ;
+          WHERE p.id = $1 AND NOT n.is_deleted
+          ORDER BY n.name ;
 
         PREPARE hatrac_object_uploads (int8) AS 
           SELECT u.*, n.name, n.pid, n.ancestors, %(owner_acl)s
           FROM hatrac.name n
           JOIN hatrac.upload u ON (u.nameid = n.id)
-          WHERE n.id = $1 ;
+          WHERE n.id = $1
+          ORDER BY u.id ;
 
         PREPARE hatrac_namespace_uploads (int8) AS
           SELECT u.*, n.name, n.pid, n.ancestors, %(owner_acl)s
           FROM hatrac.name n
           JOIN hatrac.upload u ON (u.nameid = n.id)
-          WHERE $1 = ANY (n.ancestors);
+          WHERE $1 = ANY (n.ancestors)
+          ORDER BY n.name, u.id ;
 
 """ % dict(
     owner_acl=ancestor_acl_sql('owner'),
