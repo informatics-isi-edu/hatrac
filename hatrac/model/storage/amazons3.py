@@ -3,7 +3,7 @@
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-"""Filesystem-backed object bulk storage for Hatrac.
+"""AmazonS3-backed object bulk storage for Hatrac.
 
 This module handles only low-level byte storage. Object and
 object-version lifecycle and authorization is handled by the caller.
@@ -16,7 +16,7 @@ from botocore.exceptions import ClientError
 from hatrac.core import NotFound, BadRequest, coalesce
 import binascii
 import base64
-from hatrac.rest.core import request_trace
+import web
 
 
 class PooledS3BucketConnection (PooledConnection):
@@ -56,7 +56,8 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
                     return orig_method(*args, **kwargs1)
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
                 except ClientError as s3_error:
-                    request_trace("S3 client error: %s" % s3_error)
+                    if web.ctx.hatrac_request_trace:
+                        web.ctx.hatrac_request_trace("S3 client error: %s" % s3_error)
                     raise BadRequest(s3_error)
                 except Exception:
                     s3_session = None
@@ -95,7 +96,7 @@ class HatracStorage (PooledS3BucketConnection):
     def _map_name(self, name):
         object_name = name.lstrip("/")
         path_root = object_name.split("/")[0].strip() if "/" in object_name else "/"
-        bucket = self.s3_buckets.get(path_root)
+        bucket = self.s3_buckets.get(path_root, self.s3_buckets.get("/"))
         if not bucket:
             raise NotFound("Could not find a bucket mapping for path: %s" % name)
         bucket_name = bucket.get("bucket_name")
@@ -120,7 +121,7 @@ class HatracStorage (PooledS3BucketConnection):
             response = s3_obj.put(Body=inp,
                                   ContentType=content_type,
                                   ContentLength=content_length,
-                                  ContentMD5=md5[1])
+                                  ContentMD5=md5[1].decode())
             return response['VersionId']
 
         return self._send_content_from_stream(input, nbytes, metadata, helper)
@@ -191,7 +192,8 @@ class HatracStorage (PooledS3BucketConnection):
                     yield chunk
             except Exception as ev:
                 session = None
-                request_trace("S3 read error: %s" % ev)
+                if web.ctx.hatrac_request_trace:
+                    web.ctx.hatrac_request_trace("S3 read error: %s" % ev)
             finally:
                 if session:
                     self._put_pooled_connection(session)
