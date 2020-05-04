@@ -41,6 +41,7 @@ version of any particular object.
 import os
 import sys
 import web
+import json
 import urllib
 import binascii
 import base64
@@ -1316,7 +1317,7 @@ RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS
         sql_fields = dict(
             uploadid=sql_literal(upload.id),
             position=sql_literal(int(position)),
-            aux=sql_literal(jsonWriter(aux))
+            aux=sql_literal(json.dumps(aux, ensure_ascii=False))
         )
         
         try:
