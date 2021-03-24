@@ -13,7 +13,7 @@ model with:
 
 ## Status
 
-[![Build Status](https://travis-ci.org/informatics-isi-edu/hatrac.svg)](https://travis-ci.org/informatics-isi-edu/hatrac)
+[![Build Status](https://github.com/informatics-isi-edu/hatrac/actions/workflows/main.yml/badge.svg)](https://github.com/informatics-isi-edu/hatrac/actions/workflows/main.yml)
 
 Hatrac is research software but runs in production for several
 informatics projects using the filesystem storage backend. It is
