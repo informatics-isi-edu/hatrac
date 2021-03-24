@@ -13,7 +13,7 @@ jobs:
   install-and-test:
     runs-on: ubuntu-20.04
     env:
-      COOKIES: ~/cookies
+      COOKIES: /home/runner/cookies
       VERBOSE: brief
       TEST_SSL_VERIFY: false
       HTTPD_ERROR_LOG: /var/log/apache2/error.log
@@ -76,7 +76,7 @@ jobs:
           sudo -H -u webauthn webauthn2-manage addattr admin
           sudo -H -u webauthn webauthn2-manage assign test1 admin
           sudo service apache2 restart
-          curl --fail -k -b $COOKIES -c $COOKIES -d username=test1 -d password=dummypassword https://${HOSTNAME}/authn/session
+          curl --fail -k -b ${COOKIES} -c ${COOKIES} -d username=test1 -d password=dummypassword https://${HOSTNAME}/authn/session
           bash ./test/rest-smoketest.sh
       - name: Check on test cases
         if: always() && steps.hatrac-test.outcome != 'success'
