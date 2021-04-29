@@ -4,25 +4,26 @@
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-from distutils.core import setup
+from setuptools import setup
 
 setup(
     name="hatrac",
     description="simple object storage service",
-    version="0.1-prerelease",
-    packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage","hatrac.rest"],
-    package_data={'hatrac':["*.wsgi"]},
+    version="0.2",
+    packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage", "hatrac.rest"],
+    package_data={'hatrac': ["*.wsgi"]},
     scripts=["bin/hatrac-deploy"],
-    requires=["web", "psycopg2", "webauthn2"],
-    maintainer_email="support@misd.isi.edu",
+    requires=["web", "psycopg2", "webauthn2", "boto3", "botocore"],
+    maintainer_email="isrd-support@isi.edu",
     license='Apache 2.0',
     classifiers=[
-        'Development Status :: 3 - Alpha',
         'Intended Audience :: Science/Research',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: POSIX',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 2.6',
-        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9'
     ])
