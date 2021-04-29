@@ -60,7 +60,7 @@ before_install:
   - cd ../hatrac
 
 install:
-  - sudo python3 ./setup.py install
+  - sudo pip3 install .
   - sudo useradd -m -r hatrac
   - sudo -H -u postgres createuser -d hatrac
   - sudo -H -u postgres psql -c "GRANT webauthn TO hatrac"
