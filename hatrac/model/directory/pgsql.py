@@ -343,6 +343,7 @@ class HatracObjectVersion (HatracName):
         self.object = object
         self.version = args['version']
         self.nbytes = args['nbytes']
+        self.aux = args['aux']
 
     def __str__(self):
         return '%s:%s' % (self.object, self.version)
@@ -714,11 +715,26 @@ CREATE TABLE IF NOT EXISTS hatrac.version (
   is_deleted bool NOT NULL,
   owner text[],
   read text[],
+  aux json,
   UNIQUE(nameid, version),
   CHECK(version IS NOT NULL OR is_deleted)
 );
 
 CREATE INDEX IF NOT EXISTS version_nameid_id_idx ON hatrac.version (nameid, id);
+
+DO $aux_upgrade$
+BEGIN
+  IF (SELECT True FROM information_schema.columns
+      WHERE table_schema = 'hatrac'
+        AND table_name = 'version'
+        AND column_name = 'aux') THEN
+     -- do nothing
+  ELSE
+     ALTER TABLE hatrac.version ADD COLUMN aux json;
+  END IF;
+END;
+$aux_upgrade$ LANGUAGE plpgsql;
+
 """
 
 _upload_table_sql = """
@@ -994,7 +1010,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             for res in deleted_uploads:
                 self.storage.cancel_upload(res.name, res.job)
             for res in deleted_versions:
-                self.storage.delete(res.name, res.version)
+                self.storage.delete(res.name, res.version, aux=res.aux)
             for res in deleted_names:
                 self.storage.delete_namespace(res.name)
 
@@ -1004,7 +1020,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     def delete_version(self, resource, client_context, conn=None, cur=None):
         """Delete an existing version."""
         self._delete_version(conn, cur, resource)
-        return lambda : self.storage.delete(resource.name, resource.version)
+        return lambda : self.storage.delete(resource.name, resource.version, aux=resource.aux)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version(self, object, client_context, nbytes=None, metadata={}, conn=None, cur=None):
@@ -1085,7 +1101,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         if objversion.is_deleted:
             raise core.NotFound('Resource %s is not available.' % objversion)
         if get_data:
-            nbytes, metadata, data = self.storage.get_content_range(object.name, objversion.version, objversion.metadata, get_slice)
+            nbytes, metadata, data = self.storage.get_content_range(object.name, objversion.version, objversion.metadata, get_slice, objversion.aux)
         else:
             nbytes = objversion.nbytes
             metadata = objversion.metadata

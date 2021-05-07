@@ -159,11 +159,11 @@ class HatracStorage (PooledS3BucketConnection):
 
         return sendfunc(inp, nbytes, md5, content_type=content_type)
 
-    def get_content(self, name, version, metadata={}):
-        return self.get_content_range(name, version, metadata, None)
+    def get_content(self, name, version, metadata={}, aux={}):
+        return self.get_content_range(name, version, metadata, None, aux=aux)
      
     @s3_bucket_wrap(deferred_conn_reuse=True)
-    def get_content_range(self, name, version, metadata={}, get_slice=None, s3_session=None):
+    def get_content_range(self, name, version, metadata={}, get_slice=None, s3_session=None, aux={}):
         bucket_name, object_name = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
@@ -201,7 +201,7 @@ class HatracStorage (PooledS3BucketConnection):
         return length, metadata, data_generator(s3_session)
 
     @s3_bucket_wrap()
-    def delete(self, name, version, s3_session=None):
+    def delete(self, name, version, s3_session=None, aux={}):
         """Delete object version."""
         bucket_name, object_name = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
