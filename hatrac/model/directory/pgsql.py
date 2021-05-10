@@ -343,7 +343,7 @@ class HatracObjectVersion (HatracName):
         self.object = object
         self.version = args['version']
         self.nbytes = args['nbytes']
-        self.aux = args['aux']
+        self.aux = args['aux'] or {}
 
     def __str__(self):
         return '%s:%s' % (self.object, self.version)
