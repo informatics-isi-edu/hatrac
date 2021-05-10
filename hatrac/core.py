@@ -124,7 +124,7 @@ def _test_content_disposition(orig):
 class MetadataValue (str):
     def is_object(self):
         return False
-    
+
     def get_content(self, client_context, get_data=True):
         self.container.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
         body = self + '\n'
@@ -281,5 +281,14 @@ class Metadata (dict):
     def pop(self, k):
         k = k.lower()
         return dict.pop(self, k)
-        
-        
+
+
+class Redirect(object):
+    def __init__(self, url):
+        assert url
+        self.redirect_url = url
+
+    @property
+    def url(self):
+        return self.redirect_url
+

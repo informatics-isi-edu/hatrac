@@ -54,7 +54,7 @@ from psycopg2.extras import DictCursor
 
 from webauthn2.util import jsonWriter, negotiated_content_type
 
-from ...core import coalesce, Metadata, sql_literal, sql_identifier
+from ...core import coalesce, Metadata, sql_literal, sql_identifier, Redirect
 from ... import core
 
 def regexp_escape(s):
@@ -363,9 +363,15 @@ class HatracObjectVersion (HatracName):
         return True
 
     def get_content(self, client_context, get_data=True):
+        aux_url = self.aux.get("url")
+        if aux_url:
+            return Redirect(aux_url)
         return self.directory.get_version_content(self.object, self, client_context, get_data)
 
     def get_content_range(self, client_context, get_slice=None, get_data=True):
+        aux_url = self.aux.get("url")
+        if aux_url:
+            return Redirect(aux_url)
         return self.directory.get_version_content_range(self.object, self, get_slice, client_context, get_data)
 
     def delete(self, client_context):

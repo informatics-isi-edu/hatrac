@@ -19,7 +19,7 @@ import base64
 import web
 
 
-class PooledS3BucketConnection (PooledConnection):
+class PooledS3BucketConnection(PooledConnection):
 
     def __init__(self, config):
         """Represent a pool of S3 connections.
@@ -44,6 +44,7 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
     """Decorate a method with S3 session access.
 
     """
+
     def decorator(orig_method):
         def wrapper(*args, **kwargs):
             self = args[0]
@@ -65,11 +66,13 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
             finally:
                 if s3_session and not deferred_conn_reuse:
                     self._put_pooled_connection(s3_session)
+
         return wrapper
+
     return decorator
 
 
-class HatracStorage (PooledS3BucketConnection):
+class HatracStorage(PooledS3BucketConnection):
     """Implement HatracStorage API using an S3 bucket.
 
        A configured storage bucket, object name, and object version
@@ -84,7 +87,7 @@ class HatracStorage (PooledS3BucketConnection):
     """
     track_chunks = True
 
-    _bufsize = 1024**2
+    _bufsize = 1024 ** 2
 
     def __init__(self, config):
         """Represents an Hatrac storage interface backed by an S3 bucket.
@@ -117,10 +120,11 @@ class HatracStorage (PooledS3BucketConnection):
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
 
-        def helper(inp, content_length, md5, content_type):
+        def helper(inp, content_length, md5, content_type, content_disposition=None):
             response = s3_obj.put(Body=inp,
                                   ContentType=content_type,
                                   ContentLength=content_length,
+                                  ContentDisposition=content_disposition,
                                   ContentMD5=md5[1].decode())
             return response['VersionId']
 
@@ -129,6 +133,7 @@ class HatracStorage (PooledS3BucketConnection):
     def _send_content_from_stream(self, input, nbytes, metadata, sendfunc):
         """Common file-sending logic to talk to S3."""
         content_type = metadata.get('content-type', 'application/octet-stream')
+        content_disposition = metadata.get('content-disposition')
         if 'content-md5' in metadata:
             content_md5 = metadata['content-md5']
             md5 = (binascii.hexlify(content_md5), base64.b64encode(content_md5))
@@ -157,7 +162,7 @@ class HatracStorage (PooledS3BucketConnection):
             tmpf.seek(0)
             inp = tmpf
 
-        return sendfunc(inp, nbytes, md5, content_type=content_type)
+        return sendfunc(inp, nbytes, md5, content_type=content_type, content_disposition=content_disposition)
 
     def get_content(self, name, version, metadata={}, aux={}):
         return self.get_content_range(name, version, metadata, None, aux=aux)
@@ -167,16 +172,17 @@ class HatracStorage (PooledS3BucketConnection):
         bucket_name, object_name = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
-        s3_obj.VersionId = version.strip()
+        s3_version = aux.get("version")
+        s3_obj.VersionId = version.strip() if not s3_version else s3_version.strip()
         nbytes = s3_obj.content_length
-        
+
         if get_slice is not None:
             pos = coalesce(get_slice.start, 0)
             limit = coalesce(get_slice.stop, nbytes)
         else:
             pos = 0
             limit = nbytes
-        
+
         if pos != 0 or limit != nbytes:
             content_range = 'bytes=%d-%d' % (pos, limit)
         else:
@@ -206,7 +212,8 @@ class HatracStorage (PooledS3BucketConnection):
         bucket_name, object_name = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
-        s3_obj.VersionId = version.strip()
+        s3_version = aux.get("version")
+        s3_obj.VersionId = version.strip() if not s3_version else s3_version.strip()
         s3_obj.delete()
 
     @s3_bucket_wrap()
@@ -215,7 +222,8 @@ class HatracStorage (PooledS3BucketConnection):
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.initiate_multipart_upload(
-            ContentType=metadata.get('content-type', 'application/octet-stream'))
+            ContentType=metadata.get('content-type', 'application/octet-stream'),
+            ContentDisposition=metadata.get('content-disposition'))
         return s3_upload.id
 
     @s3_bucket_wrap()
@@ -225,13 +233,13 @@ class HatracStorage (PooledS3BucketConnection):
         s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.MultipartUpload(upload_id)
 
-        def helper(input, nbytes, md5, content_type=None):
+        def helper(input, nbytes, md5, content_type=None, content_disposition=None):
             part = s3_upload.Part(position + 1)
             response = part.upload(Body=input, ContentLength=nbytes)
             return dict(etag=response['ETag'])
-        
+
         return self._send_content_from_stream(input, nbytes, metadata, helper)
-              
+
     @s3_bucket_wrap()
     def cancel_upload(self, name, upload_id, s3_session=None):
         bucket_name, object_name = self._map_name(name)
@@ -260,7 +268,7 @@ class HatracStorage (PooledS3BucketConnection):
 
 
 class InputWrapper:
-    """Input stream file-like wrapper for uploading data to S3. 
+    """Input stream file-like wrapper for uploading data to S3.
 
     This module wraps mod_wsgi_input providing implementations of
     seek and tell that are used by boto (but not relied upon)
@@ -280,15 +288,15 @@ class InputWrapper:
         return self._mod_wsgi_input.read(size)
 
     def tell(self):
-        if self.reading_started: 
+        if self.reading_started:
             raise Exception("Stream reading started")
-        
+
         return self.current_position
 
     def seek(self, offset, whence=0):
-        if self.reading_started: 
+        if self.reading_started:
             raise Exception("Stream reading started")
-        
+
         if whence == 0:
             if offset > self.nbytes or offset < 0:
                 raise IOError("Can't seek beyond stream length")
@@ -301,6 +309,6 @@ class InputWrapper:
             if offset > 0 or self.nbytes + offset < 0:
                 raise IOError("Can't seek beyond stream length")
             self.current_position = self.nbytes + offset
-             
+
     def name(self):
         return self._mod_wsgi_input.name()

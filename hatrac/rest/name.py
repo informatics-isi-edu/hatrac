@@ -50,10 +50,13 @@ class NameVersion (RestHandler):
         self.http_check_preconditions()
         if self.get_body is False and resource.is_object():
             web.header("Accept-Ranges", "bytes")
-        return self.get_content(
+        response = self.get_content(
             resource,
             web.ctx.webauthn2_context
         )
+        if isinstance(response, core.Redirect):
+            return self.redirect_response(response)
+        return response
 
 @web_url([
      # path, name, querystr
@@ -211,8 +214,11 @@ class Name (RestHandler):
         self.http_check_preconditions()
         if self.get_body is False and resource.is_object():
             web.header("Accept-Ranges", "bytes")
-        return self.get_content(
+        response = self.get_content(
             resource,
             web.ctx.webauthn2_context
         )
+        if isinstance(response, core.Redirect):
+            return self.redirect_response(response)
+        return response
 

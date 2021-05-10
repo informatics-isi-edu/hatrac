@@ -535,6 +535,21 @@ class RestHandler (object):
         web.ctx.hatrac_content_type = 'none'
         return ''
 
+    def redirect_response(self, redirect):
+        """Form response for redirect."""
+        assert isinstance(redirect, core.Redirect)
+        web.header('Location', redirect.url)
+        web.ctx.status = '303 See Other'
+        content_type = 'text/uri-list'
+        web.header('Content-Type', content_type)
+        web.ctx.hatrac_content_type = content_type
+        body = redirect.url + '\n'
+        nbytes = len(body)
+        web.header('Content-Length', nbytes)
+        web.ctx.hatrac_request_content_range = '*/%d' % nbytes
+        return body
+
+
     @web_method()
     def GET(self, *args):
         """Get resource."""
