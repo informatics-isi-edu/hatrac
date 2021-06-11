@@ -11,7 +11,8 @@
 import web
 
 from .. import core
-from .core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, hash_list
+from .core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, \
+    PayloadTooLarge, hash_list
 
 @web_url([
      # path, name, version, querystr
@@ -151,6 +152,9 @@ class Name (RestHandler):
                 nbytes = int(web.ctx.env['CONTENT_LENGTH'])
             except:
                 raise LengthRequired()
+
+            if nbytes > core.config.get("max_request_payload_size", core.max_request_payload_size_default):
+                raise PayloadTooLarge()
 
             metadata = { 'content-type': in_content_type }
             

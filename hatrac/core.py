@@ -21,6 +21,9 @@ config = merge_config(
     jsonFileName='hatrac_config.json'
 )
 
+max_request_payload_size_default = 1024 * 1024 * 128  # ~135MB
+
+
 def coalesce(*args):
     for arg in args:
         if arg is not None:

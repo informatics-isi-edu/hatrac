@@ -365,13 +365,17 @@ class HatracObjectVersion (HatracName):
     def get_content(self, client_context, get_data=True):
         aux_url = self.aux.get("url")
         if aux_url:
-            return Redirect(aux_url)
+            nbytes, metadata, data = self.directory.get_version_content(
+                self.object, self, client_context, False)
+            return nbytes, metadata, Redirect(aux_url)
         return self.directory.get_version_content(self.object, self, client_context, get_data)
 
     def get_content_range(self, client_context, get_slice=None, get_data=True):
         aux_url = self.aux.get("url")
         if aux_url:
-            return Redirect(aux_url)
+            nbytes, metadata, data = self.directory.get_version_content_range(
+                self.object, self, get_slice, client_context, False)
+            return nbytes, metadata, Redirect(aux_url)
         return self.directory.get_version_content_range(self.object, self, get_slice, client_context, get_data)
 
     def delete(self, client_context):
@@ -571,6 +575,38 @@ class connection (psycopg2.extensions.connection):
           WHERE $1 = ANY (n.ancestors)
           ORDER BY n.name, u.id ;
 
+        PREPARE hatrac_version_aux_url_update (int8, text) AS
+          UPDATE hatrac.version v 
+          SET aux = ('{"url":"' || $2 || n2.name || ':' || n2.version || '"}')::jsonb
+          FROM (
+          SELECT v.nameid, v.version, v.id as vid, n.id, n.name
+            FROM hatrac.name n
+            JOIN hatrac.version v ON (v.nameid = n.id)
+            WHERE v.nameid = $1
+          ) n2
+          WHERE v.nameid = n2.id and v.id = n2.vid;
+
+        PREPARE hatrac_version_aux_url_bulk_update (text) AS
+          UPDATE hatrac.version v 
+          SET aux = ('{"url":"' || $1 || n2.name || ':' || n2.version || '"}')::jsonb
+          FROM (
+          SELECT v.nameid, v.version, v.id as vid, n.id, n.name
+            FROM hatrac.name n
+            JOIN hatrac.version v ON (v.nameid = n.id)
+          ) n2
+          WHERE v.nameid = n2.id and v.id = n2.vid;
+
+        PREPARE hatrac_version_aux_url_delete (int8) AS 
+          UPDATE hatrac.version
+          SET aux = aux::jsonb - 'url' 
+          WHERE id = $1 ;
+
+        PREPARE hatrac_version_aux_version_update (int8, text) AS 
+          UPDATE hatrac.version
+          SET aux = CASE WHEN $2 IS NOT NULL THEN 
+          ('{"version":"' || $2 || '"}')::jsonb ELSE aux::jsonb - 'version' END
+          WHERE id = $1 ;
+
 """ % dict(
     owner_acl=ancestor_acl_sql('owner'),
     update_acl=ancestor_acl_sql('update'),
@@ -755,6 +791,19 @@ CREATE TABLE IF NOT EXISTS hatrac.upload (
   UNIQUE(nameid, job),
   CHECK(chunksize > 0)
 );
+
+DO $created_on_upgrade$
+BEGIN
+  IF (SELECT True FROM information_schema.columns
+      WHERE table_schema = 'hatrac'
+        AND table_name = 'upload'
+        AND column_name = 'created_on') THEN
+     -- do nothing
+  ELSE
+     ALTER TABLE hatrac.upload ADD COLUMN IF NOT EXISTS created_on timestamptz DEFAULT (now());
+  END IF;
+END;
+$created_on_upgrade$ LANGUAGE plpgsql;
 """
 
 _chunk_table_sql = """
@@ -1047,6 +1096,22 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         version = self.storage.create_from_file(object.name, input, nbytes, metadata)
         self.pc.perform(lambda conn, cur: self._complete_version(conn, cur, resource, version))
         return self.version_resolve(object, version)
+
+    @db_wrap()
+    def version_aux_version_update(self, resource, version, client_context=None, conn=None, cur=None):
+        self._hatrac_version_aux_version_update(conn, cur, resource, version)
+
+    @db_wrap()
+    def version_aux_url_update(self, resource, url_prefix, client_context=None, conn=None, cur=None):
+        self._hatrac_version_aux_url_update(conn, cur, resource, url_prefix)
+
+    @db_wrap()
+    def version_aux_url_bulk_update(self, url_prefix, client_context=None, conn=None, cur=None):
+        self._hatrac_version_aux_url_bulk_update(conn, cur, url_prefix)
+
+    @db_wrap()
+    def version_aux_url_delete(self, resource, client_context=None, conn=None, cur=None):
+        self._hatrac_version_aux_url_delete(conn, cur, resource)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
@@ -1464,3 +1529,17 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(int(resource.id))
         ))
         return list(cur)
+
+    def _hatrac_version_aux_url_update(self, conn, cur, resource, url_prefix):
+        cur.execute("EXECUTE hatrac_version_aux_url_update(%s, %s);" %
+                    (sql_literal(resource.id), sql_literal(url_prefix)))
+
+    def _hatrac_version_aux_url_bulk_update(self, conn, cur, url_prefix):
+        cur.execute("EXECUTE hatrac_version_aux_url_bulk_update(%s);" % sql_literal(url_prefix))
+
+    def _hatrac_version_aux_url_delete(self, conn, cur, resource):
+        cur.execute("EXECUTE hatrac_version_aux_url_delete(%s);" % (sql_literal(resource.id)))
+
+    def _hatrac_version_aux_version_update(self, conn, cur, resource, version):
+        cur.execute("EXECUTE hatrac_version_aux_version_update(%s, %s);" %
+                    (sql_literal(resource.id), sql_literal(version)))

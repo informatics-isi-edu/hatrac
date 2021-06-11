@@ -10,7 +10,8 @@ import web
 from webauthn2.util import jsonReader
 
 from .. import core
-from .core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, LengthRequired
+from .core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, LengthRequired, \
+    PayloadTooLarge
 
 @web_url([
     # path, name, job, chunk, querystr
@@ -37,6 +38,9 @@ class ObjectTransferChunk (RestHandler):
             nbytes = int(web.ctx.env['CONTENT_LENGTH'])
         except:
             raise LengthRequired()
+
+        if nbytes > core.config.get("max_request_payload_size", core.max_request_payload_size_default):
+            raise PayloadTooLarge()
 
         metadata = {}
 

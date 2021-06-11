@@ -9,14 +9,14 @@ This module handles only low-level byte storage. Object and
 object-version lifecycle and authorization is handled by the caller.
 
 """
-import tempfile
-from webauthn2.util import PooledConnection
-import boto3
-from botocore.exceptions import ClientError
-from hatrac.core import NotFound, BadRequest, coalesce
-import binascii
 import base64
+import binascii
+import boto3
 import web
+from io import BufferedRandom, BytesIO
+from webauthn2.util import PooledConnection
+from botocore.exceptions import ClientError
+from hatrac.core import NotFound, BadRequest, coalesce, max_request_payload_size_default, Redirect
 
 
 class PooledS3BucketConnection(PooledConnection):
@@ -25,6 +25,7 @@ class PooledS3BucketConnection(PooledConnection):
         """Represent a pool of S3 connections.
 
         """
+        self.config = config
         self.s3_config = config['s3_config']
         self.s3_session = self.s3_config.get('session', dict())
         self.s3_buckets = self.s3_config.get("buckets", dict())
@@ -57,7 +58,7 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
                     return orig_method(*args, **kwargs1)
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
                 except ClientError as s3_error:
-                    if web.ctx.hatrac_request_trace:
+                    if "hatrac_request_trace" in web.ctx:
                         web.ctx.hatrac_request_trace("S3 client error: %s" % s3_error)
                     raise BadRequest(s3_error)
                 except Exception:
@@ -87,7 +88,7 @@ class HatracStorage(PooledS3BucketConnection):
     """
     track_chunks = True
 
-    _bufsize = 1024 ** 2
+    _bufsize = 1024 ** 2 * 10
 
     def __init__(self, config):
         """Represents an Hatrac storage interface backed by an S3 bucket.
@@ -111,12 +112,17 @@ class HatracStorage(PooledS3BucketConnection):
                 prefix += "/"
             object_name = "%s%s" % (prefix, object_name)
 
-        return bucket_name, object_name
+        region_name = bucket.get("region_name")
+        if region_name and not bucket.get("client"):
+            # this client object is used for signing URLs because that operation is directly coupled to bucket region
+            bucket["client"] = boto3.client("s3", region_name)
+
+        return bucket_name, object_name, bucket
 
     @s3_bucket_wrap()
     def create_from_file(self, name, input, nbytes, metadata={}, s3_session=None):
         """Create an entire file-version object from input content, returning version ID."""
-        bucket_name, object_name = self._map_name(name)
+        bucket_name, object_name, bucket_config = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
 
@@ -124,26 +130,25 @@ class HatracStorage(PooledS3BucketConnection):
             response = s3_obj.put(Body=inp,
                                   ContentType=content_type,
                                   ContentLength=content_length,
-                                  ContentDisposition=content_disposition,
-                                  ContentMD5=md5[1].decode())
+                                  ContentDisposition=content_disposition or "",
+                                  ContentMD5=md5[1].decode() if md5 else "")
             return response['VersionId']
 
         return self._send_content_from_stream(input, nbytes, metadata, helper)
 
-    def _send_content_from_stream(self, input, nbytes, metadata, sendfunc):
+    def _send_content_from_stream(self, input, nbytes, metadata, sendfunc, chunksize=None):
         """Common file-sending logic to talk to S3."""
         content_type = metadata.get('content-type', 'application/octet-stream')
         content_disposition = metadata.get('content-disposition')
+        md5 = None
         if 'content-md5' in metadata:
             content_md5 = metadata['content-md5']
             md5 = (binascii.hexlify(content_md5), base64.b64encode(content_md5))
-            inp = InputWrapper(input, nbytes)
-        else:
-            # let S3 backend use a temporary file to rewind and calculate MD5 if needed
-            tmpf = tempfile.TemporaryFile()
-            md5 = None
 
-            rbytes = 0
+        rbytes = 0
+        rbuf = BufferedRandom(
+            BytesIO(), chunksize or self.config.get("max_request_payload_size", max_request_payload_size_default))
+        try:
             while True:
                 if nbytes is not None:
                     buf = input.read(min(self._bufsize, nbytes - rbytes))
@@ -152,29 +157,51 @@ class HatracStorage(PooledS3BucketConnection):
 
                 blen = len(buf)
                 rbytes += blen
-                tmpf.write(buf)
+                rbuf.write(buf)
 
                 if blen == 0:
                     if nbytes is not None and rbytes < nbytes:
                         raise IOError('received %d of %d expected bytes' % (rbytes, nbytes))
                     break
-
-            tmpf.seek(0)
-            inp = tmpf
-
-        return sendfunc(inp, nbytes, md5, content_type=content_type, content_disposition=content_disposition)
+            rbuf.seek(0)
+            return sendfunc(rbuf, nbytes, md5, content_type=content_type, content_disposition=content_disposition)
+        finally:
+            if rbuf:
+                rbuf.close()
 
     def get_content(self, name, version, metadata={}, aux={}):
         return self.get_content_range(name, version, metadata, None, aux=aux)
      
     @s3_bucket_wrap(deferred_conn_reuse=True)
-    def get_content_range(self, name, version, metadata={}, get_slice=None, s3_session=None, aux={}):
-        bucket_name, object_name = self._map_name(name)
+    def get_content_range(self, name, version, metadata={}, get_slice=None, aux={}, s3_session=None):
+        bucket_name, object_name, bucket_config = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
         s3_version = aux.get("version")
         s3_obj.VersionId = version.strip() if not s3_version else s3_version.strip()
         nbytes = s3_obj.content_length
+
+        over_threshold = False
+        presigned_url_threshold = bucket_config.get("presigned_url_threshold")
+        if isinstance(presigned_url_threshold, int) and presigned_url_threshold > 0:
+            if nbytes > presigned_url_threshold:
+                over_threshold = True
+
+        if over_threshold and not get_slice:
+            client = bucket_config.get("client")
+            if not client:
+                client = s3_session.meta.client
+            url = client.generate_presigned_url(
+                ClientMethod='get_object',
+                ExpiresIn=300,
+                Params={
+                    'Bucket': bucket_name,
+                    'Key': object_name,
+                    'VersionId': s3_obj.VersionId
+                }
+            )
+            response = Redirect(url)
+            return nbytes, metadata, response
 
         if get_slice is not None:
             pos = coalesce(get_slice.start, 0)
@@ -190,7 +217,7 @@ class HatracStorage(PooledS3BucketConnection):
 
         length = limit - pos
 
-        response = s3_obj.get(Range=content_range, VersionId=version)
+        response = s3_obj.get(Range=content_range, VersionId=s3_obj.VersionId)
 
         def data_generator(session):
             try:
@@ -198,7 +225,7 @@ class HatracStorage(PooledS3BucketConnection):
                     yield chunk
             except Exception as ev:
                 session = None
-                if web.ctx.hatrac_request_trace:
+                if "hatrac_request_trace" in web.ctx:
                     web.ctx.hatrac_request_trace("S3 read error: %s" % ev)
             finally:
                 if session:
@@ -207,9 +234,9 @@ class HatracStorage(PooledS3BucketConnection):
         return length, metadata, data_generator(s3_session)
 
     @s3_bucket_wrap()
-    def delete(self, name, version, s3_session=None, aux={}):
+    def delete(self, name, version, aux={}, s3_session=None):
         """Delete object version."""
-        bucket_name, object_name = self._map_name(name)
+        bucket_name, object_name, bucket_config = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
         s3_version = aux.get("version")
@@ -218,17 +245,17 @@ class HatracStorage(PooledS3BucketConnection):
 
     @s3_bucket_wrap()
     def create_upload(self, name, nbytes=None, metadata={}, s3_session=None):
-        bucket_name, object_name = self._map_name(name)
+        bucket_name, object_name, bucket_config = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.initiate_multipart_upload(
             ContentType=metadata.get('content-type', 'application/octet-stream'),
-            ContentDisposition=metadata.get('content-disposition'))
+            ContentDisposition=metadata.get('content-disposition', ''))
         return s3_upload.id
 
     @s3_bucket_wrap()
     def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes, metadata={}, s3_session=None):
-        bucket_name, object_name = self._map_name(name)
+        bucket_name, object_name, bucket_config = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.MultipartUpload(upload_id)
@@ -238,11 +265,11 @@ class HatracStorage(PooledS3BucketConnection):
             response = part.upload(Body=input, ContentLength=nbytes)
             return dict(etag=response['ETag'])
 
-        return self._send_content_from_stream(input, nbytes, metadata, helper)
+        return self._send_content_from_stream(input, nbytes, metadata, helper, chunksize)
 
     @s3_bucket_wrap()
     def cancel_upload(self, name, upload_id, s3_session=None):
-        bucket_name, object_name = self._map_name(name)
+        bucket_name, object_name, bucket_config = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.MultipartUpload(upload_id)
@@ -251,7 +278,7 @@ class HatracStorage(PooledS3BucketConnection):
 
     @s3_bucket_wrap()
     def finalize_upload(self, name, upload_id, chunk_data, metadata={}, s3_session=None):
-        bucket_name, object_name = self._map_name(name)
+        bucket_name, object_name, bucket_config = self._map_name(name)
         s3_bucket = s3_session.Bucket(bucket_name)
         s3_obj = s3_bucket.Object(object_name)
         s3_upload = s3_obj.MultipartUpload(upload_id)
@@ -265,50 +292,3 @@ class HatracStorage(PooledS3BucketConnection):
         """Tidy up after an empty namespace that has been deleted."""
         # nothing to do for S3 since namespaces are not explicit resources in bucket
         pass
-
-
-class InputWrapper:
-    """Input stream file-like wrapper for uploading data to S3.
-
-    This module wraps mod_wsgi_input providing implementations of
-    seek and tell that are used by boto (but not relied upon)
-
-    """
-
-    def __init__(self, ip, nbytes):
-        self._mod_wsgi_input = ip
-        self.nbytes = nbytes
-        self.reading_started = False
-        self.current_position = 0
-
-    def read(self, size=None):
-        if self.current_position != 0:
-            raise Exception("Stream seek position not at 0")
-        self.reading_started = True
-        return self._mod_wsgi_input.read(size)
-
-    def tell(self):
-        if self.reading_started:
-            raise Exception("Stream reading started")
-
-        return self.current_position
-
-    def seek(self, offset, whence=0):
-        if self.reading_started:
-            raise Exception("Stream reading started")
-
-        if whence == 0:
-            if offset > self.nbytes or offset < 0:
-                raise IOError("Can't seek beyond stream length")
-            self.current_position = offset
-        elif whence == 1:
-            if offset + self.current_position > self.nbytes or offset + self.current_position < 0:
-                raise IOError("Can't seek beyond stream length")
-            self.current_position = self.current_position + offset
-        else:
-            if offset > 0 or self.nbytes + offset < 0:
-                raise IOError("Can't seek beyond stream length")
-            self.current_position = self.nbytes + offset
-
-    def name(self):
-        return self._mod_wsgi_input.name()

@@ -9,6 +9,7 @@ import itertools
 import web
 import urllib
 
+import hatrac.core
 from . import core
 
 # these modify core.dispatch_rules
@@ -28,6 +29,9 @@ rules = [
     (re.compile(pattern + (pattern[-1] != '$' and '$' or '')), handler)
     for pattern, handler in rules
 ]
+
+read_only = hatrac.core.config.get("read_only", False)
+
 
 class Dispatcher (object):
     """Helper class to handle parser-based URL dispatch
@@ -68,12 +72,18 @@ class Dispatcher (object):
         return self.METHOD('GET')
         
     def PUT(self):
+        if read_only:
+            raise core.NoMethod("System is currently in read-only mode.")
         return self.METHOD('PUT')
 
     def DELETE(self):
+        if read_only:
+            raise core.NoMethod("System is currently in read-only mode.")
         return self.METHOD('DELETE')
 
     def POST(self):
+        if read_only:
+            raise core.NoMethod("System is currently in read-only mode.")
         return self.METHOD('POST')
 
 

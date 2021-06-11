@@ -1,0 +1,290 @@
+#!/usr/bin/python
+#
+# Copyright 2015-2021 University of Southern California
+# Distributed under the Apache License, Version 2.0. See LICENSE for more info.
+#
+import os
+import sys
+import datetime
+import shutil
+import argparse
+import base64
+import logging
+import traceback
+import requests
+from hatrac.core import config
+
+# do a run-time import of deriva-py so that we don't need to declare it as a formal dependency
+try:
+    from deriva.core import hatrac_store, format_exception, format_credential, get_transfer_summary, urlsplit, \
+        urlunsplit, make_dirs, BaseCLI, DEFAULT_CHUNK_SIZE
+    from deriva.core.utils import hash_utils
+except ModuleNotFoundError:
+    sys.stderr.write("Cannot import deriva.core python module. Ensure that deriva-py is installed.\n\n")
+    sys.exit(2)
+
+
+DESC = "DERIVA HATRAC Migration Tool"
+INFO = "For more information see: https://github.com/informatics-isi-edu/hatrac"
+VERSION = 0.1
+
+
+class HatracMigrateCLI (BaseCLI):
+    """Deriva Hatrac Migration Tool CLI.
+    """
+    cache_dir_name = "hatrac-migration-cache"
+
+    def __init__(self, description, epilog, version):
+        super(HatracMigrateCLI, self).__init__(description, epilog, version)
+        self.store = None
+        self.backend = None
+        self.credentials = None
+        self.path_prefix = "/hatrac"
+        self.cache_dir = "./%s" % self.cache_dir_name
+        self.headers = {'Connection': 'keep-alive'}
+        self.chunk_size = DEFAULT_CHUNK_SIZE
+        self.chunk_size_multiplier = 1
+
+        self.parser.add_argument("-l", "--link-redirects", action="store_true",
+                                 help="Set ALL object version redirect fields to: "
+                                 "{<host> + <path-prefix> + <existing object name>}")
+        self.parser.add_argument("-t", "--transfer-linked-redirects", action="store_true",
+                                 help="Transfer files that have linked redirects to this instance, "
+                                 "deleting link redirect on successful transfer completion.")
+        self.parser.add_argument("-p", "--path-prefix", metavar="</path>",
+                                 help="Base resource path prefix, defaults to '%s'" % self.path_prefix,
+                                 default=self.path_prefix)
+        self.parser.add_argument("-c", "--cache-dir", metavar="<path>",
+                                 help="Cache directory to use for transfers. Defaults to '%s'." % self.cache_dir)
+        self.parser.add_argument("-x", "--chunk-size-multiplier", metavar="<1-10>", type=int,
+                                 choices=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                                 help="Chunk size multiplier to use for chunked transfers. "
+                                      "Defaults to %dx of default chunk size %d bytes." %
+                                      (self.chunk_size_multiplier, self.chunk_size),
+                                 default=self.chunk_size_multiplier)
+
+    def transfer_linked_objects(self, directory):
+        objects = dict()
+        try:
+            root = directory.name_resolve("/")
+            names = directory.namespace_enumerate_names(root)
+            for name in names:
+                if name.is_object():
+                    versions = directory.object_enumerate_versions(name)
+                    for version in versions:
+                        url = version.aux.get("url")
+                        if url:
+                            objects[url] = version
+        except Exception as e:
+            raise RuntimeError(
+                "Exception while enumerating object versions from the database: %s" % format_exception(e))
+
+        for url, obj in objects.items():
+            logging.info("Attempting to transfer file(s)...")
+            if not self.store:
+                host = urlsplit(url)
+                self.store = hatrac_store.HatracStore(host.scheme, host.hostname, self.credentials)
+
+            # 1. GET the specified file from the remote hatrac system into the working cache.
+            success = False
+            cached = False
+            input_file = None
+            filename = os.path.basename(url)
+            resource_path = urlsplit(url).path
+            dirname = hash_utils.compute_hashes(resource_path.encode())['md5'][0]
+            output_dir = os.path.abspath(os.path.join(self.cache_dir, dirname))
+            file_path = os.path.abspath(os.path.join(output_dir, filename))
+            try:
+                resp = self.store.head(resource_path, self.headers)
+                file_size = int(resp.headers.get('Content-Length'))
+                file_md5 = resp.headers.get('Content-MD5') or ""
+                file_sha256 = resp.headers.get('Content-SHA256') or ""
+                if os.path.isfile(file_path):
+                    logging.info("Computing hashes for file %s found in local cache: [%s]." %
+                                 (filename, file_path))
+                    cached_file_size = os.path.getsize(file_path)
+                    cached_hashes = hash_utils.compute_file_hashes(file_path, ["md5", "sha256"])
+                    cached_md5 = cached_hashes["md5"][1]
+                    cached_sha256 = cached_hashes["sha256"][1]
+                    if (cached_file_size == file_size) and (cached_md5 == file_md5 or cached_sha256 == file_sha256):
+                        cached = True
+                    else:
+                        logging.warning("Cached file [%s] exists but does pass validation check. "
+                                        "Local file size: [%d]. Remote file size: [%d]. "
+                                        "Local file MD5: [%s]. Remote file MD5: [%s]. "
+                                        "Local file SHA256: [%s]. Remote file SHA256: [%s]."
+                                        % (file_path, cached_file_size, file_size, cached_md5, file_md5,
+                                           cached_sha256, file_sha256))
+                if not cached:
+                    logging.info("Transferring [%s] to: %s" % (url, file_path))
+                    make_dirs(output_dir, mode=0o755)
+                    self.store.get_obj(resource_path, self.headers, file_path)
+
+            except requests.HTTPError as e:
+                logging.error("File [%s] transfer failed: %s" % (file_path, e))
+                continue
+            except Exception as e:
+                logging.error(format_exception(e))
+                continue
+
+            # 2. Sanity check the checksums against the known object version checksums from the database.
+            md5 = base64.b64encode(obj.metadata.get("content-md5", b"")).decode()
+            if (md5 and file_md5) and (md5 != file_md5):
+                logging.warning(
+                    "Downloaded file MD5 [%s] does not equal known object version MD5 [%s]. Skipping." %
+                    (file_md5, md5))
+                continue
+            sha256 = base64.b64encode(obj.metadata.get("content-sha256", b"")).decode()
+            if (sha256 and file_sha256) and (sha256 != file_sha256):
+                logging.warning(
+                    "Downloaded file SHA256 [%s] does not equal known object version SHA256 [%s]. Skipping." %
+                    (file_sha256, sha256))
+                continue
+
+            # 3. Transfer the input file to the storage backend.
+            try:
+                if self.backend == "filesystem":
+                    version = obj.version
+                    dest_file_path = "%s/%s" % (directory.storage._dirname_relname(obj.name, version))
+                    make_dirs(dest_file_path, mode=0o755)
+                    logging.info("Moving file [%s] from local cache to [%s]." % (file_path, dest_file_path))
+                    shutil.move(file_path, dest_file_path)
+                else:
+                    input_file = open(file_path, "rb")
+
+                    # 3.1 Non-chunked transfer if under self.chunk_size
+                    if file_size < self.chunk_size:
+                        logging.info("Transferring file [%s] from local cache to backend storage type: [%s]." %
+                                     (file_path, self.backend))
+                        version = directory.storage.create_from_file(obj.name,
+                                                                     input_file,
+                                                                     file_size,
+                                                                     obj.metadata,
+                                                                     obj.version)
+                    # 3.2 Do chunked transfer.
+                    else:
+                        logging.info("Transferring file [%s] from local cache to backend storage using chunked "
+                                     "upload to backend storage type: [%s]." % (file_path, self.backend))
+
+                        # 3.2.1 Create upload job
+                        tbytes = 0
+                        position = 0
+                        chunk_aux = list()
+                        remainder = file_size % self.chunk_size
+                        nchunks = file_size // self.chunk_size
+                        tchunks = nchunks if remainder == 0 else nchunks + 1
+                        start = datetime.datetime.now()
+                        upload = directory.storage.create_upload(obj.name, file_size, obj.metadata)
+
+                        # 3.2.2 Upload chunks
+                        while tbytes < file_size:
+                            nbytes = self.chunk_size if position < nchunks else remainder
+                            metadata = obj.metadata.copy()
+                            c_start = datetime.datetime.now()
+                            try:
+                                aux = directory.storage.upload_chunk_from_file(obj.name,
+                                                                               upload,
+                                                                               position,
+                                                                               self.chunk_size,
+                                                                               input_file,
+                                                                               nbytes,
+                                                                               metadata)
+                            except:
+                                directory.storage.cancel_upload(obj.name, upload)
+                                raise
+
+                            chunk_aux.append({"position": position, "aux": aux})
+                            position += 1
+                            tbytes += nbytes
+                            c_elapsed = datetime.datetime.now() - c_start
+                            c_summary = get_transfer_summary(nbytes, c_elapsed)
+                            logging.info("Object [%s] successfully uploaded chunk: %d of %d. "
+                                         "Total bytes processed: %d of %d. %s" %
+                                         (obj.name, position, tchunks, tbytes, file_size, c_summary))
+
+                        # 3.2.3 Finalize upload job
+                        version = directory.storage.finalize_upload(obj.name, upload, chunk_aux, obj.metadata)
+                        elapsed = datetime.datetime.now() - start
+                        summary = get_transfer_summary(tbytes, elapsed)
+                        logging.info("Chunked upload of file [%s] successful. %s" % (file_path, summary))
+
+                # 3.3 Post-transfer database updates
+                # We only care about storing the returned aux version in the non-filesystem backend case
+                version = version if self.backend != "filesystem" else None
+                directory.version_aux_version_update(obj, version)
+                # On a successful transfer, we will automatically delete the aux redirect url
+                directory.version_aux_url_delete(obj)
+                success = True
+            except Exception as e:
+                logging.error("Error during transfer of [%s] to backend storage: %s" %
+                              (file_path, format_exception(e)))
+                continue
+            finally:
+                if input_file:
+                    input_file.close()
+                if success:
+                    shutil.rmtree(output_dir)
+
+    def main(self):
+        try:
+            import pydevd_pycharm
+            pydevd_pycharm.settrace('98.149.8.115', port=50006, stdoutToServer=True, stderrToServer=True)
+        except Exception as e:
+            sys.stderr.write(format_exception(e) + "\n")
+            sys.exit(-1)
+
+        args = self.parse_cli()
+        self.path_prefix = args.path_prefix
+        self.chunk_size *= args.chunk_size_multiplier
+        if args.cache_dir:
+            self.cache_dir = os.path.join(args.cache_dir, self.cache_dir_name)
+
+        # credential initialization
+        token = args.token if args.token else None
+        oauth2_token = args.oauth2_token if args.oauth2_token else None
+        credential_file = args.credential_file if args.credential_file else None
+        if credential_file:
+            self.credentials = get_credential(self.hostname, credential_file)
+        elif token or oauth2_token:
+            self.credentials = format_credential(token=token, oauth2_token=oauth2_token)
+
+        try:
+            # This will generally fail unless run locally in ~/hatrac on the target hatrac system for the migration
+            from hatrac import directory
+            self.backend = config.get('storage_backend')
+
+            # The "link_redirects" logic will set alternate "redirect" URLs for every object version in the database
+            # based on the following path components:
+            # <host> + <path-prefix> + <existing object name from the database name table>.
+            # The server will then automatically redirect requests for these objects to these URLs.
+            if args.link_redirects:
+                if not args.host:
+                    raise argparse.ArgumentError(
+                        None, 'The "--host" argument is required when the "--link-redirects" argument is specified.')
+                base_url = (args.host if args.host.startswith("http") else "https://" + args.host) + self.path_prefix
+                directory.version_aux_url_bulk_update(base_url)
+
+            # The "transfer_linked_redirects" logic will attempt to transfer files referenced by any pre-existing
+            # redirect links to the "local" hatrac instance. This could involve local file caching when additional IO
+            # is performed to backend storage off system, e.g. to S3.
+            if args.transfer_linked_redirects:
+                self.transfer_linked_objects(directory)
+            return 0
+        except argparse.ArgumentError as e:
+            logging.error(format_exception(e))
+        except RuntimeError as e:
+            logging.error(format_exception(e))
+            if args.debug:
+                traceback.print_exc()
+        except:
+            logging.error("Unhandled exception!")
+            traceback.print_exc()
+        return 1
+
+
+def main():
+    return HatracMigrateCLI(DESC, INFO, VERSION).main()
+
+
+if __name__ == '__main__':
+    sys.exit(main())

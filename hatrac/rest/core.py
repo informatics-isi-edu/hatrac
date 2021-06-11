@@ -34,6 +34,7 @@ from .. import directory
 
 _webauthn2_manager = webauthn2.Manager()
 
+
 def hash_value(d):
     return base64.b64encode(hashlib.md5(d.encode()).digest()).decode()
 
@@ -168,6 +169,11 @@ class LengthRequired (RestException):
 class PreconditionFailed (RestException):
     status = '412 Precondition Failed'
     message = 'Resource state does not match requested preconditions.'
+
+class PayloadTooLarge (RestException):
+    status = '413 Payload Too Large'
+    message = 'Request body size is larger than the current limit defined by the server, which is %s bytes.' % \
+              core.config.get("max_request_payload_size", core.max_request_payload_size_default)
 
 class BadRange (RestException):
     status = '416 Requested Range Not Satisfiable'
