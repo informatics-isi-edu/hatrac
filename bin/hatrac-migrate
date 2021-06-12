@@ -226,13 +226,6 @@ class HatracMigrateCLI (BaseCLI):
                     shutil.rmtree(output_dir)
 
     def main(self):
-        try:
-            import pydevd_pycharm
-            pydevd_pycharm.settrace('98.149.8.115', port=50006, stdoutToServer=True, stderrToServer=True)
-        except Exception as e:
-            sys.stderr.write(format_exception(e) + "\n")
-            sys.exit(-1)
-
         args = self.parse_cli()
         self.path_prefix = args.path_prefix
         self.chunk_size *= args.chunk_size_multiplier
