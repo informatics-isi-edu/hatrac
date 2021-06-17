@@ -32,9 +32,6 @@ class HatracUtilsCLI (BaseCLI):
     def __init__(self, description, epilog, version):
         super(HatracUtilsCLI, self).__init__(description, epilog, version)
 
-        import pydevd_pycharm
-        pydevd_pycharm.settrace('98.149.8.115', port=50006, stdoutToServer=True, stderrToServer=True)
-
         self.backend = None
         self.path_prefix = "/hatrac"
 
