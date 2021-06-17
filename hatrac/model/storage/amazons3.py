@@ -12,6 +12,7 @@ object-version lifecycle and authorization is handled by the caller.
 import base64
 import binascii
 import boto3
+import sys
 import web
 from io import BufferedRandom, BytesIO
 from webauthn2.util import PooledConnection
@@ -99,7 +100,7 @@ class HatracStorage(PooledS3BucketConnection):
 
     def _map_name(self, name):
         object_name = name.lstrip("/")
-        path_root = object_name.split("/")[0].strip() if "/" in object_name else "/"
+        path_root = "/" + (object_name.split("/")[0].strip() if "/" in object_name else object_name)
         bucket = self.s3_buckets.get(path_root, self.s3_buckets.get("/"))
         if not bucket:
             raise NotFound("Could not find a bucket mapping for path: %s" % name)
@@ -115,6 +116,7 @@ class HatracStorage(PooledS3BucketConnection):
         region_name = bucket.get("region_name")
         if region_name and not bucket.get("client"):
             # this client object is used for signing URLs because that operation is directly coupled to bucket region
+            # per the boto documentation, the client object is re-entrant
             bucket["client"] = boto3.client("s3", region_name)
 
         return bucket_name, object_name, bucket
@@ -292,3 +294,32 @@ class HatracStorage(PooledS3BucketConnection):
         """Tidy up after an empty namespace that has been deleted."""
         # nothing to do for S3 since namespaces are not explicit resources in bucket
         pass
+
+    @s3_bucket_wrap()
+    def purge_all_multipart_uploads(self, name, s3_session=None):
+        bucket_name, object_name, bucket_config = self._map_name(name)
+        client = bucket_config.get("client")
+        if not client and s3_session is not None:
+            client = s3_session.meta.client
+        next_key_marker = None
+        while True:
+            upload_response = client.list_multipart_uploads(Bucket=bucket_name, KeyMarker=next_key_marker or "")
+            uploads = upload_response.get("Uploads")
+            if not uploads:
+                return
+            for upload in uploads:
+                key = upload["Key"]
+                upload_id = upload["UploadId"]
+                try:
+                    client.abort_multipart_upload(Bucket=bucket_name, Key=key, UploadId=upload_id)
+                except Exception as e:
+                    if "hatrac_request_trace" in web.ctx:
+                        web.ctx.hatrac_request_trace("S3 client error: %s" % e)
+                    else:
+                        sys.stderr.print("Error purging S3 multipart upload for Key [%s] with UploadId [%s]: %s" %
+                                         (key, upload_id, e))
+
+            if upload_response["IsTruncated"]:
+                next_key_marker = upload_response["NextKeyMarker"]
+            else:
+                break

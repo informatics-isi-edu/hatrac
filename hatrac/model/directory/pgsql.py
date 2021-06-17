@@ -415,6 +415,7 @@ class HatracUpload (HatracName):
         self.job = args['job']
         self.nbytes = args['nbytes']
         self.chunksize = args['chunksize']
+        self.created_on = args['created_on']
 
     def __str__(self):
         return "%s;upload/%s" % (self.object, self.job)
@@ -1163,6 +1164,11 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
     def upload_cancel(self, upload, client_context, conn=None, cur=None):
+        self._delete_upload(conn, cur, upload)
+        return lambda : self.storage.cancel_upload(upload.name, upload.job)
+
+    @db_wrap(reload_pos=1, transform=lambda thunk: thunk())
+    def _upload_cancel(self, upload, conn=None, cur=None):
         self._delete_upload(conn, cur, upload)
         return lambda : self.storage.cancel_upload(upload.name, upload.job)
 
