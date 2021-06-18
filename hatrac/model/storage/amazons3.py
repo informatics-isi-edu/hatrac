@@ -184,7 +184,7 @@ class HatracStorage(PooledS3BucketConnection):
         nbytes = s3_obj.content_length
 
         over_threshold = False
-        presigned_url_threshold = bucket_config.get("presigned_url_threshold")
+        presigned_url_threshold = bucket_config.get("presigned_url_size_threshold")
         if isinstance(presigned_url_threshold, int) and presigned_url_threshold > 0:
             if nbytes > presigned_url_threshold:
                 over_threshold = True
@@ -195,7 +195,7 @@ class HatracStorage(PooledS3BucketConnection):
                 client = s3_session.meta.client
             url = client.generate_presigned_url(
                 ClientMethod='get_object',
-                ExpiresIn=300,
+                ExpiresIn=bucket_config.get("presigned_url_expiration_secs", 300),
                 Params={
                     'Bucket': bucket_name,
                     'Key': object_name,
