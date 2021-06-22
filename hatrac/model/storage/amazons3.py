@@ -313,11 +313,8 @@ class HatracStorage(PooledS3BucketConnection):
                 try:
                     client.abort_multipart_upload(Bucket=bucket_name, Key=key, UploadId=upload_id)
                 except Exception as e:
-                    if "hatrac_request_trace" in web.ctx:
-                        web.ctx.hatrac_request_trace("S3 client error: %s" % e)
-                    else:
-                        sys.stderr.print("Error purging S3 multipart upload for Key [%s] with UploadId [%s]: %s" %
-                                         (key, upload_id, e))
+                    sys.stderr.print("Error purging S3 multipart upload for Key [%s] with UploadId [%s]: %s" %
+                                     (key, upload_id, e))
 
             if upload_response["IsTruncated"]:
                 next_key_marker = upload_response["NextKeyMarker"]
