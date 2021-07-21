@@ -9,10 +9,10 @@ from setuptools import setup
 setup(
     name="hatrac",
     description="simple object storage service",
-    version="0.2",
+    version="0.3",
     packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage", "hatrac.rest"],
     package_data={'hatrac': ["*.wsgi"]},
-    scripts=["bin/hatrac-deploy"],
+    scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-utils"],
     requires=["web", "psycopg2", "webauthn2", "boto3", "botocore"],
     maintainer_email="isrd-support@isi.edu",
     license='Apache 2.0',

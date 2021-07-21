@@ -1,0 +1,109 @@
+#!/usr/bin/python
+#
+# Copyright 2015-2021 University of Southern California
+# Distributed under the Apache License, Version 2.0. See LICENSE for more info.
+#
+import os
+import sys
+import datetime
+import argparse
+import logging
+import pytz
+import traceback
+from hatrac.core import config
+
+# do a run-time import of deriva-py so that we don't need to declare it as a formal dependency
+try:
+    from deriva.core import format_exception, format_credential, BaseCLI
+except ModuleNotFoundError:
+    sys.stderr.write("Cannot import deriva.core python module. Ensure that deriva-py is installed.\n\n")
+    sys.exit(2)
+
+
+DESC = "DERIVA HATRAC Utilities Tool"
+INFO = "For more information see: https://github.com/informatics-isi-edu/hatrac"
+VERSION = 0.1
+
+
+class HatracUtilsCLI (BaseCLI):
+    """Deriva Hatrac Utilities Tool CLI.
+    """
+
+    def __init__(self, description, epilog, version):
+        super(HatracUtilsCLI, self).__init__(description, epilog, version)
+
+        self.backend = None
+        self.path_prefix = "/hatrac"
+
+        # parent arg parser
+        self.remove_options(['--host', '--token', '--oauth2-token', '--config-file', '--credential-file'])
+        subparsers = self.parser.add_subparsers(title='sub-commands', dest='subcmd')
+
+        # delete-upload-jobs parser
+        del_jobs_parser = subparsers.add_parser('del-jobs', help="Delete upload jobs.")
+        del_jobs_parser.add_argument("--namespace-root", metavar="<path>", type=str, default="/",
+                                     help="Namespace root path; default = \"/\".")
+        del_jobs_parser.add_argument("--older-than-days", metavar="<days>", type=int,
+                                     help="Only delete jobs older than <n> days.")
+        del_jobs_parser.add_argument("--include-orphans", action="store_true",
+                                     help="For certain backends (e.g. S3) which may have additional job metadata "
+                                          "records that may have orphaned relations from the Hatrac database, or no"
+                                          "correlating record at all, also delete these jobs from the target backend.")
+        del_jobs_parser.set_defaults(func=self.delete_upload_jobs)
+
+    def delete_upload_jobs(self, args):
+        self.backend = config.get('storage_backend')
+        try:
+            from hatrac import directory  # Must be run locally in ~/hatrac on the target hatrac system.
+
+            root = directory.name_resolve(args.namespace_root)
+            uploads = directory.namespace_enumerate_uploads(root)
+            if args.older_than_days is not None:
+                for upload in uploads:
+                    purge_threshold = datetime.datetime.now(tz=pytz.UTC) - \
+                                      datetime.timedelta(days=args.older_than_days)
+                    if purge_threshold > upload.created_on:
+                        try:
+                            directory._upload_cancel(upload)
+                            logging.info("Cancelled upload job %s created on %s" %
+                                         (upload.job, upload.created_on.isoformat()))
+                        except Exception as e:
+                            logging.warning("Exception while attempting to cancel upload job %s: %s" %
+                                            (upload.job, format_exception(e)))
+
+            if args.include_orphans:
+                if self.backend == "amazons3":
+                    directory.storage.purge_all_multipart_uploads(root.name)
+
+        except Exception as e:
+            raise RuntimeError(
+                "Exception while deleting upload jobs from the database: %s" % format_exception(e))
+
+    def main(self):
+        args = self.parse_cli()
+
+        if not hasattr(args, 'func'):
+            self.parser.print_usage()
+            return 1
+
+        try:
+            args.func(args)
+            return 0
+        except argparse.ArgumentError as e:
+            logging.error(format_exception(e))
+        except RuntimeError as e:
+            logging.error(format_exception(e))
+            if args.debug:
+                traceback.print_exc()
+        except:
+            logging.error("Unhandled exception!")
+            traceback.print_exc()
+        return 1
+
+
+def main():
+    return HatracUtilsCLI(DESC, INFO, VERSION).main()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
