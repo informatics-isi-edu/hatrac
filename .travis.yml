@@ -2,10 +2,10 @@
 language: python
 
 sudo: required
-dist: xenial
+dist: bionic
 
 python:
-  - "3.9"
+  - "3.6"
 
 virtualenv:
   system_site_packages: true
@@ -37,7 +37,7 @@ env:
     - PYTHONWARNINGS="ignore:Unverified HTTPS request"
 
 before_install:
-  - sudo su -c 'echo /usr/lib/python3.5/site-packages > /usr/local/lib/python3.5/dist-packages/sys-site-packages.pth'
+  - sudo su -c 'echo /usr/lib/python3.6/site-packages > /usr/local/lib/python3.6/dist-packages/sys-site-packages.pth'
   - sudo ln -s /etc/apache2/conf-enabled /etc/apache2/conf.d
   - sudo service postgresql stop
   - sudo service postgresql start 10
