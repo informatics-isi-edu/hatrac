@@ -19,9 +19,9 @@ addons:
     packages:
       - libpq-dev
       - libjson-c-dev
-      - postgresql-10
-      - postgresql-client-10
-      - postgresql-server-dev-10
+      - postgresql-12
+      - postgresql-client-12
+      - postgresql-server-dev-12
       - apache2
       - apache2-dev
       - ssl-cert
@@ -40,7 +40,7 @@ before_install:
   - sudo su -c 'echo /usr/lib/python3.6/site-packages > /usr/local/lib/python3.6/dist-packages/sys-site-packages.pth'
   - sudo ln -s /etc/apache2/conf-enabled /etc/apache2/conf.d
   - sudo service postgresql stop
-  - sudo service postgresql start 10
+  - sudo service postgresql start 12
   - sudo a2enmod ssl
   - sudo a2ensite default-ssl
   - sudo groupadd -o -g $(id -g www-data) apache
