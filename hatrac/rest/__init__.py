@@ -86,6 +86,11 @@ class Dispatcher (object):
             raise core.NoMethod("System is currently in read-only mode.")
         return self.METHOD('POST')
 
+    # This is for CORS preflight checks that may happen in browsers when Hatrac redirects to another server
+    def OPTIONS(self):
+        web.ctx.status = '200 OK'
+        return ''
+
 
 # bypass web.py URI-dispatching because of broken handling of url-escapes!
 urls = ('.*', Dispatcher)

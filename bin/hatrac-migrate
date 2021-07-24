@@ -4,6 +4,7 @@
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 import os
+import re
 import sys
 import datetime
 import shutil
@@ -39,7 +40,6 @@ class HatracMigrateCLI (BaseCLI):
         self.store = None
         self.backend = None
         self.credentials = None
-        self.path_prefix = "/hatrac"
         self.cache_dir = "./%s" % self.cache_dir_name
         self.headers = {'Connection': 'keep-alive'}
         self.chunk_size = DEFAULT_CHUNK_SIZE
@@ -52,10 +52,19 @@ class HatracMigrateCLI (BaseCLI):
                                  help="Transfer files that have linked redirects to this instance, "
                                  "deleting link redirect on successful transfer completion.")
         self.parser.add_argument("-p", "--path-prefix", metavar="</path>",
-                                 help="Base resource path prefix, defaults to '%s'" % self.path_prefix,
-                                 default=self.path_prefix)
+                                 help="Base resource path prefix")
         self.parser.add_argument("-c", "--cache-dir", metavar="<path>",
                                  help="Cache directory to use for transfers. Defaults to '%s'." % self.cache_dir)
+        self.parser.add_argument("-a", "--allow-missing-hashes", action="store_true", default=False,
+                                 help="If hashes for existing objects cannot be found in both the source and "
+                                      "destination, allow them to be generated based on locally downloaded content "
+                                      "from the source.")
+        self.parser.add_argument("-w", "--whitelist-path-pattern", metavar="regex>",
+                                 help="Regular expression to apply to object names for inclusion in "
+                                      "linking/transferring.")
+        self.parser.add_argument("-d", "--dry-run", action="store_true", default=False,
+                                 help="Dry run will not modify the database when linking. This argument does not "
+                                      "apply when transferring already linked files.")
         self.parser.add_argument("-x", "--chunk-size-multiplier", metavar="<1-10>", type=int,
                                  choices=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                                  help="Chunk size multiplier to use for chunked transfers. "
@@ -63,7 +72,57 @@ class HatracMigrateCLI (BaseCLI):
                                       (self.chunk_size_multiplier, self.chunk_size),
                                  default=self.chunk_size_multiplier)
 
-    def transfer_linked_objects(self, directory):
+    @staticmethod
+    def link_objects(directory, base_url, whitelist_regex=None, dry_run=False):
+        # 1. Enumerate the objects to link
+        logging.info("Enumerating existing object versions. %sPlease wait." %
+                     ("Dry-run is enabled. " if dry_run else ""))
+        objects = dict()
+        try:
+            root = directory.name_resolve("/")
+            names = directory.namespace_enumerate_names(root)
+            for name in names:
+                if name.is_object():
+                    versions = directory.object_enumerate_versions(name)
+                    for version in versions:
+                        objects["%s:%s" % (version.name, version.version)] = version
+        except Exception as e:
+            raise RuntimeError(
+                "Exception while enumerating object versions from the database: %s" % format_exception(e))
+        total = len(objects)
+        logging.info("Attempting to link redirects for %d object versions." % total)
+
+        # 2. Prune the object set based on the whitelist regex, if any
+        pruned_objects = dict()
+        if whitelist_regex:
+            logging.info("Applying whitelist regex '%s' to prune object set." % whitelist_regex)
+            regex = re.compile(whitelist_regex)
+            for path, obj in objects.items():
+                if regex.match(path):
+                    logging.debug("Including object path [%s] in whitelisted object set." % path)
+                    pruned_objects[path] = obj
+            total = len(pruned_objects)
+            logging.info("Whitelisted object set now contains %d entries." % total)
+        else:
+            pruned_objects = objects
+
+        # 3. Link the objects to the source URLs
+        succeeded = 0
+        for path, obj in pruned_objects.items():
+            try:
+                logging.debug("Linking object [%s:%s] to [%s]" % (obj.name, obj.version, base_url + obj.asurl()))
+                if not dry_run:
+                    directory.version_aux_url_update(obj, base_url)
+                    succeeded += 1
+            except Exception as e:
+                logging.warning(
+                    "Exception while attempting to link object [%s:%s] to [%s]: %s" %
+                    (obj.name, obj.version, base_url + obj.asurl(), format_exception(e)))
+        if not dry_run:
+            logging.info("Successfully linked %d of %d object versions." % (succeeded, total))
+
+    def transfer_linked_objects(self, directory, allow_missing_hashes=False, whitelist_regex=None):
+        logging.info("Enumerating existing object versions. Please wait.")
         objects = dict()
         try:
             root = directory.name_resolve("/")
@@ -78,8 +137,25 @@ class HatracMigrateCLI (BaseCLI):
         except Exception as e:
             raise RuntimeError(
                 "Exception while enumerating object versions from the database: %s" % format_exception(e))
+        total = len(objects)
+        logging.info("Attempting to migrate files for %d object versions." % total)
 
-        for url, obj in objects.items():
+        # 2. Prune the object set based on the whitelist regex, if any
+        pruned_objects = dict()
+        if whitelist_regex:
+            logging.info("Applying whitelist regex '%s' to prune object set." % whitelist_regex)
+            regex = re.compile(whitelist_regex)
+            for url, obj in objects.items():
+                path = "%s:%s" % (obj.name, obj.version)
+                if regex.match(path):
+                    logging.debug("Including object path [%s] in whitelisted object set." % path)
+                    pruned_objects[url] = obj
+            total = len(pruned_objects)
+            logging.info("Whitelisted object set now contains %d entries." % total)
+        else:
+            pruned_objects = objects
+
+        for url, obj in pruned_objects.items():
             logging.info("Attempting to transfer file(s)...")
             if not self.store:
                 host = urlsplit(url)
@@ -109,7 +185,7 @@ class HatracMigrateCLI (BaseCLI):
                     if (cached_file_size == file_size) and (cached_md5 == file_md5 or cached_sha256 == file_sha256):
                         cached = True
                     else:
-                        logging.warning("Cached file [%s] exists but does pass validation check. "
+                        logging.warning("Cached file [%s] exists but does not pass validation check. "
                                         "Local file size: [%d]. Remote file size: [%d]. "
                                         "Local file MD5: [%s]. Remote file MD5: [%s]. "
                                         "Local file SHA256: [%s]. Remote file SHA256: [%s]."
@@ -134,12 +210,29 @@ class HatracMigrateCLI (BaseCLI):
                     "Downloaded file MD5 [%s] does not equal known object version MD5 [%s]. Skipping." %
                     (file_md5, md5))
                 continue
+
             sha256 = base64.b64encode(obj.metadata.get("content-sha256", b"")).decode()
             if (sha256 and file_sha256) and (sha256 != file_sha256):
                 logging.warning(
                     "Downloaded file SHA256 [%s] does not equal known object version SHA256 [%s]. Skipping." %
                     (file_sha256, sha256))
                 continue
+
+            # If hashes don't exist in both remote and local, create them if "allow_missing_hashes" is enabled.
+            # Otherwise skip on size mismatch.
+            if not (md5 and file_md5) and not (sha256 and file_sha256):
+                if not allow_missing_hashes:
+                    logging.warning("Missing both local and remote MD5 and SHA256 hashes. Skipping.")
+                    continue
+                if os.path.getsize(file_path) != file_size:
+                    logging.warning("Missing both local and remote MD5 and SHA256 hashes, and local file size does not "
+                                    "equal remote file size. Skipping.")
+                    continue
+                logging.warning("Missing both local and remote MD5 and SHA256 hashes. "
+                                "Calculating new hash values based on local content.")
+                hashes = hash_utils.compute_file_hashes(file_path, ["md5", "sha256"])
+                obj.metadata.update({"content-md5": base64.b64decode(hashes["md5"][1]),
+                                     "content-sha256": base64.b64decode(hashes["sha256"][1])})
 
             # 3. Transfer the input file to the storage backend.
             try:
@@ -159,8 +252,7 @@ class HatracMigrateCLI (BaseCLI):
                         version = directory.storage.create_from_file(obj.name,
                                                                      input_file,
                                                                      file_size,
-                                                                     obj.metadata,
-                                                                     obj.version)
+                                                                     obj.metadata)
                     # 3.2 Do chunked transfer.
                     else:
                         logging.info("Transferring file [%s] from local cache to backend storage using chunked "
@@ -227,7 +319,6 @@ class HatracMigrateCLI (BaseCLI):
 
     def main(self):
         args = self.parse_cli()
-        self.path_prefix = args.path_prefix
         self.chunk_size *= args.chunk_size_multiplier
         if args.cache_dir:
             self.cache_dir = os.path.join(args.cache_dir, self.cache_dir_name)
@@ -254,14 +345,20 @@ class HatracMigrateCLI (BaseCLI):
                 if not args.host:
                     raise argparse.ArgumentError(
                         None, 'The "--host" argument is required when the "--link-redirects" argument is specified.')
-                base_url = (args.host if args.host.startswith("http") else "https://" + args.host) + self.path_prefix
-                directory.version_aux_url_bulk_update(base_url)
+                base_url = (args.host if args.host.startswith("http") else "https://" + args.host)
+                directory.prefix = args.path_prefix if args.path_prefix else config.get("service_prefix", "/hatrac")
+                self.link_objects(directory, base_url,
+                                  whitelist_regex=args.whitelist_path_pattern, dry_run=args.dry_run)
 
             # The "transfer_linked_redirects" logic will attempt to transfer files referenced by any pre-existing
             # redirect links to the "local" hatrac instance. This could involve local file caching when additional IO
             # is performed to backend storage off system, e.g. to S3.
-            if args.transfer_linked_redirects:
-                self.transfer_linked_objects(directory)
+            elif args.transfer_linked_redirects:
+                self.transfer_linked_objects(directory,
+                                             allow_missing_hashes=args.allow_missing_hashes,
+                                             whitelist_regex=args.whitelist_path_pattern)
+            else:
+                self.parser.print_usage()
             return 0
         except argparse.ArgumentError as e:
             logging.error(format_exception(e))
