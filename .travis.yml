@@ -5,7 +5,7 @@ sudo: required
 dist: xenial
 
 python:
-  - "3.7"
+  - "3.9"
 
 virtualenv:
   system_site_packages: true
