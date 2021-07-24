@@ -14,14 +14,14 @@ services:
   - postgresql
 
 addons:
-  postgresql: "12"
+  postgresql: "11"
   apt:
     packages:
       - libpq-dev
       - libjson-c-dev
-      - postgresql-12
-      - postgresql-client-12
-      - postgresql-server-dev-12
+      - postgresql-11
+      - postgresql-client-11
+      - postgresql-server-dev-11
       - apache2
       - apache2-dev
       - ssl-cert
@@ -40,7 +40,7 @@ before_install:
   - sudo su -c 'echo /usr/lib/python3.6/site-packages > /usr/local/lib/python3.6/dist-packages/sys-site-packages.pth'
   - sudo ln -s /etc/apache2/conf-enabled /etc/apache2/conf.d
   - sudo service postgresql stop
-  - sudo service postgresql start 12
+  - sudo service postgresql start 11
   - sudo a2enmod ssl
   - sudo a2ensite default-ssl
   - sudo groupadd -o -g $(id -g www-data) apache
