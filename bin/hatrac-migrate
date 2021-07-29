@@ -63,8 +63,9 @@ class HatracMigrateCLI (BaseCLI):
                                  help="Regular expression to apply to object names for inclusion in "
                                       "linking/transferring.")
         self.parser.add_argument("-d", "--dry-run", action="store_true", default=False,
-                                 help="Dry run will not modify the database when linking. This argument does not "
-                                      "apply when transferring already linked files.")
+                                 help="Dry run will not modify the database when linking and will not any transfer any "
+                                      "previously linked files. It will simply log the list of files that would be "
+                                      "linked, based on the input parameters.")
         self.parser.add_argument("-x", "--chunk-size-multiplier", metavar="<1-10>", type=int,
                                  choices=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                                  help="Chunk size multiplier to use for chunked transfers. "
@@ -110,8 +111,11 @@ class HatracMigrateCLI (BaseCLI):
         succeeded = 0
         for path, obj in pruned_objects.items():
             try:
-                logging.debug("Linking object [%s:%s] to [%s]" % (obj.name, obj.version, base_url + obj.asurl()))
-                if not dry_run:
+                msg = "Linking object [%s:%s] to [%s]" % (obj.name, obj.version, base_url + obj.asurl())
+                if dry_run:
+                    logging.info(msg)
+                else:
+                    logging.debug(msg)
                     directory.version_aux_url_update(obj, base_url)
                     succeeded += 1
             except Exception as e:
@@ -354,9 +358,12 @@ class HatracMigrateCLI (BaseCLI):
             # redirect links to the "local" hatrac instance. This could involve local file caching when additional IO
             # is performed to backend storage off system, e.g. to S3.
             elif args.transfer_linked_redirects:
-                self.transfer_linked_objects(directory,
-                                             allow_missing_hashes=args.allow_missing_hashes,
-                                             whitelist_regex=args.whitelist_path_pattern)
+                if args.dry_run:
+                    logging.info("Skipping transfer of linked objects for dry-run.")
+                else:
+                    self.transfer_linked_objects(directory,
+                                                 allow_missing_hashes=args.allow_missing_hashes,
+                                                 whitelist_regex=args.whitelist_path_pattern)
             else:
                 self.parser.print_usage()
             return 0
