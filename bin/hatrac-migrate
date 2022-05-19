@@ -29,6 +29,8 @@ DESC = "DERIVA HATRAC Migration Tool"
 INFO = "For more information see: https://github.com/informatics-isi-edu/hatrac"
 VERSION = 0.1
 
+logger = logging.getLogger(__name__)
+
 
 class HatracMigrateCLI (BaseCLI):
     """Deriva Hatrac Migration Tool CLI.
@@ -41,9 +43,11 @@ class HatracMigrateCLI (BaseCLI):
         self.backend = None
         self.credentials = None
         self.cache_dir = "./%s" % self.cache_dir_name
-        self.headers = {'Connection': 'keep-alive'}
+        self.headers = {'Accept-Encoding': 'identity'}
+        # self.headers = {'Connection': 'keep-alive', 'Accept-Encoding': 'identity'}
         self.chunk_size = DEFAULT_CHUNK_SIZE
         self.chunk_size_multiplier = 1
+        self.progress_percentage_checkpoint = 20
 
         self.parser.add_argument("-l", "--link-redirects", action="store_true",
                                  help="Set ALL object version redirect fields to: "
@@ -72,12 +76,16 @@ class HatracMigrateCLI (BaseCLI):
                                       "Defaults to %dx of default chunk size %d bytes." %
                                       (self.chunk_size_multiplier, self.chunk_size),
                                  default=self.chunk_size_multiplier)
+        self.parser.add_argument("-i", "--transfer-progress-info-percentage", metavar="<1-100>", type=int,
+                                 help="Transfer statistics will be logged at this completion percentage interval. "
+                                      "Defaults to %s percent." % self.progress_percentage_checkpoint,
+                                 default=self.progress_percentage_checkpoint)
 
     @staticmethod
     def link_objects(directory, base_url, whitelist_regex=None, dry_run=False):
         # 1. Enumerate the objects to link
-        logging.info("Enumerating existing object versions. %sPlease wait." %
-                     ("Dry-run is enabled. " if dry_run else ""))
+        logger.info("Enumerating existing object versions. %sPlease wait." %
+                    ("Dry-run is enabled. " if dry_run else ""))
         objects = dict()
         try:
             root = directory.name_resolve("/")
@@ -91,19 +99,19 @@ class HatracMigrateCLI (BaseCLI):
             raise RuntimeError(
                 "Exception while enumerating object versions from the database: %s" % format_exception(e))
         total = len(objects)
-        logging.info("Attempting to link redirects for %d object versions." % total)
+        logger.info("Attempting to link redirects for %d object versions." % total)
 
         # 2. Prune the object set based on the whitelist regex, if any
         pruned_objects = dict()
         if whitelist_regex:
-            logging.info("Applying whitelist regex '%s' to prune object set." % whitelist_regex)
+            logger.info("Applying whitelist regex '%s' to prune object set." % whitelist_regex)
             regex = re.compile(whitelist_regex)
             for path, obj in objects.items():
                 if regex.match(path):
-                    logging.debug("Including object path [%s] in whitelisted object set." % path)
+                    logger.debug("Including object path [%s] in whitelisted object set." % path)
                     pruned_objects[path] = obj
             total = len(pruned_objects)
-            logging.info("Whitelisted object set now contains %d entries." % total)
+            logger.info("Whitelisted object set now contains %d entries." % total)
         else:
             pruned_objects = objects
 
@@ -113,20 +121,20 @@ class HatracMigrateCLI (BaseCLI):
             try:
                 msg = "Linking object [%s:%s] to [%s]" % (obj.name, obj.version, base_url + obj.asurl())
                 if dry_run:
-                    logging.info(msg)
+                    logger.info(msg)
                 else:
-                    logging.debug(msg)
+                    logger.debug(msg)
                     directory.version_aux_url_update(obj, base_url)
                     succeeded += 1
             except Exception as e:
-                logging.warning(
+                logger.warning(
                     "Exception while attempting to link object [%s:%s] to [%s]: %s" %
                     (obj.name, obj.version, base_url + obj.asurl(), format_exception(e)))
         if not dry_run:
-            logging.info("Successfully linked %d of %d object versions." % (succeeded, total))
+            logger.info("Successfully linked %d of %d object versions." % (succeeded, total))
 
     def transfer_linked_objects(self, directory, allow_missing_hashes=False, whitelist_regex=None):
-        logging.info("Enumerating existing object versions. Please wait.")
+        logger.info("Enumerating existing object versions. Please wait.")
         objects = dict()
         try:
             root = directory.name_resolve("/")
@@ -142,25 +150,25 @@ class HatracMigrateCLI (BaseCLI):
             raise RuntimeError(
                 "Exception while enumerating object versions from the database: %s" % format_exception(e))
         total = len(objects)
-        logging.info("Attempting to migrate files for %d object versions." % total)
+        logger.info("Attempting to migrate files for %d object versions." % total)
 
         # 2. Prune the object set based on the whitelist regex, if any
         pruned_objects = dict()
         if whitelist_regex:
-            logging.info("Applying whitelist regex '%s' to prune object set." % whitelist_regex)
+            logger.info("Applying whitelist regex '%s' to prune object set." % whitelist_regex)
             regex = re.compile(whitelist_regex)
             for url, obj in objects.items():
                 path = "%s:%s" % (obj.name, obj.version)
                 if regex.match(path):
-                    logging.debug("Including object path [%s] in whitelisted object set." % path)
+                    logger.debug("Including object path [%s] in whitelisted object set." % path)
                     pruned_objects[url] = obj
             total = len(pruned_objects)
-            logging.info("Whitelisted object set now contains %d entries." % total)
+            logger.info("Whitelisted object set now contains %d entries." % total)
         else:
             pruned_objects = objects
 
+        logger.info("Attempting to transfer file(s)...")
         for url, obj in pruned_objects.items():
-            logging.info("Attempting to transfer file(s)...")
             if not self.store:
                 host = urlsplit(url)
                 self.store = hatrac_store.HatracStore(host.scheme, host.hostname, self.credentials)
@@ -175,13 +183,24 @@ class HatracMigrateCLI (BaseCLI):
             output_dir = os.path.abspath(os.path.join(self.cache_dir, dirname))
             file_path = os.path.abspath(os.path.join(output_dir, filename))
             try:
+                logger.info("Performing HEAD request for metadata on resource: %s" % resource_path)
                 resp = self.store.head(resource_path, self.headers)
-                file_size = int(resp.headers.get('Content-Length'))
+                length = resp.headers.get('Content-Length')
+                if length is None:
+                    logger.error("Remote resource %s is missing 'Content-Length' header. File will be skipped." %
+                                 resource_path)
+                    continue
+                else:
+                    file_size = int(length)
                 file_md5 = resp.headers.get('Content-MD5') or ""
+                if not file_md5:
+                    logger.warning("Remote resource %s is missing 'Content-MD5' header." % resource_path)
                 file_sha256 = resp.headers.get('Content-SHA256') or ""
+                if not file_sha256:
+                    logger.warning("Remote resource %s is missing 'Content-SHA256' header." % resource_path)
                 if os.path.isfile(file_path):
-                    logging.info("Computing hashes for file %s found in local cache: [%s]." %
-                                 (filename, file_path))
+                    logger.info("Computing hashes for file %s found in local cache: [%s]." %
+                                (filename, file_path))
                     cached_file_size = os.path.getsize(file_path)
                     cached_hashes = hash_utils.compute_file_hashes(file_path, ["md5", "sha256"])
                     cached_md5 = cached_hashes["md5"][1]
@@ -189,51 +208,81 @@ class HatracMigrateCLI (BaseCLI):
                     if (cached_file_size == file_size) and (cached_md5 == file_md5 or cached_sha256 == file_sha256):
                         cached = True
                     else:
-                        logging.warning("Cached file [%s] exists but does not pass validation check. "
-                                        "Local file size: [%d]. Remote file size: [%d]. "
-                                        "Local file MD5: [%s]. Remote file MD5: [%s]. "
-                                        "Local file SHA256: [%s]. Remote file SHA256: [%s]."
-                                        % (file_path, cached_file_size, file_size, cached_md5, file_md5,
-                                           cached_sha256, file_sha256))
+                        logger.warning("Cached file [%s] exists but does not pass validation check. "
+                                       "Local file size: [%d]. Remote file size: [%d]. "
+                                       "Local file MD5: [%s]. Remote file MD5: [%s]. "
+                                       "Local file SHA256: [%s]. Remote file SHA256: [%s]."
+                                       % (file_path, cached_file_size, file_size, cached_md5, file_md5,
+                                          cached_sha256, file_sha256))
                 if not cached:
-                    logging.info("Transferring [%s] to: %s" % (url, file_path))
+                    logger.info("Transferring [%s] with size %s bytes to cache location: %s" %
+                                (url, file_size, file_path))
                     make_dirs(output_dir, mode=0o755)
-                    self.store.get_obj(resource_path, self.headers, file_path)
+                    chunk_progress_threshold = int((file_size / self.chunk_size) *
+                                                   min((self.progress_percentage_checkpoint * .01), 1))
+                    start = datetime.datetime.now()
+
+                    def cache_transfer_callback(**kwargs):
+                        elapsed_time = datetime.datetime.now() - start
+                        total_bytes = kwargs.get("total_bytes", None)
+                        current_chunk = kwargs.get("current_chunk", None)
+                        if not (total_bytes and current_chunk):
+                            return True
+                        if total_bytes == file_size:
+                            return True
+                        if (current_chunk % chunk_progress_threshold) == 0:
+                            logger.info("Transferred %s%% of file [%s] with %s" %
+                                        (round((total_bytes / file_size) * 100),
+                                         file_path,
+                                         get_transfer_summary(total_bytes, elapsed_time)))
+                        return True
+
+                    self.store.get_obj(resource_path,
+                                       destfilename=file_path,
+                                       chunk_size=self.chunk_size,
+                                       callback=cache_transfer_callback)
+                    success = True
 
             except requests.HTTPError as e:
-                logging.error("File [%s] transfer failed: %s" % (file_path, e))
+                logger.error("File [%s] transfer failed: %s" % (file_path, e))
                 continue
             except Exception as e:
-                logging.error(format_exception(e))
+                logger.error(format_exception(e))
                 continue
+            finally:
+                if not success:
+                    if os.path.isdir(output_dir):
+                        shutil.rmtree(output_dir)
+                else:
+                    success = False
 
-            # 2. Sanity check the checksums against the known object version checksums from the database.
+            # 2. Sanity check the hashes against the known object version hashes from the database.
             md5 = base64.b64encode(obj.metadata.get("content-md5", b"")).decode()
             if (md5 and file_md5) and (md5 != file_md5):
-                logging.warning(
+                logger.warning(
                     "Downloaded file MD5 [%s] does not equal known object version MD5 [%s]. Skipping." %
                     (file_md5, md5))
                 continue
 
             sha256 = base64.b64encode(obj.metadata.get("content-sha256", b"")).decode()
             if (sha256 and file_sha256) and (sha256 != file_sha256):
-                logging.warning(
+                logger.warning(
                     "Downloaded file SHA256 [%s] does not equal known object version SHA256 [%s]. Skipping." %
                     (file_sha256, sha256))
                 continue
 
             # If hashes don't exist in both remote and local, create them if "allow_missing_hashes" is enabled.
-            # Otherwise skip on size mismatch.
+            # No matter what, skip on size mismatch.
             if not (md5 and file_md5) and not (sha256 and file_sha256):
                 if not allow_missing_hashes:
-                    logging.warning("Missing both local and remote MD5 and SHA256 hashes. Skipping.")
+                    logger.warning("Missing both local and remote MD5 and SHA256 hashes. Skipping.")
                     continue
                 if os.path.getsize(file_path) != file_size:
-                    logging.warning("Missing both local and remote MD5 and SHA256 hashes, and local file size does not "
-                                    "equal remote file size. Skipping.")
+                    logger.warning("Missing both local and remote MD5 and SHA256 hashes, and local file size does not "
+                                   "equal remote file size. Skipping.")
                     continue
-                logging.warning("Missing both local and remote MD5 and SHA256 hashes. "
-                                "Calculating new hash values based on local content.")
+                logger.warning("Missing both local and remote MD5 and SHA256 hashes. "
+                               "Calculating new hash values based on local content.")
                 hashes = hash_utils.compute_file_hashes(file_path, ["md5", "sha256"])
                 obj.metadata.update({"content-md5": base64.b64decode(hashes["md5"][1]),
                                      "content-sha256": base64.b64decode(hashes["sha256"][1])})
@@ -244,23 +293,23 @@ class HatracMigrateCLI (BaseCLI):
                     version = obj.version
                     dest_file_path = "%s/%s" % (directory.storage._dirname_relname(obj.name, version))
                     make_dirs(dest_file_path, mode=0o755)
-                    logging.info("Moving file [%s] from local cache to [%s]." % (file_path, dest_file_path))
+                    logger.info("Moving file [%s] from local cache to [%s]." % (file_path, dest_file_path))
                     shutil.move(file_path, dest_file_path)
                 else:
                     input_file = open(file_path, "rb")
 
                     # 3.1 Non-chunked transfer if under self.chunk_size
                     if file_size < self.chunk_size:
-                        logging.info("Transferring file [%s] from local cache to backend storage type: [%s]." %
-                                     (file_path, self.backend))
+                        logger.info("Transferring file [%s] from local cache to backend storage type: [%s]." %
+                                    (file_path, self.backend))
                         version = directory.storage.create_from_file(obj.name,
                                                                      input_file,
                                                                      file_size,
                                                                      obj.metadata)
                     # 3.2 Do chunked transfer.
                     else:
-                        logging.info("Transferring file [%s] from local cache to backend storage using chunked "
-                                     "upload to backend storage type: [%s]." % (file_path, self.backend))
+                        logger.info("Transferring file [%s] from local cache to backend storage using chunked "
+                                    "upload to backend storage type: [%s]." % (file_path, self.backend))
 
                         # 3.2.1 Create upload job
                         tbytes = 0
@@ -294,15 +343,16 @@ class HatracMigrateCLI (BaseCLI):
                             tbytes += nbytes
                             c_elapsed = datetime.datetime.now() - c_start
                             c_summary = get_transfer_summary(nbytes, c_elapsed)
-                            logging.info("Object [%s] successfully uploaded chunk: %d of %d. "
-                                         "Total bytes processed: %d of %d. %s" %
-                                         (obj.name, position, tchunks, tbytes, file_size, c_summary))
+                            if logger.isEnabledFor(logging.DEBUG):
+                                logger.debug("Object [%s] successfully uploaded chunk: %d of %d. "
+                                             "Total bytes processed: %d of %d. %s" %
+                                             (obj.name, position, tchunks, tbytes, file_size, c_summary))
 
                         # 3.2.3 Finalize upload job
                         version = directory.storage.finalize_upload(obj.name, upload, chunk_aux, obj.metadata)
                         elapsed = datetime.datetime.now() - start
                         summary = get_transfer_summary(tbytes, elapsed)
-                        logging.info("Chunked upload of file [%s] successful. %s" % (file_path, summary))
+                        logger.info("Chunked upload of file [%s] successful. %s" % (file_path, summary))
 
                 # 3.3 Post-transfer database updates
                 # We only care about storing the returned aux version in the non-filesystem backend case
@@ -312,20 +362,24 @@ class HatracMigrateCLI (BaseCLI):
                 directory.version_aux_url_delete(obj)
                 success = True
             except Exception as e:
-                logging.error("Error during transfer of [%s] to backend storage: %s" %
-                              (file_path, format_exception(e)))
+                logger.error("Error during transfer of [%s] to backend storage: %s" %
+                             (file_path, format_exception(e)))
                 continue
             finally:
                 if input_file:
                     input_file.close()
                 if success:
-                    shutil.rmtree(output_dir)
+                    if os.path.isdir(output_dir):
+                        shutil.rmtree(output_dir)
 
     def main(self):
         args = self.parse_cli()
         self.chunk_size *= args.chunk_size_multiplier
         if args.cache_dir:
             self.cache_dir = os.path.join(args.cache_dir, self.cache_dir_name)
+
+        if args.transfer_progress_info_percentage:
+            self.progress_percentage_checkpoint = args.transfer_progress_info_percentage
 
         # credential initialization
         token = args.token if args.token else None
@@ -359,7 +413,7 @@ class HatracMigrateCLI (BaseCLI):
             # is performed to backend storage off system, e.g. to S3.
             elif args.transfer_linked_redirects:
                 if args.dry_run:
-                    logging.info("Skipping transfer of linked objects for dry-run.")
+                    logger.info("Skipping transfer of linked objects for dry-run.")
                 else:
                     self.transfer_linked_objects(directory,
                                                  allow_missing_hashes=args.allow_missing_hashes,
@@ -368,13 +422,13 @@ class HatracMigrateCLI (BaseCLI):
                 self.parser.print_usage()
             return 0
         except argparse.ArgumentError as e:
-            logging.error(format_exception(e))
+            logger.error(format_exception(e))
         except RuntimeError as e:
-            logging.error(format_exception(e))
+            logger.error(format_exception(e))
             if args.debug:
                 traceback.print_exc()
         except:
-            logging.error("Unhandled exception!")
+            logger.error("Unhandled exception!")
             traceback.print_exc()
         return 1
 
