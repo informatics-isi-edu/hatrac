@@ -47,7 +47,7 @@ class HatracMigrateCLI (BaseCLI):
         # self.headers = {'Connection': 'keep-alive', 'Accept-Encoding': 'identity'}
         self.chunk_size = DEFAULT_CHUNK_SIZE
         self.chunk_size_multiplier = 1
-        self.progress_percentage_checkpoint = 20
+        self.progress_percentage_checkpoint = 10
 
         self.parser.add_argument("-l", "--link-redirects", action="store_true",
                                  help="Set ALL object version redirect fields to: "
@@ -223,19 +223,25 @@ class HatracMigrateCLI (BaseCLI):
                     start = datetime.datetime.now()
 
                     def cache_transfer_callback(**kwargs):
-                        elapsed_time = datetime.datetime.now() - start
-                        total_bytes = kwargs.get("total_bytes", None)
-                        current_chunk = kwargs.get("current_chunk", None)
-                        if not (total_bytes and current_chunk):
+                        try:
+                            elapsed_time = datetime.datetime.now() - start
+                            total_bytes = kwargs.get("total_bytes", None)
+                            current_chunk = kwargs.get("current_chunk", None)
+                            if not (total_bytes and current_chunk and chunk_progress_threshold):
+                                return True
+                            if total_bytes == file_size:
+                                return True
+                            if (current_chunk % chunk_progress_threshold) == 0:
+                                logger.info("Transferred %s%% of file [%s] with %s" %
+                                            (round((total_bytes / file_size) * 100),
+                                             file_path,
+                                             get_transfer_summary(total_bytes, elapsed_time)))
+                                return True
+                        except:
+                            traceback.print_exc()
+                            raise
+                        finally:
                             return True
-                        if total_bytes == file_size:
-                            return True
-                        if (current_chunk % chunk_progress_threshold) == 0:
-                            logger.info("Transferred %s%% of file [%s] with %s" %
-                                        (round((total_bytes / file_size) * 100),
-                                         file_path,
-                                         get_transfer_summary(total_bytes, elapsed_time)))
-                        return True
 
                     self.store.get_obj(resource_path,
                                        destfilename=file_path,
