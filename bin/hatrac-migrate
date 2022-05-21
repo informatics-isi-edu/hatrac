@@ -18,7 +18,7 @@ from hatrac.core import config
 # do a run-time import of deriva-py so that we don't need to declare it as a formal dependency
 try:
     from deriva.core import hatrac_store, format_exception, format_credential, get_transfer_summary, urlsplit, \
-        urlunsplit, make_dirs, BaseCLI, DEFAULT_CHUNK_SIZE
+        urlunsplit, make_dirs, BaseCLI, DEFAULT_CHUNK_SIZE, DEFAULT_SESSION_CONFIG
     from deriva.core.utils import hash_utils
 except ModuleNotFoundError:
     sys.stderr.write("Cannot import deriva.core python module. Ensure that deriva-py is installed.\n\n")
@@ -171,7 +171,8 @@ class HatracMigrateCLI (BaseCLI):
         for url, obj in pruned_objects.items():
             if not self.store:
                 host = urlsplit(url)
-                self.store = hatrac_store.HatracStore(host.scheme, host.hostname, self.credentials)
+                self.store = hatrac_store.HatracStore(
+                    host.scheme, host.hostname, self.credentials, session_config=make_session_config())
 
             # 1. GET the specified file from the remote hatrac system into the working cache.
             success = False
@@ -244,6 +245,7 @@ class HatracMigrateCLI (BaseCLI):
                             return True
 
                     self.store.get_obj(resource_path,
+                                       headers={'Connection': 'keep-alive'},
                                        destfilename=file_path,
                                        chunk_size=self.chunk_size,
                                        callback=cache_transfer_callback)
@@ -437,6 +439,16 @@ class HatracMigrateCLI (BaseCLI):
             logger.error("Unhandled exception!")
             traceback.print_exc()
         return 1
+
+
+def make_session_config():
+    """Return custom requests session_config for our data submission scenarios
+    """
+    session_config = DEFAULT_SESSION_CONFIG.copy()
+    session_config.update({
+        "retry_status_forcelist": [502, 503, 504],
+    })
+    return session_config
 
 
 def main():
