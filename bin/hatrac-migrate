@@ -163,6 +163,8 @@ class HatracMigrateCLI (BaseCLI):
         for url, obj in objects.items():
             if not self.store:
                 host = urlsplit(url)
+                if not self.credentials:
+                    self.credentials = get_credential(host.hostname)
                 self.store = hatrac_store.HatracStore(
                     host.scheme, host.hostname, self.credentials, session_config=self.make_session_config())
 
@@ -390,8 +392,6 @@ class HatracMigrateCLI (BaseCLI):
                 self.credentials = format_credential(token=token, oauth2_token=oauth2_token)
             elif credential_file:
                 self.credentials = get_credential(args.host, credential_file)
-            else:
-                self.credentials = get_credential(args.host)
 
         try:
             # This will generally fail unless run locally in ~/hatrac on the target hatrac system for the migration
