@@ -17,8 +17,8 @@ from hatrac.core import config
 
 # do a run-time import of deriva-py so that we don't need to declare it as a formal dependency
 try:
-    from deriva.core import hatrac_store, format_exception, format_credential, get_transfer_summary, urlsplit, \
-        urlunsplit, make_dirs, BaseCLI, DEFAULT_CHUNK_SIZE, DEFAULT_SESSION_CONFIG
+    from deriva.core import hatrac_store, format_exception, format_credential, get_credential, get_transfer_summary, \
+        urlsplit, urlunsplit, make_dirs, BaseCLI, DEFAULT_CHUNK_SIZE, DEFAULT_SESSION_CONFIG
     from deriva.core.utils import hash_utils
 except ModuleNotFoundError:
     sys.stderr.write("Cannot import deriva.core python module. Ensure that deriva-py is installed.\n\n")
@@ -42,9 +42,9 @@ class HatracMigrateCLI (BaseCLI):
         self.store = None
         self.backend = None
         self.credentials = None
+        self.directory = None
         self.cache_dir = "./%s" % self.cache_dir_name
-        self.headers = {'Accept-Encoding': 'identity'}
-        # self.headers = {'Connection': 'keep-alive', 'Accept-Encoding': 'identity'}
+        self.headers = {'Connection': 'keep-alive', 'Accept-Encoding': 'identity'}
         self.chunk_size = DEFAULT_CHUNK_SIZE
         self.chunk_size_multiplier = 1
         self.progress_percentage_checkpoint = 10
@@ -66,6 +66,8 @@ class HatracMigrateCLI (BaseCLI):
         self.parser.add_argument("-w", "--whitelist-path-pattern", metavar="regex>",
                                  help="Regular expression to apply to object names for inclusion in "
                                       "linking/transferring.")
+        self.parser.add_argument("-e", "--enumerate-linked-objects", action="store_true",
+                                 help="Enumerate the set of linked objects that have not yet been migrated.")
         self.parser.add_argument("-d", "--dry-run", action="store_true", default=False,
                                  help="Dry run will not modify the database when linking and will not any transfer any "
                                       "previously linked files. It will simply log the list of files that would be "
@@ -82,97 +84,87 @@ class HatracMigrateCLI (BaseCLI):
                                  default=self.progress_percentage_checkpoint)
 
     @staticmethod
-    def link_objects(directory, base_url, whitelist_regex=None, dry_run=False):
-        # 1. Enumerate the objects to link
-        logger.info("Enumerating existing object versions. %sPlease wait." %
-                    ("Dry-run is enabled. " if dry_run else ""))
+    def make_session_config():
+        session_config = DEFAULT_SESSION_CONFIG.copy()
+        session_config.update({
+            "retry_status_forcelist": [502, 503, 504],
+        })
+        return session_config
+
+    def enumerate_objects(self, linked=False, whitelist_regex=None):
         objects = dict()
         try:
-            root = directory.name_resolve("/")
-            names = directory.namespace_enumerate_names(root)
+            root = self.directory.name_resolve("/")
+            names = self.directory.namespace_enumerate_names(root)
             for name in names:
                 if name.is_object():
-                    versions = directory.object_enumerate_versions(name)
+                    versions = self.directory.object_enumerate_versions(name)
                     for version in versions:
-                        objects["%s:%s" % (version.name, version.version)] = version
+                        if linked:
+                            url = version.aux.get("url")
+                            if url:
+                                objects[url] = version
+                        else:
+                            objects["%s:%s" % (version.name, version.version)] = version
+
         except Exception as e:
             raise RuntimeError(
                 "Exception while enumerating object versions from the database: %s" % format_exception(e))
         total = len(objects)
-        logger.info("Attempting to link redirects for %d object versions." % total)
+        logger.info("Found %d%s object versions." % (total, " linked" if linked else ""))
 
         # 2. Prune the object set based on the whitelist regex, if any
         pruned_objects = dict()
         if whitelist_regex:
             logger.info("Applying whitelist regex '%s' to prune object set." % whitelist_regex)
             regex = re.compile(whitelist_regex)
-            for path, obj in objects.items():
+            for key, obj in objects.items():
+                path = "%s:%s" % (obj.name, obj.version)
                 if regex.match(path):
                     logger.debug("Including object path [%s] in whitelisted object set." % path)
-                    pruned_objects[path] = obj
+                    pruned_objects[key] = obj
             total = len(pruned_objects)
-            logger.info("Whitelisted object set now contains %d entries." % total)
+            logger.info("Filtered object set now contains %d entries." % total)
         else:
             pruned_objects = objects
 
+        return pruned_objects
+
+    def link_objects(self, base_url, whitelist_regex=None, dry_run=False):
+        # 1. Enumerate the objects to link
+        logger.info("Enumerating existing object versions. %sPlease wait..." %
+                    ("Dry-run is enabled. " if dry_run else ""))
+        objects = self.enumerate_objects(linked=False, whitelist_regex=whitelist_regex)
+
         # 3. Link the objects to the source URLs
         succeeded = 0
-        for path, obj in pruned_objects.items():
+        for path, obj in objects.items():
             try:
                 msg = "Linking object [%s:%s] to [%s]" % (obj.name, obj.version, base_url + obj.asurl())
                 if dry_run:
                     logger.info(msg)
                 else:
                     logger.debug(msg)
-                    directory.version_aux_url_update(obj, base_url)
+                    self.directory.version_aux_url_update(obj, base_url)
                     succeeded += 1
             except Exception as e:
                 logger.warning(
                     "Exception while attempting to link object [%s:%s] to [%s]: %s" %
                     (obj.name, obj.version, base_url + obj.asurl(), format_exception(e)))
         if not dry_run:
-            logger.info("Successfully linked %d of %d object versions." % (succeeded, total))
+            logger.info("Successfully linked %d of %d object versions." % (succeeded, len(objects)))
 
-    def transfer_linked_objects(self, directory, allow_missing_hashes=False, whitelist_regex=None):
-        logger.info("Enumerating existing object versions. Please wait.")
-        objects = dict()
-        try:
-            root = directory.name_resolve("/")
-            names = directory.namespace_enumerate_names(root)
-            for name in names:
-                if name.is_object():
-                    versions = directory.object_enumerate_versions(name)
-                    for version in versions:
-                        url = version.aux.get("url")
-                        if url:
-                            objects[url] = version
-        except Exception as e:
-            raise RuntimeError(
-                "Exception while enumerating object versions from the database: %s" % format_exception(e))
-        total = len(objects)
-        logger.info("Attempting to migrate files for %d object versions." % total)
-
-        # 2. Prune the object set based on the whitelist regex, if any
-        pruned_objects = dict()
-        if whitelist_regex:
-            logger.info("Applying whitelist regex '%s' to prune object set." % whitelist_regex)
-            regex = re.compile(whitelist_regex)
-            for url, obj in objects.items():
-                path = "%s:%s" % (obj.name, obj.version)
-                if regex.match(path):
-                    logger.debug("Including object path [%s] in whitelisted object set." % path)
-                    pruned_objects[url] = obj
-            total = len(pruned_objects)
-            logger.info("Whitelisted object set now contains %d entries." % total)
-        else:
-            pruned_objects = objects
+    def transfer_linked_objects(self, allow_missing_hashes=False, whitelist_regex=None):
+        # Get the current working set of linked objects.
+        logger.info("Enumerating linked object versions. Please wait...")
+        objects = self.enumerate_objects(linked=True, whitelist_regex=whitelist_regex)
 
         logger.info("Attempting to transfer file(s)...")
-        for url, obj in pruned_objects.items():
+        for url, obj in objects.items():
             if not self.store:
                 host = urlsplit(url)
                 self.store = hatrac_store.HatracStore(
-                    host.scheme, host.hostname, self.credentials, session_config=make_session_config())
+                    host.scheme, host.hostname, self.credentials, session_config=self.make_session_config())
 
             # 1. GET the specified file from the remote hatrac system into the working cache.
             success = False
@@ -299,7 +291,7 @@ class HatracMigrateCLI (BaseCLI):
             try:
                 if self.backend == "filesystem":
                     version = obj.version
-                    dest_file_path = "%s/%s" % (directory.storage._dirname_relname(obj.name, version))
+                    dest_file_path = "%s/%s" % (self.directory.storage._dirname_relname(obj.name, version))
                     make_dirs(dest_file_path, mode=0o755)
                     logger.info("Moving file [%s] from local cache to [%s]." % (file_path, dest_file_path))
                     shutil.move(file_path, dest_file_path)
@@ -310,10 +302,10 @@ class HatracMigrateCLI (BaseCLI):
                     if file_size < self.chunk_size:
                         logger.info("Transferring file [%s] from local cache to backend storage type: [%s]." %
                                     (file_path, self.backend))
-                        version = directory.storage.create_from_file(obj.name,
-                                                                     input_file,
-                                                                     file_size,
-                                                                     obj.metadata)
+                        version = self.directory.storage.create_from_file(obj.name,
+                                                                          input_file,
+                                                                          file_size,
+                                                                          obj.metadata)
                     # 3.2 Do chunked transfer.
                     else:
                         logger.info("Transferring file [%s] from local cache to backend storage using chunked "
@@ -327,7 +319,7 @@ class HatracMigrateCLI (BaseCLI):
                         nchunks = file_size // self.chunk_size
                         tchunks = nchunks if remainder == 0 else nchunks + 1
                         start = datetime.datetime.now()
-                        upload = directory.storage.create_upload(obj.name, file_size, obj.metadata)
+                        upload = self.directory.storage.create_upload(obj.name, file_size, obj.metadata)
 
                         # 3.2.2 Upload chunks
                         while tbytes < file_size:
@@ -335,15 +327,15 @@ class HatracMigrateCLI (BaseCLI):
                             metadata = obj.metadata.copy()
                             c_start = datetime.datetime.now()
                             try:
-                                aux = directory.storage.upload_chunk_from_file(obj.name,
-                                                                               upload,
-                                                                               position,
-                                                                               self.chunk_size,
-                                                                               input_file,
-                                                                               nbytes,
-                                                                               metadata)
+                                aux = self.directory.storage.upload_chunk_from_file(obj.name,
+                                                                                    upload,
+                                                                                    position,
+                                                                                    self.chunk_size,
+                                                                                    input_file,
+                                                                                    nbytes,
+                                                                                    metadata)
                             except:
-                                directory.storage.cancel_upload(obj.name, upload)
+                                self.directory.storage.cancel_upload(obj.name, upload)
                                 raise
 
                             chunk_aux.append({"position": position, "aux": aux})
@@ -357,7 +349,7 @@ class HatracMigrateCLI (BaseCLI):
                                              (obj.name, position, tchunks, tbytes, file_size, c_summary))
 
                         # 3.2.3 Finalize upload job
-                        version = directory.storage.finalize_upload(obj.name, upload, chunk_aux, obj.metadata)
+                        version = self.directory.storage.finalize_upload(obj.name, upload, chunk_aux, obj.metadata)
                         elapsed = datetime.datetime.now() - start
                         summary = get_transfer_summary(tbytes, elapsed)
                         logger.info("Chunked upload of file [%s] successful. %s" % (file_path, summary))
@@ -365,9 +357,9 @@ class HatracMigrateCLI (BaseCLI):
                 # 3.3 Post-transfer database updates
                 # We only care about storing the returned aux version in the non-filesystem backend case
                 version = version if self.backend != "filesystem" else None
-                directory.version_aux_version_update(obj, version)
+                self.directory.version_aux_version_update(obj, version)
                 # On a successful transfer, we will automatically delete the aux redirect url
-                directory.version_aux_url_delete(obj)
+                self.directory.version_aux_url_delete(obj)
                 success = True
             except Exception as e:
                 logger.error("Error during transfer of [%s] to backend storage: %s" %
@@ -390,31 +382,39 @@ class HatracMigrateCLI (BaseCLI):
             self.progress_percentage_checkpoint = args.transfer_progress_info_percentage
 
         # credential initialization
-        token = args.token if args.token else None
-        oauth2_token = args.oauth2_token if args.oauth2_token else None
-        credential_file = args.credential_file if args.credential_file else None
-        if credential_file:
-            self.credentials = get_credential(self.hostname, credential_file)
-        elif token or oauth2_token:
-            self.credentials = format_credential(token=token, oauth2_token=oauth2_token)
+        if args.host:
+            token = args.token if args.token else None
+            oauth2_token = args.oauth2_token if args.oauth2_token else None
+            credential_file = args.credential_file if args.credential_file else None
+            if token or oauth2_token:
+                self.credentials = format_credential(token=token, oauth2_token=oauth2_token)
+            elif credential_file:
+                self.credentials = get_credential(args.host, credential_file)
+            else:
+                self.credentials = get_credential(args.host)
 
         try:
             # This will generally fail unless run locally in ~/hatrac on the target hatrac system for the migration
             from hatrac import directory
+            self.directory = directory
             self.backend = config.get('storage_backend')
+
+            # Enumerate the set of linked objects.
+            if args.enumerate_linked_objects:
+                self.enumerate_objects(linked=True, whitelist_regex=args.whitelist_path_pattern)
 
             # The "link_redirects" logic will set alternate "redirect" URLs for every object version in the database
             # based on the following path components:
             # <host> + <path-prefix> + <existing object name from the database name table>.
             # The server will then automatically redirect requests for these objects to these URLs.
-            if args.link_redirects:
+            elif args.link_redirects:
                 if not args.host:
                     raise argparse.ArgumentError(
                         None, 'The "--host" argument is required when the "--link-redirects" argument is specified.')
                 base_url = (args.host if args.host.startswith("http") else "https://" + args.host)
-                directory.prefix = args.path_prefix if args.path_prefix else config.get("service_prefix", "/hatrac")
-                self.link_objects(directory, base_url,
-                                  whitelist_regex=args.whitelist_path_pattern, dry_run=args.dry_run)
+                self.directory.prefix = \
+                    args.path_prefix if args.path_prefix else config.get("service_prefix", "/hatrac")
+                self.link_objects(base_url, whitelist_regex=args.whitelist_path_pattern, dry_run=args.dry_run)
 
             # The "transfer_linked_redirects" logic will attempt to transfer files referenced by any pre-existing
             # redirect links to the "local" hatrac instance. This could involve local file caching when additional IO
@@ -423,8 +423,7 @@ class HatracMigrateCLI (BaseCLI):
                 if args.dry_run:
                     logger.info("Skipping transfer of linked objects for dry-run.")
                 else:
-                    self.transfer_linked_objects(directory,
-                                                 allow_missing_hashes=args.allow_missing_hashes,
+                    self.transfer_linked_objects(allow_missing_hashes=args.allow_missing_hashes,
                                                  whitelist_regex=args.whitelist_path_pattern)
             else:
                 self.parser.print_usage()
@@ -435,20 +434,12 @@ class HatracMigrateCLI (BaseCLI):
             logger.error(format_exception(e))
             if args.debug:
                 traceback.print_exc()
+        except KeyboardInterrupt:
+            logger.warning("Process interrupted by user.")
         except:
             logger.error("Unhandled exception!")
             traceback.print_exc()
         return 1
-
-
-def make_session_config():
-    """Return custom requests session_config for our data submission scenarios
-    """
-    session_config = DEFAULT_SESSION_CONFIG.copy()
-    session_config.update({
-        "retry_status_forcelist": [502, 503, 504],
-    })
-    return session_config
 
 
 def main():
