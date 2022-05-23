@@ -401,6 +401,7 @@ class HatracMigrateCLI (BaseCLI):
 
             # Enumerate the set of linked objects.
             if args.enumerate_linked_objects:
+                logger.info("Enumerating linked object versions. Please wait...")
                 self.enumerate_objects(linked=True, whitelist_regex=args.whitelist_path_pattern)
 
             # The "link_redirects" logic will set alternate "redirect" URLs for every object version in the database
