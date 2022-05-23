@@ -163,6 +163,8 @@ class HatracMigrateCLI (BaseCLI):
         for url, obj in objects.items():
             if not self.store:
                 host = urlsplit(url)
+                if not self.credentials:
+                    self.credentials = get_credential(host.hostname)
                 self.store = hatrac_store.HatracStore(
                     host.scheme, host.hostname, self.credentials, session_config=self.make_session_config())
 
@@ -384,8 +386,6 @@ class HatracMigrateCLI (BaseCLI):
                 self.credentials = format_credential(token=token, oauth2_token=oauth2_token)
             elif credential_file:
                 self.credentials = get_credential(args.host, credential_file)
-            else:
-                self.credentials = get_credential(args.host)
 
         try:
             # This will generally fail unless run locally in ~/hatrac on the target hatrac system for the migration
@@ -395,6 +395,7 @@ class HatracMigrateCLI (BaseCLI):
 
             # Enumerate the set of linked objects.
             if args.enumerate_linked_objects:
+                logger.info("Enumerating linked object versions. Please wait...")
                 self.enumerate_objects(linked=True, whitelist_regex=args.whitelist_path_pattern)
 
             # The "link_redirects" logic will set alternate "redirect" URLs for every object version in the database
