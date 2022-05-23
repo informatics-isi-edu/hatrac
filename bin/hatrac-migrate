@@ -178,13 +178,7 @@ class HatracMigrateCLI (BaseCLI):
             try:
                 logger.info("Performing HEAD request for metadata on resource: %s" % resource_path)
                 resp = self.store.head(resource_path, self.headers)
-                length = resp.headers.get('Content-Length')
-                if length is None:
-                    logger.error("Remote resource %s is missing 'Content-Length' header. File will be skipped." %
-                                 resource_path)
-                    continue
-                else:
-                    file_size = int(length)
+                file_size = int(resp.headers.get('Content-Length', 0))
                 file_md5 = resp.headers.get('Content-MD5') or ""
                 if not file_md5:
                     logger.warning("Remote resource %s is missing 'Content-MD5' header." % resource_path)
