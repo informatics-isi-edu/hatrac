@@ -54,7 +54,7 @@ from psycopg2.extras import DictCursor
 
 from webauthn2.util import jsonWriter, negotiated_content_type
 
-from ...core import coalesce, Metadata, sql_literal, sql_identifier
+from ...core import coalesce, Metadata, sql_literal, sql_identifier, Redirect
 from ... import core
 
 def regexp_escape(s):
@@ -343,6 +343,7 @@ class HatracObjectVersion (HatracName):
         self.object = object
         self.version = args['version']
         self.nbytes = args['nbytes']
+        self.aux = args['aux'] or {}
 
     def __str__(self):
         return '%s:%s' % (self.object, self.version)
@@ -362,9 +363,19 @@ class HatracObjectVersion (HatracName):
         return True
 
     def get_content(self, client_context, get_data=True):
+        aux_url = self.aux.get("url")
+        if aux_url:
+            nbytes, metadata, data = self.directory.get_version_content(
+                self.object, self, client_context, False)
+            return nbytes, metadata, Redirect(aux_url)
         return self.directory.get_version_content(self.object, self, client_context, get_data)
 
     def get_content_range(self, client_context, get_slice=None, get_data=True):
+        aux_url = self.aux.get("url")
+        if aux_url:
+            nbytes, metadata, data = self.directory.get_version_content_range(
+                self.object, self, get_slice, client_context, False)
+            return nbytes, metadata, Redirect(aux_url)
         return self.directory.get_version_content_range(self.object, self, get_slice, client_context, get_data)
 
     def delete(self, client_context):
@@ -404,6 +415,7 @@ class HatracUpload (HatracName):
         self.job = args['job']
         self.nbytes = args['nbytes']
         self.chunksize = args['chunksize']
+        self.created_on = args['created_on']
 
     def __str__(self):
         return "%s;upload/%s" % (self.object, self.job)
@@ -564,6 +576,22 @@ class connection (psycopg2.extensions.connection):
           WHERE $1 = ANY (n.ancestors)
           ORDER BY n.name, u.id ;
 
+        PREPARE hatrac_version_aux_url_update (int8, text) AS
+          UPDATE hatrac.version v 
+          SET aux = ('{"url":"' || $2 || '"}')::jsonb
+          WHERE id = $1 ;
+
+        PREPARE hatrac_version_aux_url_delete (int8) AS 
+          UPDATE hatrac.version
+          SET aux = aux::jsonb - 'url' 
+          WHERE id = $1 ;
+
+        PREPARE hatrac_version_aux_version_update (int8, text) AS 
+          UPDATE hatrac.version
+          SET aux = CASE WHEN $2 IS NOT NULL THEN 
+          ('{"version":"' || $2 || '"}')::jsonb ELSE aux::jsonb - 'version' END
+          WHERE id = $1 ;
+
 """ % dict(
     owner_acl=ancestor_acl_sql('owner'),
     update_acl=ancestor_acl_sql('update'),
@@ -714,11 +742,26 @@ CREATE TABLE IF NOT EXISTS hatrac.version (
   is_deleted bool NOT NULL,
   owner text[],
   read text[],
+  aux json,
   UNIQUE(nameid, version),
   CHECK(version IS NOT NULL OR is_deleted)
 );
 
 CREATE INDEX IF NOT EXISTS version_nameid_id_idx ON hatrac.version (nameid, id);
+
+DO $aux_upgrade$
+BEGIN
+  IF (SELECT True FROM information_schema.columns
+      WHERE table_schema = 'hatrac'
+        AND table_name = 'version'
+        AND column_name = 'aux') THEN
+     -- do nothing
+  ELSE
+     ALTER TABLE hatrac.version ADD COLUMN aux json;
+  END IF;
+END;
+$aux_upgrade$ LANGUAGE plpgsql;
+
 """
 
 _upload_table_sql = """
@@ -733,6 +776,19 @@ CREATE TABLE IF NOT EXISTS hatrac.upload (
   UNIQUE(nameid, job),
   CHECK(chunksize > 0)
 );
+
+DO $created_on_upgrade$
+BEGIN
+  IF (SELECT True FROM information_schema.columns
+      WHERE table_schema = 'hatrac'
+        AND table_name = 'upload'
+        AND column_name = 'created_on') THEN
+     -- do nothing
+  ELSE
+     ALTER TABLE hatrac.upload ADD COLUMN IF NOT EXISTS created_on timestamptz DEFAULT (now());
+  END IF;
+END;
+$created_on_upgrade$ LANGUAGE plpgsql;
 """
 
 _chunk_table_sql = """
@@ -994,7 +1050,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             for res in deleted_uploads:
                 self.storage.cancel_upload(res.name, res.job)
             for res in deleted_versions:
-                self.storage.delete(res.name, res.version)
+                self.storage.delete(res.name, res.version, aux=res.aux)
             for res in deleted_names:
                 self.storage.delete_namespace(res.name)
 
@@ -1004,7 +1060,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     def delete_version(self, resource, client_context, conn=None, cur=None):
         """Delete an existing version."""
         self._delete_version(conn, cur, resource)
-        return lambda : self.storage.delete(resource.name, resource.version)
+        return lambda : self.storage.delete(resource.name, resource.version, aux=resource.aux)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version(self, object, client_context, nbytes=None, metadata={}, conn=None, cur=None):
@@ -1025,6 +1081,18 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         version = self.storage.create_from_file(object.name, input, nbytes, metadata)
         self.pc.perform(lambda conn, cur: self._complete_version(conn, cur, resource, version))
         return self.version_resolve(object, version)
+
+    @db_wrap()
+    def version_aux_version_update(self, resource, version, client_context=None, conn=None, cur=None):
+        self._hatrac_version_aux_version_update(conn, cur, resource, version)
+
+    @db_wrap()
+    def version_aux_url_update(self, resource, url_prefix, client_context=None, conn=None, cur=None):
+        self._hatrac_version_aux_url_update(conn, cur, resource, url_prefix)
+
+    @db_wrap()
+    def version_aux_url_delete(self, resource, client_context=None, conn=None, cur=None):
+        self._hatrac_version_aux_url_delete(conn, cur, resource)
 
     @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
@@ -1079,13 +1147,18 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         self._delete_upload(conn, cur, upload)
         return lambda : self.storage.cancel_upload(upload.name, upload.job)
 
+    @db_wrap(reload_pos=1, transform=lambda thunk: thunk())
+    def _upload_cancel(self, upload, conn=None, cur=None):
+        self._delete_upload(conn, cur, upload)
+        return lambda : self.storage.cancel_upload(upload.name, upload.job)
+
     @db_wrap(reload_pos=2, enforce_acl=(2, 4, ['owner', 'read', 'ancestor_owner', 'ancestor_read']))
     def get_version_content_range(self, object, objversion, get_slice, client_context, get_data=True, conn=None, cur=None):
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
             raise core.NotFound('Resource %s is not available.' % objversion)
         if get_data:
-            nbytes, metadata, data = self.storage.get_content_range(object.name, objversion.version, objversion.metadata, get_slice)
+            nbytes, metadata, data = self.storage.get_content_range(object.name, objversion.version, objversion.metadata, get_slice, objversion.aux)
         else:
             nbytes = objversion.nbytes
             metadata = objversion.metadata
@@ -1442,3 +1515,14 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(int(resource.id))
         ))
         return list(cur)
+
+    def _hatrac_version_aux_url_update(self, conn, cur, resource, url_prefix):
+        cur.execute("EXECUTE hatrac_version_aux_url_update(%s, %s);" %
+                    (sql_literal(resource.id), sql_literal(url_prefix + resource.asurl())))
+
+    def _hatrac_version_aux_url_delete(self, conn, cur, resource):
+        cur.execute("EXECUTE hatrac_version_aux_url_delete(%s);" % (sql_literal(resource.id)))
+
+    def _hatrac_version_aux_version_update(self, conn, cur, resource, version):
+        cur.execute("EXECUTE hatrac_version_aux_version_update(%s, %s);" %
+                    (sql_literal(resource.id), sql_literal(version)))

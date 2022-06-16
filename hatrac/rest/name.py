@@ -11,7 +11,8 @@
 import web
 
 from .. import core
-from .core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, hash_list
+from .core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, \
+    PayloadTooLarge, hash_list
 
 @web_url([
      # path, name, version, querystr
@@ -50,10 +51,13 @@ class NameVersion (RestHandler):
         self.http_check_preconditions()
         if self.get_body is False and resource.is_object():
             web.header("Accept-Ranges", "bytes")
-        return self.get_content(
+        response = self.get_content(
             resource,
             web.ctx.webauthn2_context
         )
+        if isinstance(response, core.Redirect):
+            return self.redirect_response(response)
+        return response
 
 @web_url([
      # path, name, querystr
@@ -149,6 +153,9 @@ class Name (RestHandler):
             except:
                 raise LengthRequired()
 
+            if nbytes > core.config.get("max_request_payload_size", core.max_request_payload_size_default):
+                raise PayloadTooLarge()
+
             metadata = { 'content-type': in_content_type }
             
             if 'HTTP_CONTENT_MD5' in web.ctx.env:
@@ -211,8 +218,11 @@ class Name (RestHandler):
         self.http_check_preconditions()
         if self.get_body is False and resource.is_object():
             web.header("Accept-Ranges", "bytes")
-        return self.get_content(
+        response = self.get_content(
             resource,
             web.ctx.webauthn2_context
         )
+        if isinstance(response, core.Redirect):
+            return self.redirect_response(response)
+        return response
 
