@@ -1,0 +1,95 @@
+
+name: Hatrac tests
+
+on: 
+  push:
+    branches: 
+      - 'master'
+  pull_request:
+    branches:
+      - 'master'
+
+jobs:
+  install-and-test:
+    runs-on: ubuntu-20.04
+    env:
+      COOKIES: /home/runner/cookies
+      VERBOSE: brief
+      TEST_SSL_VERIFY: false
+      HTTPD_ERROR_LOG: /var/log/apache2/error.log
+      PYTHONWARNINGS: "ignore:Unverified HTTPS request"
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v2
+        with:
+          path: hatrac
+      - name: Setup the system
+        run: |
+          sudo apt-get -y install libcurl4-openssl-dev libjson-c-dev
+          sudo service postgresql stop || true
+          sudo service postgresql start 12
+          sudo apt-get install apache2 apache2-dev ssl-cert libapache2-mod-wsgi-py3
+          sudo ln -s /etc/apache2/conf-enabled /etc/apache2/conf.d
+          sudo -H -u postgres psql -c "SHOW ALL"
+          sudo a2enmod ssl
+          sudo a2ensite default-ssl
+          sudo groupadd -o -g $(id -g www-data) apache 
+          sudo apt-get install -y python3-setuptools python3-ply
+          sudo su -c 'echo /usr/lib/python3.8/site-packages > /usr/local/lib/python3.8/dist-packages/sys-site-packages.pth'
+          sudo pip3 install requests
+          sudo pip3 install psycopg2-binary
+          sudo pip3 install git+https://github.com/informatics-isi-edu/webpy.git
+      - name: Install webauthn
+        run: |
+          sudo useradd -m -r webauthn
+          sudo su -c '/usr/bin/python3 -c "import sys;import pprint;pprint.pprint(sys.path)"' - webauthn
+          git clone https://github.com/informatics-isi-edu/webauthn.git
+          cd webauthn
+          git checkout origin/master
+          sudo make testvars
+          sudo make install
+          sudo make deploy
+          sudo bash ./test/ubuntu-travis-setup.sh
+          sudo a2enmod webauthn
+          sudo service apache2 restart
+      - name: Install Hatrac
+        run: |
+          cd hatrac
+          sudo python3 ./setup.py install
+          sudo useradd -m -r hatrac
+          sudo -H -u postgres createuser -d hatrac
+          sudo -H -u postgres psql -c "GRANT webauthn TO hatrac"
+          sudo -H -u hatrac createdb hatrac
+          sudo cp test/hatrac_config.json ~hatrac/
+          sudo -H -u hatrac hatrac-deploy admin
+          sudo su -c 'python3 -c "import hatrac as m;m.sample_httpd_config()"' - hatrac > ../wsgi_hatrac.conf
+          sudo cp ../wsgi_hatrac.conf /etc/apache2/conf.d/wsgi_hatrac.conf
+          sudo mkdir /var/www/hatrac
+          sudo chown hatrac /var/www/hatrac
+      - name: Run test cases
+        id: hatrac-test
+        continue-on-error: true
+        run: |
+          cd hatrac
+          sudo -H -u webauthn webauthn2-manage adduser test1
+          sudo -H -u webauthn webauthn2-manage passwd test1 dummypassword
+          sudo -H -u webauthn webauthn2-manage addattr admin
+          sudo -H -u webauthn webauthn2-manage assign test1 admin
+          sudo service apache2 restart
+          curl --fail -k -b ${COOKIES} -c ${COOKIES} -d username=test1 -d password=dummypassword https://${HOSTNAME}/authn/session
+          bash ./test/rest-smoketest.sh
+      - name: Check on test cases
+        if: always() && steps.hatrac-test.outcome != 'success'
+        run: exit 1
+      - name: Diagnosis after failure
+        if: ${{ failure() }}
+        run: |
+          sudo ls -lR /etc/apache2
+          sudo ls -lR /var/run/apache2
+          sudo ls -lR /var/log/apache2
+          sudo cat /etc/apache2/conf.d/webauthn.conf
+          sudo cat /etc/apache2/conf.d/wsgi_webauthn2.conf
+          sudo cat /etc/apache2/conf.d/wsgi_hatrac.conf
+          sudo cat ${HTTPD_ERROR_LOG}
+          sudo systemctl status apache2 -l
+                    
