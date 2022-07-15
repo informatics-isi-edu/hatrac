@@ -27,7 +27,7 @@ except ModuleNotFoundError:
 
 DESC = "DERIVA HATRAC Migration Tool"
 INFO = "For more information see: https://github.com/informatics-isi-edu/hatrac"
-VERSION = 0.1
+VERSION = 0.2
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,8 @@ class HatracMigrateCLI (BaseCLI):
             for key, obj in objects.items():
                 path = "%s:%s" % (obj.name, obj.version)
                 if regex.match(path):
-                    logger.debug("Including object path [%s] in whitelisted object set." % path)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug("Including object path [%s] in whitelisted object set." % path)
                     pruned_objects[key] = obj
             total = len(pruned_objects)
             logger.info("Filtered object set now contains %d entries." % total)
@@ -144,7 +145,8 @@ class HatracMigrateCLI (BaseCLI):
                 if dry_run:
                     logger.info(msg)
                 else:
-                    logger.debug(msg)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(msg)
                     self.directory.version_aux_url_update(obj, base_url)
                     succeeded += 1
             except Exception as e:
@@ -178,7 +180,8 @@ class HatracMigrateCLI (BaseCLI):
             output_dir = os.path.abspath(os.path.join(self.cache_dir, dirname))
             file_path = os.path.abspath(os.path.join(output_dir, filename))
             try:
-                logger.info("Performing HEAD request for metadata on resource: %s" % resource_path)
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("Performing HEAD request for metadata on resource: %s" % resource_path)
                 resp = self.store.head(resource_path, self.headers)
                 file_size = int(resp.headers.get('Content-Length', 0))
                 file_md5 = resp.headers.get('Content-MD5') or ""
@@ -304,8 +307,8 @@ class HatracMigrateCLI (BaseCLI):
                                                                           obj.metadata)
                     # 3.2 Do chunked transfer.
                     else:
-                        logger.info("Transferring file [%s] from local cache to backend storage using chunked "
-                                    "upload to backend storage type: [%s]." % (file_path, self.backend))
+                        logger.info("Transferring file [%s] from local cache to backend storage type [%s] using "
+                                    "chunked upload." % (file_path, self.backend))
 
                         # 3.2.1 Create upload job
                         tbytes = 0
