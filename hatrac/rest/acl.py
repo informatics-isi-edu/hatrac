@@ -27,7 +27,7 @@ class ACLEntry (RestHandler):
         resource.set_acl_role(
             access, 
             role, 
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
@@ -41,7 +41,7 @@ class ACLEntry (RestHandler):
         resource.drop_acl_role(
             access, 
             role, 
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.delete_response()
 
@@ -52,7 +52,7 @@ class ACLEntry (RestHandler):
         self.set_http_etag(hash_list(resource))
         resource = resource[role]
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _ACLEntry_view = app.route(
     '/;acl/<access>/<role>'
@@ -78,7 +78,7 @@ class ACL (RestHandler):
         if in_content_type != 'application/json':
             raise BadRequest('Only application/json input is accepted for ACLs.')
         try:
-            acl = jsonReader(web.ctx.env['wsgi.input'].read().decode())
+            acl = json.loads(request.stream.read().decode())
         except:
             raise BadRequest('Error reading JSON input.')
         if not isinstance(acl, list):
@@ -94,7 +94,7 @@ class ACL (RestHandler):
         resource.set_acl(
             access,
             acl,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
@@ -107,7 +107,7 @@ class ACL (RestHandler):
         self.http_check_preconditions('DELETE')
         resource.clear_acl(
             access,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
@@ -117,7 +117,7 @@ class ACL (RestHandler):
         resource = self.resolve_name_or_version(path, name, version).acls[access]
         self.set_http_etag(hash_list(resource))
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _ACL_view = app.route(
     '/;acl/<access>'
@@ -153,7 +153,7 @@ class ACLs (RestHandler):
         resource = self.resolve_name_or_version(path, name, version).acls
         self.set_http_etag(hash_dict(resource))
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _ACLs_view = app.route(
     '/;acl'

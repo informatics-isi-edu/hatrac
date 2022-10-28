@@ -22,7 +22,7 @@ class Metadata (RestHandler):
         if in_content_type != 'text/plain':
             raise BadRequest('Only text/plain input is accepted for metadata.')
 
-        value = web.ctx.env['wsgi.input'].read().decode()
+        value = request.stream.read().decode()
 
         if version:
             resource = self.resolve_version(path, name, version)
@@ -36,8 +36,8 @@ class Metadata (RestHandler):
         self.http_check_preconditions('PUT')
 
         resource.update_metadata(
-            web.ctx.hatrac_directory.metadata_from_http({ fieldname: value }),
-            web.ctx.webauthn2_context
+            hatrac_ctx.hatrac_directory.metadata_from_http({ fieldname: value }),
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
@@ -56,7 +56,7 @@ class Metadata (RestHandler):
 
         resource.pop_metadata(
             fieldname,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
@@ -75,7 +75,7 @@ class Metadata (RestHandler):
 
         self.set_http_etag(hash_value(resource))
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _Metadata_view = app.route(
     '/;metadata/<fieldname>'
@@ -109,7 +109,7 @@ class MetadataCollection (RestHandler):
 
         self.set_http_etag(hash_dict(resource))
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _MetadataCollection_view = app.route(
     '/;metadata'

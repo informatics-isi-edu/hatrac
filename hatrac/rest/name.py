@@ -33,7 +33,7 @@ class NameVersion (RestHandler):
         self.set_http_etag(resource.version)
         self.http_check_preconditions('DELETE')
         resource.delete(
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.delete_response()
 
@@ -45,15 +45,16 @@ class NameVersion (RestHandler):
         )
         self.set_http_etag(resource.version)
         self.http_check_preconditions()
-        if self.get_body is False and resource.is_object():
-            web.header("Accept-Ranges", "bytes")
-        response = self.get_content(
+        body, status, headers = self.get_content(
             resource,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         if isinstance(response, core.Redirect):
             return self.redirect_response(response)
         return response
+        if isinstance(body, core.Redirect):
+            return self.redirect_response(body)
+        return (body, status, headers)
 
 _NameVersion_view = app.route(
     '/<name>:<version>'
@@ -84,7 +85,7 @@ class NameVersions (RestHandler):
         self.http_check_preconditions()
         return self.get_content(
             resource,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
 
 
@@ -121,18 +122,18 @@ class Name (RestHandler):
         
             # check precondition for current state of resource not existing
             self.http_check_preconditions('PUT', False)
-            resource = web.ctx.hatrac_directory.create_name(
+            resource = hatrac_ctx.hatrac_directory.create_name(
                 self._fullname(path, name),
                 is_object,
                 make_parents,
-                web.ctx.webauthn2_context
+                hatrac_ctx.webauthn2_context
             )
         elif not resource.is_object():
             self.set_http_etag(
                 hash_list([ r.asurl() for r in resource.directory.namespace_enumerate_names(resource, False, False)])
             )
             self.http_check_preconditions('PUT')
-            resource.enforce_acl(['owner'], web.ctx.webauthn2_context)
+            resource.enforce_acl(['owner'], hatrac_ctx.webauthn2_context)
             raise Conflict('Namespace %s already exists.' % resource)
         else:
             try:
@@ -147,7 +148,7 @@ class Name (RestHandler):
         # covers update of existing object or first version of new object
         if resource.is_object():
             try:
-                nbytes = int(web.ctx.env['CONTENT_LENGTH'])
+                nbytes = int(request.environ['CONTENT_LENGTH'])
             except:
                 raise LengthRequired()
 
@@ -156,20 +157,20 @@ class Name (RestHandler):
 
             metadata = { 'content-type': in_content_type }
             
-            if 'HTTP_CONTENT_MD5' in web.ctx.env:
-                metadata['content-md5'] = web.ctx.env.get('HTTP_CONTENT_MD5').strip()
+            if 'HTTP_CONTENT_MD5' in request.environ:
+                metadata['content-md5'] = request.environ.get('HTTP_CONTENT_MD5').strip()
 
-            if 'HTTP_CONTENT_SHA256' in web.ctx.env:
-                metadata['content-sha256'] = web.ctx.env.get('HTTP_CONTENT_SHA256').strip()
+            if 'HTTP_CONTENT_SHA256' in request.environ:
+                metadata['content-sha256'] = request.environ.get('HTTP_CONTENT_SHA256').strip()
 
-            if 'HTTP_CONTENT_DISPOSITION' in web.ctx.env:
-                metadata['content-disposition'] = web.ctx.env.get('HTTP_CONTENT_DISPOSITION').strip()
+            if 'HTTP_CONTENT_DISPOSITION' in request.environ:
+                metadata['content-disposition'] = request.environ.get('HTTP_CONTENT_DISPOSITION').strip()
 
             resource = resource.create_version_from_file(
-                web.ctx.env['wsgi.input'],
-                web.ctx.webauthn2_context,
+                request.stream,
+                hatrac_ctx.webauthn2_context,
                 nbytes,
-                metadata=web.ctx.hatrac_directory.metadata_from_http(metadata)
+                metadata=hatrac_ctx.hatrac_directory.metadata_from_http(metadata)
             )
                 
         return self.create_response(resource)
@@ -195,7 +196,7 @@ class Name (RestHandler):
             )
             self.http_check_preconditions('DELETE')
         resource.delete(
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.delete_response()
 
@@ -213,16 +214,13 @@ class Name (RestHandler):
                 hash_list([ r.asurl() for r in resource.directory.namespace_enumerate_names(resource, False, False)])
             )
         self.http_check_preconditions()
-        if self.get_body is False and resource.is_object():
-            web.header("Accept-Ranges", "bytes")
-        response = self.get_content(
+        body, status, headers = self.get_content(
             resource,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
-        if isinstance(response, core.Redirect):
+        if isinstance(body, core.Redirect):
             return self.redirect_response(response)
-        return response
-
+        return (body, status, headers)
 
 _Name_view = app.route(
     '/'

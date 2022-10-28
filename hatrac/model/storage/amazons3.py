@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2017 University of Southern California
+# Copyright 2015-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -13,10 +13,11 @@ import base64
 import binascii
 import boto3
 import sys
-import web
 from io import BufferedRandom, BytesIO
-from webauthn2.util import PooledConnection
 from botocore.exceptions import ClientError
+from flask import g as hatrac_ctx
+
+from webauthn2.util import PooledConnection
 from hatrac.core import NotFound, BadRequest, coalesce, max_request_payload_size_default, Redirect
 
 
@@ -59,8 +60,8 @@ def s3_bucket_wrap(deferred_conn_reuse=False):
                     return orig_method(*args, **kwargs1)
                     # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
                 except ClientError as s3_error:
-                    if "hatrac_request_trace" in web.ctx:
-                        web.ctx.hatrac_request_trace("S3 client error: %s" % s3_error)
+                    if "hatrac_request_trace" in hatrac_ctx:
+                        hatrac_ctx.hatrac_request_trace("S3 client error: %s" % s3_error)
                     raise BadRequest(s3_error)
                 except Exception:
                     s3_session = None
@@ -227,8 +228,8 @@ class HatracStorage(PooledS3BucketConnection):
                     yield chunk
             except Exception as ev:
                 session = None
-                if "hatrac_request_trace" in web.ctx:
-                    web.ctx.hatrac_request_trace("S3 read error: %s" % ev)
+                if "hatrac_request_trace" in hatrac_ctx:
+                    hatrac_ctx.hatrac_request_trace("S3 read error: %s" % ev)
             finally:
                 if session:
                     self._put_pooled_connection(session)

@@ -29,7 +29,7 @@ class ObjectTransferChunk (RestHandler):
             raise BadRequest('Invalid chunk number %s.' % chunk)
         
         try:
-            nbytes = int(web.ctx.env['CONTENT_LENGTH'])
+            nbytes = int(request.environ['CONTENT_LENGTH'])
         except:
             raise LengthRequired()
 
@@ -42,19 +42,19 @@ class ObjectTransferChunk (RestHandler):
                 ('content-md5', 'HTTP_CONTENT_MD5'),
                 ('content-sha256', 'HTTP_CONTENT_SHA256')
         ]:
-            val = web.ctx.env.get(var)
+            val = request.environ.get(var)
             if val is not None:
                 metadata[hdr] = val
                 
         upload = self.resolve_upload(path, name, job)
-        upload.enforce_acl(['owner'], web.ctx.webauthn2_context)
+        upload.enforce_acl(['owner'], hatrac_ctx.webauthn2_context)
         self.http_check_preconditions('PUT')
         upload.upload_chunk_from_file(
             chunk, 
-            web.ctx.env['wsgi.input'],
-            web.ctx.webauthn2_context,
+            request.stream,
+            hatrac_ctx.webauthn2_context,
             nbytes,
-            web.ctx.hatrac_directory.metadata_from_http(metadata)
+            hatrac_ctx.hatrac_directory.metadata_from_http(metadata)
         )
         return self.update_response()
 
@@ -79,14 +79,14 @@ class ObjectTransfer (RestHandler):
         """Update status of transfer job to finalize."""
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions('POST')
-        version = upload.finalize(web.ctx.webauthn2_context)
+        version = upload.finalize(hatrac_ctx.webauthn2_context)
         return self.create_response(version)
 
     def delete(self, name, job, path="/"):
         """Cancel existing transfer job."""
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions('DELETE')
-        upload.cancel(web.ctx.webauthn2_context)
+        upload.cancel(hatrac_ctx.webauthn2_context)
         return self.update_response()
 
     def get(self, name, job, path="/"):
@@ -94,7 +94,7 @@ class ObjectTransfer (RestHandler):
         self.get_body = False if request.method == 'HEAD' else True
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions()
-        return self.get_content(upload, web.ctx.webauthn2_context)
+        return self.get_content(upload, hatrac_ctx.webauthn2_context)
 
 _ObjectTransfer_view = app.route(
     '/<name>;upload/<job>'
@@ -119,7 +119,7 @@ class ObjectTransfers (RestHandler):
         if in_content_type != 'application/json':
             raise BadRequest('Only application/json input is accepted for upload jobs.')
         try:
-            job = jsonReader(web.ctx.env['wsgi.input'].read().decode())
+            job = json.loads(request.stream.read().decode())
         except ValueError as ev:
             raise BadRequest('Error reading JSON input:' % ev)
         if type(job) != dict:
@@ -157,11 +157,11 @@ class ObjectTransfers (RestHandler):
         try:
             params = self.parse_querystr(querystr)
             make_parents = params.get('parents', 'false').lower() == 'true'
-            resource = web.ctx.hatrac_directory.create_name(
+            resource = hatrac_ctx.hatrac_directory.create_name(
                 self._fullname(path, name),
                 True,  # is_object
                 make_parents,
-                web.ctx.webauthn2_context
+                hatrac_ctx.webauthn2_context
             )
         except core.Conflict as ev:
             try:
@@ -172,7 +172,7 @@ class ObjectTransfers (RestHandler):
         # say resource_exists=False as we always create a new one...
         self.http_check_preconditions('POST', False)
         upload = resource.create_version_upload_job(
-            chunksize, web.ctx.webauthn2_context, nbytes, web.ctx.hatrac_directory.metadata_from_http(metadata)
+            chunksize, hatrac_ctx.webauthn2_context, nbytes, hatrac_ctx.hatrac_directory.metadata_from_http(metadata)
         )
         return self.create_response(upload)
 
@@ -181,10 +181,7 @@ class ObjectTransfers (RestHandler):
         self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve(path, name).get_uploads()
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
-    
-
-
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _ObjectTransfers_view = app.route(
     '/<name>;upload'

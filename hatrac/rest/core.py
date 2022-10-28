@@ -19,20 +19,24 @@ import datetime
 from datetime import timezone
 import struct
 import urllib
-
 import sys
 import traceback
 import hashlib
+from flask import request, g as hatrac_ctx
+import flask.views
+import werkzeug.exceptions
+import werkzeug.http
 
 import webauthn2
-from webauthn2.util import context_from_environment
-from webauthn2.rest import get_log_parts, request_trace_json, request_final_json
+from webauthn2.util import Context
+from webauthn2.rest import prune_excessive_dcctx
 
+from . import app
 from .. import core
+from ..core import hatrac_debug, negotiated_content_type
 from .. import directory
 
 _webauthn2_manager = webauthn2.Manager()
-
 
 def hash_value(d):
     return base64.b64encode(hashlib.md5(d.encode()).digest()).decode()
@@ -40,7 +44,7 @@ def hash_value(d):
 def hash_multi(d):
     if d is None:
         return '_'
-    elif isinstance(d, str):
+    elif isinstance(d, (str, bytes)):
         return hash_value(d)
     elif isinstance(d, (list, set)):
         return hash_list(d)
@@ -416,7 +420,7 @@ class RestHandler (flask.views.MethodView):
         self.http_vary = _webauthn2_manager.get_http_vary()
 
     def trace(self, msg):
-        web.ctx.hatrac_request_trace(msg)
+        hatrac_ctx.hatrac_request_trace(msg)
         
     def _fullname(self, path, name):
         nameparts = [ n for n in ((path or '') + (name or '')).split('/') if n ]
@@ -425,7 +429,7 @@ class RestHandler (flask.views.MethodView):
 
     def resolve(self, path, name, raise_notfound=True):
         fullname = self._fullname(path, name)
-        return web.ctx.hatrac_directory.name_resolve(fullname, raise_notfound)
+        return hatrac_ctx.hatrac_directory.name_resolve(fullname, raise_notfound)
 
     def resolve_version(self, path, name, version):
         object = self.resolve(path, name)
@@ -442,22 +446,12 @@ class RestHandler (flask.views.MethodView):
             return self.resolve(path, name)
 
     def in_content_type(self):
-        in_content_type = web.ctx.env.get('CONTENT_TYPE')
+        in_content_type = request.headers.get('content-type')
         if in_content_type is not None:
             return in_content_type.lower().split(";", 1)[0].strip()
         else:
             return None
 
-    def parse_querystr(self, querystr):
-        params = querystr.split('&')
-        result = {}
-        for param in params:
-            if param:
-                parts = param.split('=')
-                if parts:
-                    result[ parts[0] ] = '='.join(parts[1:])
-        return result
-        
     def set_http_etag(self, version):
         """Set an ETag from version key.
 
@@ -512,7 +506,7 @@ class RestHandler (flask.views.MethodView):
     def http_check_preconditions(self, method='GET', resource_exists=True):
         failed = False
 
-        match_etags = self.parse_client_etags(web.ctx.env.get('HTTP_IF_MATCH', ''))
+        match_etags = self.parse_client_etags(request.environ.get('HTTP_IF_MATCH', ''))
         if match_etags:
             if resource_exists:
                 if self.http_etag and self.http_etag not in match_etags \
@@ -521,7 +515,7 @@ class RestHandler (flask.views.MethodView):
             else:
                 failed = True
         
-        nomatch_etags = self.parse_client_etags(web.ctx.env.get('HTTP_IF_NONE_MATCH', ''))
+        nomatch_etags = self.parse_client_etags(request.environ.get('HTTP_IF_NONE_MATCH', ''))
         if nomatch_etags:
             if resource_exists:
                 if self.http_etag and self.http_etag in nomatch_etags \
@@ -540,7 +534,7 @@ class RestHandler (flask.views.MethodView):
 
     def get_content(self, resource, client_context, get_body=True):
         """Form response w/ bulk resource content."""
-        get_range = web.ctx.env.get('HTTP_RANGE')
+        get_range = request.environ.get('HTTP_RANGE')
         get_slice = None
         if get_range:
             # parse HTTP Range header which can encode a set of ranges
@@ -622,84 +616,73 @@ class RestHandler (flask.views.MethodView):
                 raise ev
             except Exception as ev:
                 # HTTP spec says to ignore a Range header w/ syntax errors
-                web.debug('Ignoring HTTP Range header %s due to error: %s' % (get_range, ev))
+                hatrac_debug('Ignoring HTTP Range header %s due to error: %s' % (get_range, ev))
                 pass
+
+        status = 200
+        headers = {}
 
         if get_slice is not None:
             nbytes, metadata, data_generator \
                 = resource.get_content_range(client_context, get_slice, get_data=self.get_body)
-            web.header(
-                'Content-Range', 'bytes %d-%d/%d' 
-                % (get_slice.start, get_slice.stop - 1, resource.nbytes)
-            )
-            web.ctx.hatrac_request_content_range = '%d-%d/%d' % (get_slice.start, get_slice.stop - 1, resource.nbytes)
-            web.ctx.status = '206 Partial Content'
+            status = 206
+            crange = '%d-%d/%d' % (get_slice.start, get_slice.stop - 1, resource.nbytes)
+            headers['content-range'] = 'bytes %s' % crange
         else:
             nbytes, metadata, data_generator = resource.get_content(client_context, get_data=self.get_body)
-            web.ctx.hatrac_request_content_range = '*/%d' % nbytes
-            web.ctx.status = '200 OK'
 
-        web.header('Content-Length', nbytes)
+        if resource.is_object() and self.get_body is False:
+            headers['accept-ranges'] = 'bytes'
+        headers['Content-Length'] = nbytes
 
         metadata = core.Metadata(metadata)
-        if 'content-type' in metadata:
-            web.ctx.hatrac_content_type = metadata['content-type']
-
         metadata = metadata.to_http()
-            
-        for hdr, val in metadata.items():
-            web.header(hdr, val)
+        headers.update(metadata)
 
         if resource.is_object() and resource.is_version():
-            web.header('Content-Location', resource.asurl())
+            headers['content-location'] = resource.asurl()
             if 'content-disposition' not in resource.metadata:
-                web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.parse.quote(str(resource.object).split("/")[-1]))
+                headers['content-disposition'] = "filename*=UTF-8''%s" % urllib.parse.quote(str(resource.object).split("/")[-1])
             
         if self.http_etag:
-            web.header('ETag', self.http_etag)
+            headers['ETag'] = self.http_etag
             
         if self.http_vary:
-            web.header('Vary', ', '.join(self.http_vary))
+            headers['Vary'] = ', '.join(self.http_vary)
 
-        return data_generator
+        return (data_generator, status, headers)
 
     def create_response(self, resource):
         """Form response for resource creation request."""
-        web.ctx.status = '201 Created'
-        web.header('Location', resource.asurl())
+        status = 201
         content_type = 'text/uri-list'
-        web.header('Content-Type', content_type)
-        web.ctx.hatrac_content_type = content_type
         body = resource.asurl() + '\n'
         nbytes = len(body)
-        web.header('Content-Length', nbytes)
-        web.ctx.hatrac_request_content_range = '*/%d' % nbytes
-        return body
+        headers = {
+            'location': resource.asurl(),
+            'content-type': content_type,
+            'content-length': nbytes,
+        }
+        return (body, status, headers)
 
     def delete_response(self):
         """Form response for deletion request."""
-        web.ctx.status = '204 No Content'
-        web.ctx.hatrac_request_content_range = '*/0'
-        web.ctx.hatrac_content_type = 'none'
-        return ''
+        return ('', 204)
 
     def update_response(self):
         """Form response for update request."""
-        web.ctx.status = '204 No Content'
-        web.ctx.hatrac_request_content_range = '*/0'
-        web.ctx.hatrac_content_type = 'none'
-        return ''
+        return ('', 204)
 
     def redirect_response(self, redirect):
         """Form response for redirect."""
         assert isinstance(redirect, core.Redirect)
-        web.header('Location', redirect.url)
-        web.ctx.status = '303 See Other'
+        status = 303
         content_type = 'text/uri-list'
-        web.header('Content-Type', content_type)
-        web.ctx.hatrac_content_type = content_type
         body = redirect.url + '\n'
         nbytes = len(body)
-        web.header('Content-Length', nbytes)
-        web.ctx.hatrac_request_content_range = '*/%d' % nbytes
-        return body
+        headers = {
+            'location': redirect.url,
+            'content-type': content_type,
+            'content-length': nbytes,
+        }
+        return (body, status, headers)
