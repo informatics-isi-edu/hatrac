@@ -21,7 +21,8 @@ A failure will exit with status 1 and a non-empty standard output.
 
 Diagnostics may be printed to standard error regardless of success or
 failure.  Setting the environment variable VERBOSE=true increases the
-amount of diagnostic output.
+amount of diagnostic output. Setting the environment variable
+FAILSTOP=true stops the tests on the first failure.
 
 EOF
 }
@@ -249,7 +250,7 @@ dotest()
     if [[ "${#mismatches[*]}" -gt 0 ]]
     then
 	cat >&2 <<EOF
-FAILED.
+FAILED test $(( ${NUM_TESTS} + 1 )).
 
 $(printf "%s\n" "${mismatches[@]}")
 
@@ -260,6 +261,13 @@ $(head -c 500 ${RESPONSE_CONTENT} | sed -e "s/\(.*\)/    \1/")
 
 EOF
 	NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
+        if [[ -n "${FAILSTOP:=}" ]]
+        then
+            cat >&2 <<EOF
+Exiting due to FAILSTOP environment setting.
+EOF
+            exit 1
+        fi
     else
 	cat >&2 <<EOF
 OK.
@@ -288,7 +296,7 @@ dohdrtest()
     then
 	echo "OK." >&2
     else
-	echo "FAILED." >&2
+	echo "FAILED test $(( ${NUM_TESTS} + 1 ))." >&2
 	cat >&2 <<EOF
 
 Response headers:
@@ -296,6 +304,13 @@ $(cat ${RESPONSE_HEADERS} | sed -e "s/\(.*\)/    \1/")
 
 EOF
 	NUM_FAILURES=$(( ${NUM_FAILURES} + 1 ))
+        if [[ -n "${FAILSTOP:=}" ]]
+        then
+            cat >&2 <<EOF
+Exiting due to FAILSTOP environment setting.
+EOF
+            exit 1
+        fi
     fi
     NUM_TESTS=$(( ${NUM_TESTS} + 1 ))
 }
