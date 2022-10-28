@@ -117,8 +117,7 @@ class Name (RestHandler):
             else:
                 is_object = True
 
-            params = self.parse_querystr(querystr)
-            make_parents = params.get('parents', 'false').lower() == 'true'
+            make_parents = request.args.get('parents', 'false').lower() == 'true'
         
             # check precondition for current state of resource not existing
             self.http_check_preconditions('PUT', False)

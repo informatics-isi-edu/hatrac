@@ -155,8 +155,7 @@ class ObjectTransfers (RestHandler):
             
         # create object implicitly or reuse existing object...
         try:
-            params = self.parse_querystr(querystr)
-            make_parents = params.get('parents', 'false').lower() == 'true'
+            make_parents = request.args.get('parents', 'false').lower() == 'true'
             resource = hatrac_ctx.hatrac_directory.create_name(
                 self._fullname(path, name),
                 True,  # is_object
