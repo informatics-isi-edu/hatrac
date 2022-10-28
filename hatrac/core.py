@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -8,11 +8,11 @@
 
 """
 
+import sys
 import binascii
 import base64
 import re
 import urllib
-import web
 import json
 
 from webauthn2 import merge_config, jsonWriter
@@ -23,6 +23,42 @@ config = merge_config(
 
 max_request_payload_size_default = 1024 * 1024 * 128  # ~135MB
 
+def hatrac_debug(*args):
+    """Shim for non-logger diagnostics
+
+    This stderr output will typically go to the web container's debug
+    log.  We previously used web.py's web.debug function for this.
+    """
+    if len(args) > 1:
+        v = str(tuple(args))
+    else:
+        v = str(args[0])
+
+    print(v, file=sys.stderr, flush=True)
+
+class web_storage(object):
+    """Shim to emulate web.storage attr-dict class.
+
+    This is used in legacy code before migrating from web.py to flask.
+    """
+    def __init__(self, *args, **kwargs):
+        self._d = dict(*args, **kwargs)
+
+    def __getattribute__(self, a):
+        """Allow reading of dict keys as attributes.
+
+        Don't allow dict keys to shadow actual attributes of dict, and
+        proxy those instead.
+        """
+        sself = super(web_storage, self)
+        try:
+            return sself.__getattribute__(a)
+        except:
+            d = sself.__getattribute__('_d')
+            if a in d:
+                return d[a]
+            else:
+                raise AttributeError(a)
 
 def coalesce(*args):
     for arg in args:
@@ -36,7 +72,7 @@ def _string_wrap(s, escape=u'\\', protect=[]):
             s = s.replace(c, escape + c)
         return s
     except Exception as e:
-        #web.debug('_string_wrap', s, escape, protect, e)
+        #hatrac_debug('_string_wrap', s, escape, protect, e)
         raise
 
 def sql_identifier(s):
@@ -52,6 +88,53 @@ def sql_literal(v):
         return "'%s'" % _string_wrap(s, u"'")
     else:
         return 'NULL'
+
+def negotiated_content_type(environ, supported_types=['text/csv', 'application/json', 'application/x-json-stream'], default=None):
+    """Determine negotiated response content-type from Accept header.
+
+       environ: the WSGI environment containing HTTP_* header content
+
+       supported_types: a list of MIME types the caller would be able
+         to implement if the client has requested one.
+
+       default: a MIME type or None to return if none of the
+         supported_types were requested by the client.
+
+       This function considers the preference qfactors encoded in the
+       client request to choose the preferred type when there is more
+       than one supported type that the client would accept.
+
+    """
+    def accept_pair(s):
+        """parse one Accept header pair into (qfactor, type)."""
+        parts = s.split(';')
+        q = 1.0
+        t = parts[0].strip()
+        for p in parts[1:]:
+            fields = p.split('=')
+            if len(fields) == 2 and fields[0] == 'q':
+                q = float(fields[1])
+        return (q, t)
+
+    try:
+        accept = environ['HTTP_ACCEPT']
+    except:
+        accept = ""
+
+    accept_types = [
+        pair[1]
+        for pair in sorted(
+            [ accept_pair(s) for s in accept.lower().split(',') ],
+            key=lambda pair: pair[0]
+            )
+        ]
+
+    if accept_types:
+        for accept_type in accept_types:
+            if accept_type in supported_types:
+                return accept_type
+
+    return default
 
 class HatracException (Exception):
     """Base class for Hatrac API exceptions."""
