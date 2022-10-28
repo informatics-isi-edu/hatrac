@@ -76,100 +76,140 @@ def request_trace(tracedata):
     """
     logger.info( request_trace_json(tracedata, log_parts()) )
 
-class RestException (web.HTTPError):
-    message = None
-    status = None
-    headers = {
-        'Content-Type': 'text/plain'
-    }
 
-    def __init__(self, message=None, headers=None):
-        if headers:
-            hdr = dict(self.headers)
-            hdr.update(headers)
-        else:
-            hdr = self.headers
-        msg = message or self.message
-        web.HTTPError.__init__(self, self.status, hdr, msg + '\n' if msg is not None else '')
-        web.ctx.hatrac_content_type = hdr['Content-Type']
+class RestException (werkzeug.exceptions.HTTPException):
+    """Hatrac generic REST exception overriding flask/werkzeug defaults.
+
+    Our API defaults to text/plain error responses but supports
+    negotiated HTML and some customization by legacy
+    hatrac_config.json content.
+    """
+
+    # werkzeug fields
+    code = None
+    description = None
+
+    # refactoring of prior hatrac templating
+    title = None
+    response_templates = OrderedDict([
+        ("text/plain", "%(message)s"),
+        ("text/html", "<html><body><h1>%(title)s</h1><p>%(message)s</p></body></html>"),
+    ])
+
+    def __init__(self, description=None, headers={}):
+        self.headers = dict(headers)
+        if description is not None:
+            self.description = description
+        super().__init__()
+        # allow ourselves to customize the error title for our UX
+        if self.title is None:
+            self.title = werkzeug.http.HTTP_STATUS_CODES.get(self.code)
+
+        # lookup templates overrides in hatrac_config.json
+        #
+        # OrderedDict.update() maintains ordering for keys already
+        # controlled above, but has indeterminate order for new
+        # additions from JSON dict!
+        #
+        # default templates override built-in templates
+        self.response_templates = self.response_templates.copy()
+        self.response_templates.update(
+            core.config.get('error_templates', {}).get("default", {})
+        )
+        # code-specific templates override default templates
+        self.response_templates.update(
+            core.config.get('error_templates', {}).get(self.code, {})
+        )
+        # legacy config syntax
+        #   code_typesuffix: template,
+        #   ...
+        for content_type in list(self.response_templates.keys()):
+            template_key = '%s_%s' % (self.code, content_type.split('/')[-1])
+            if template_key in core.config:
+                self.response_templates[content_type] = core.config[template_key]
+
+        # find client's negotiated type
+        supported_content_types = list(self.response_templates.keys())
+        default_content_type = supported_content_types[0]
+        self.content_type = negotiated_content_type(request.environ, supported_content_types, default_content_type)
+        self.headers['content-type'] = self.content_type
+
+    # override the werkzeug base exception to use our state management
+    def get_description(self, environ=None, scope=None):
+        return self.description
+
+    def get_body(self, environ=None, scope=None):
+        template = self.response_templates[self.content_type]
+        description = self.get_description()
+        return (template + '\n') % {
+            "code": self.code,
+            "description": description,
+            "message": description, # for existing hatrac_config template feature
+            "title": self.title, # for our new generic templates
+        }
+
+    def get_headers(self, environ=None, scope=None):
+        return self.headers
 
 class NotModified (RestException):
-    status = '304 Not Modified'
-    message = None
+    code = 304
+    description = None
 
 class BadRequest (RestException):
-    status = '400 Bad Request'
-    message = 'Request malformed.'
+    code = 400
+    description = 'Request malformed.'
 
-class TemplatedRestException (RestException):
-    error_type = ''
-    supported_content_types = ['text/plain', 'text/html']
-    def __init__(self, message=None, headers=None):
-        # filter types to those for which we have a response template, or text/plain which we always support
-        supported_content_types = [
-            content_type for content_type in self.supported_content_types
-            if "%s_%s" % (self.error_type, content_type.split('/')[-1]) in core.config or content_type == 'text/plain'
-        ]
-        default_content_type = supported_content_types[0]
-        # find client's preferred type
-        content_type = webauthn2.util.negotiated_content_type(supported_content_types, default_content_type)
-        # lookup template and use it if available
-        template_key = '%s_%s' % (self.error_type, content_type.split('/')[-1])
-        if template_key in core.config:
-            message = core.config[template_key] % dict(message=message)
-        RestException.__init__(self, message, headers)
-        web.header('Content-Type', content_type)
-        
-class Unauthorized (TemplatedRestException):
-    error_type = '401'
-    status = '401 Unauthorized'
-    message = 'Access requires authentication.'
+class Unauthorized (RestException):
+    code = 401
+    description = 'Access requires authentication.'
+    title = 'Authentication Required'
 
-class Forbidden (TemplatedRestException):
-    error_type = '403'
-    status = '403 Forbidden'
-    message = 'Access forbidden.'
+class Forbidden (RestException):
+    code = 403
+    description = 'Access forbidden.'
+    title = 'Access Forbidden'
 
 class NotFound (RestException):
-    status = '404 Not Found'
-    message = 'Resource not found.'
+    code = 404
+    description = 'Resource not found.'
 
 class NoMethod (RestException):
-    status = '405 Method Not Allowed'
-    message = 'Request method not allowed on this resource.'
+    code = 405
+    description = 'Request method not allowed on this resource.'
 
 class Conflict (RestException):
-    status = '409 Conflict'
-    message = 'Request conflicts with state of server.'
+    code = 409
+    description = 'Request conflicts with state of server.'
 
 class LengthRequired (RestException):
-    status = '411 Length Required'
-    message = 'Content-Length header is required for this request.'
+    code = 411
+    description = 'Content-Length header is required for this request.'
 
 class PreconditionFailed (RestException):
-    status = '412 Precondition Failed'
-    message = 'Resource state does not match requested preconditions.'
+    code = 412
+    description = 'Resource state does not match requested preconditions.'
 
 class PayloadTooLarge (RestException):
-    status = '413 Payload Too Large'
-    message = 'Request body size is larger than the current limit defined by the server, which is %s bytes.' % \
+    code = 413
+    description = 'Request body size is larger than the current limit defined by the server, which is %s bytes.' % \
               core.config.get("max_request_payload_size", core.max_request_payload_size_default)
 
 class BadRange (RestException):
-    status = '416 Requested Range Not Satisfiable'
-    message = 'Requested Range is not satisfiable for this resource.'
-    def __init__(self, msg=None, headers=None, nbytes=None):
-        RestException.__init__(self, msg, headers)
+    code = 416
+    description = 'Requested Range is not satisfiable for this resource.'
+
+    def __init__(self, description=None, headers={}, nbytes=None):
+        super().__init__(description=description, headers=headers)
         if nbytes is not None:
-            web.header('Content-Range', 'bytes */%d' % nbytes)
+            self.headers['content-range'] = 'bytes */%d' % nbytes
 
 class NotImplemented (RestException):
-    status = '501 Not Implemented'
-    message = 'Request not implemented for this resource.'
+    code = 501
+    description = 'Request not implemented for this resource.'
 
 class ServerError (RestException):
-    status = '500 Internal Server Error'
-    message = 'The request encountered an error on the server: %s.'
+    code = 500
+    description = 'The request encountered an error on the server.'
 
 @app.before_request
 def before_request():
