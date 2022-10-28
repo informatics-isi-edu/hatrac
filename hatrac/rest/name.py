@@ -49,12 +49,13 @@ class NameVersion (RestHandler):
             resource,
             hatrac_ctx.webauthn2_context
         )
-        if isinstance(response, core.Redirect):
-            return self.redirect_response(response)
-        return response
         if isinstance(body, core.Redirect):
             return self.redirect_response(body)
-        return (body, status, headers)
+        # we need to build the response or flask discards the content-length
+        resp = make_response(body, status)
+        for k, v in headers.items():
+            resp.headers[k] = v
+        return resp
 
 _NameVersion_view = app.route(
     '/<name>:<version>'
@@ -219,7 +220,11 @@ class Name (RestHandler):
         )
         if isinstance(body, core.Redirect):
             return self.redirect_response(response)
-        return (body, status, headers)
+        # we need to build the response or flask discards the content-length
+        resp = make_response(body, status)
+        for k, v in headers.items():
+            resp.headers[k] = v
+        return resp
 
 _Name_view = app.route(
     '/'
