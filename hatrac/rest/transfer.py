@@ -1,30 +1,24 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
 import re
-import web
+import json
+from flask import request, g as hatrac_ctx
 
-from webauthn2.util import jsonReader
-
+from . import app
 from .. import core
-from .core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, LengthRequired, \
-    PayloadTooLarge
+from .core import RestHandler, \
+    NoMethod, Conflict, NotFound, BadRequest, LengthRequired, PayloadTooLarge
 
-@web_url([
-    # path, name, job, chunk, querystr
-    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/([^/:;?]+)/([^/:;?]+)[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/([^/:;?]+)/([^/:;?]+)()'
-])
 class ObjectTransferChunk (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    @web_method()
-    def PUT(self, path, name, job, chunk, querystr):
+    def put(self, name, job, chunk, path="/"):
         """Upload chunk of transfer job."""
         try:
             chunk = int(chunk)
@@ -64,50 +58,61 @@ class ObjectTransferChunk (RestHandler):
         )
         return self.update_response()
 
-@web_url([
-    # path, name, job, querystr
-    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/([^/:;?]+)/?[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/([^/:;?]+)/?()'
-])
+    def get(self, name, job, chunk, path="/"):
+        # flask raises 404 on GET if get method isn't defined
+        # our existing test suite expects resource to exist but raise 405
+        raise NoMethod()
+
+_ObjectTransferChunk_view = app.route(
+    '/<name>;upload/<job>/<chunk>'
+)(app.route(
+    '/<path:path>/<name>;upload/<job>/<chunk>'
+)(ObjectTransferChunk.as_view('ObjectTransferChunk')))
+
+
 class ObjectTransfer (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    @web_method()
-    def POST(self, path, name, job, querystr):
+    def post(self, name, job, path="/"):
         """Update status of transfer job to finalize."""
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions('POST')
         version = upload.finalize(web.ctx.webauthn2_context)
         return self.create_response(version)
 
-    @web_method()
-    def DELETE(self, path, name, job, querystr):
+    def delete(self, name, job, path="/"):
         """Cancel existing transfer job."""
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions('DELETE')
         upload.cancel(web.ctx.webauthn2_context)
         return self.update_response()
 
-    def _GET(self, path, name, job, querystr):
+    def get(self, name, job, path="/"):
         """Get status of transfer job."""
+        self.get_body = False if request.method == 'HEAD' else True
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions()
         return self.get_content(upload, web.ctx.webauthn2_context)
 
-@web_url([
-    # path, name, querystr
-    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/?[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+);upload/?()'
-])
+_ObjectTransfer_view = app.route(
+    '/<name>;upload/<job>'
+)(app.route(
+    '/<name>;upload/<job>/'
+)(app.route(
+    '/<path:path>/<name>;upload/<job>'
+)(app.route(
+    '/<path:path>/<name>;upload/<job>/'
+)(ObjectTransfer.as_view('ObjectTransfer')))))
+
+
 class ObjectTransfers (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    @web_method()
-    def POST(self, path, name, querystr):
+    def post(self, name, path="/"):
         """Create a new chunked transfer job."""
         in_content_type = self.in_content_type()
 
@@ -171,11 +176,22 @@ class ObjectTransfers (RestHandler):
         )
         return self.create_response(upload)
 
-    def _GET(self, path, name, querystr):
+    def get(self, name, path="/"):
         """List outstanding chunked transfer jobs."""
+        self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve(path, name).get_uploads()
         self.http_check_preconditions()
         return self.get_content(resource, web.ctx.webauthn2_context)
     
 
 
+
+_ObjectTransfers_view = app.route(
+    '/<name>;upload'
+)(app.route(
+    '/<name>;upload/'
+)(app.route(
+    '/<path:path>/<name>;upload'
+)(app.route(
+    '/<path:path>/<name>;upload/'
+)(ObjectTransfers.as_view('ObjectTransfers')))))

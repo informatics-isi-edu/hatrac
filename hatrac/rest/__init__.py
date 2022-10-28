@@ -1,97 +1,42 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
+import sys
 import re
 import itertools
-import web
 import urllib
+from flask import Flask, request
 
-import hatrac.core
-from . import core
+from ..core import config
 
-# these modify core.dispatch_rules
+def raw_path_app(app_orig, raw_uri_env_key='REQUEST_URI'):
+    """Allow routes to distinguish raw reserved chars from escaped ones.
+    :param app_orig: The WSGI app to wrap with middleware.
+    :param raw_path_env_key: The key to lookup the raw request URI in the WSGI environment.
+    """
+    def app(environ, start_response):
+        parts = urllib.parse.urlparse(environ[raw_uri_env_key])
+        path_info = parts.path
+        script_name = environ['SCRIPT_NAME']
+        if path_info.startswith(script_name):
+            path_info = path_info[len(script_name):]
+        if parts.params:
+            path_info = '%s;%s' % (path_info, parts.params)
+        environ['PATH_INFO'] = path_info
+        return app_orig(environ, start_response)
+    return app
+
+app = Flask(__name__)
+app.wsgi_app = raw_path_app(app.wsgi_app)
+
+read_only = config.get("read_only", False)
+# TODO: add method decorator for this!!
+
+# import these (circularly!) to register app routes
 from . import acl
 from . import metadata
 from . import name
 from . import transfer
-
-rules = list(core.dispatch_rules.items())
-
-# sort longest patterns first where prefixes match
-rules.sort(reverse=True)
-
-# flatten list of pairs into one long tuple for web.py
-rules = [
-    # anchor pattern to end of string too for full matching
-    (re.compile(pattern + (pattern[-1] != '$' and '$' or '')), handler)
-    for pattern, handler in rules
-]
-
-read_only = hatrac.core.config.get("read_only", False)
-
-
-class Dispatcher (object):
-    """Helper class to handle parser-based URL dispatch
-
-       Does what mod_wsgi + web.py should do if the standards around
-       url-escaping weren't horribly broken.
-
-    """
-
-    def prepare_dispatch(self):
-        """computes web dispatch from REQUEST_URI
-        """
-        uri = web.ctx.env['REQUEST_URI']
-        uribase = web.ctx.env['SCRIPT_NAME']
-        assert uri[0:len(uribase)] == uribase
-        uri = uri[len(uribase):]
-
-        for pattern, handler in rules:
-            m = pattern.match(uri)
-            if m:
-                return handler(), m.groups()
-        raise core.NotFound('%s does not map to any REST API.' % uri)
-
-    def METHOD(self, methodname):
-        handler, matchgroups = self.prepare_dispatch()
-        matchgroups = map(urllib.parse.unquote, matchgroups)
-
-        if not hasattr(handler, methodname):
-            raise core.NoMethod()
-
-        method = getattr(handler, methodname)
-        return method(*matchgroups)
-
-    def HEAD(self):
-        return self.METHOD('HEAD')
-
-    def GET(self):
-        return self.METHOD('GET')
-        
-    def PUT(self):
-        if read_only:
-            raise core.NoMethod("System is currently in read-only mode.")
-        return self.METHOD('PUT')
-
-    def DELETE(self):
-        if read_only:
-            raise core.NoMethod("System is currently in read-only mode.")
-        return self.METHOD('DELETE')
-
-    def POST(self):
-        if read_only:
-            raise core.NoMethod("System is currently in read-only mode.")
-        return self.METHOD('POST')
-
-    # This is for CORS preflight checks that may happen in browsers when Hatrac redirects to another server
-    def OPTIONS(self):
-        web.ctx.status = '200 OK'
-        return ''
-
-
-# bypass web.py URI-dispatching because of broken handling of url-escapes!
-urls = ('.*', Dispatcher)
-

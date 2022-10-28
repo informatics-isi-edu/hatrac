@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -11,7 +11,6 @@
 import re
 import logging
 from logging.handlers import SysLogHandler
-import web
 import json
 from collections import OrderedDict
 import random
@@ -57,25 +56,6 @@ def hash_list(l):
 
 def hash_dict(d):
     return hash_list([ hash_multi(k) + hash_multi(v) for k, v in d.items() ])
-
-# map URL pattern (regexp) to handler class
-dispatch_rules = dict()
-
-def web_url(url_patterns):
-    """Annotate and track web request handler class and dispatch URL patterns.
-
-       url_patterns: sequence of URL regular expression patterns that
-         will be mapped to the modified handler class in web.py
-         dispatch
-
-    """
-    def helper(original_class):
-        original_class.url_patterns = url_patterns
-        for url_pattern in url_patterns:
-            assert url_pattern not in dispatch_rules
-            dispatch_rules[url_pattern] = original_class
-        return original_class
-    return helper
 
 ## setup logger and web request log helpers
 logger = logging.getLogger('hatrac')
@@ -191,73 +171,85 @@ class ServerError (RestException):
     status = '500 Internal Server Error'
     message = 'The request encountered an error on the server: %s.'
 
-def web_method():
-    """Augment web handler method with common service logic."""
-    def helper(original_method):
-        def wrapper(*args):
-            # request context init
-            web.ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) ).decode()
-            web.ctx.hatrac_start_time = datetime.datetime.now(timezone.utc)
-            web.ctx.hatrac_request_content_range = None
-            web.ctx.hatrac_content_type = None
-            web.ctx.webauthn2_manager = _webauthn2_manager
-            web.ctx.webauthn2_context = webauthn2.Context() # set empty context for sanity
-            web.ctx.hatrac_request_trace = request_trace
-            web.ctx.hatrac_directory = directory
+@app.before_request
+def before_request():
+    # request context init
+    hatrac_ctx.hatrac_status = None
+    hatrac_ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) ).decode()
+    hatrac_ctx.hatrac_start_time = datetime.datetime.now(timezone.utc)
+    hatrac_ctx.hatrac_request_content_range = None
+    hatrac_ctx.hatrac_content_type = None
+    hatrac_ctx.webauthn2_manager = _webauthn2_manager
+    hatrac_ctx.webauthn2_context = webauthn2.Context() # set empty context for sanity
+    hatrac_ctx.hatrac_request_trace = request_trace
+    hatrac_ctx.hatrac_directory = directory
 
-            if directory.prefix is None:
-                # set once from web context if administrator did not specify in config
-                directory.prefix = web.ctx.env['SCRIPT_NAME']
-            
-            try:
-                # get client authentication context
-                web.ctx.webauthn2_context = context_from_environment(fallback=False)
-                if web.ctx.webauthn2_context is None:
-                    web.debug("falling back to _webauthn2_manager.get_request_context() after failed context_from_environment(False)")
-                    web.ctx.webauthn2_context = _webauthn2_manager.get_request_context()
-            except (ValueError, IndexError) as ev:
-                raise Unauthorized('service access requires client authentication')
+    if directory.prefix is None:
+        # set once from web context if administrator did not specify in config
+        directory.prefix = request.environ['SCRIPT_NAME']
 
-            try:
-                # run actual method
-                return original_method(*args)
+    try:
+        # get client authentication context
+        hatrac_ctx.webauthn2_context = context_from_environment(fallback=False)
+        if hatrac_ctx.webauthn2_context is None:
+            hatrac_debug("falling back to _webauthn2_manager.get_request_context() after failed context_from_environment(False)")
+            hatrac_ctx.webauthn2_context = _webauthn2_manager.get_request_context()
+    except (ValueError, IndexError) as ev:
+        raise Unauthorized('service access requires client authentication')
 
-            except core.BadRequest as ev:
-                request_trace(str(ev))
-                raise BadRequest(str(ev))
-            except core.Unauthenticated as ev:
-                request_trace(str(ev))
-                raise Unauthorized(str(ev))
-            except core.Forbidden as ev:
-                request_trace(str(ev))
-                raise Forbidden(str(ev))
-            except core.NotFound as ev:
-                request_trace(str(ev))
-                raise NotFound(str(ev))
-            except core.Conflict as ev:
-                request_trace(str(ev))
-                raise Conflict(str(ev))
-            except RestException as ev:
-                # pass through rest exceptions already generated by handlers
-                if not isinstance(ev, NotModified):
-                    request_trace(str(ev))
-                raise
-            except Exception as ev:
-                # log and rethrow all errors so web.ctx reflects error prior to request_final_log below...
-                et, ev2, tb = sys.exc_info()
-                web.debug(
-                    'Got unhandled exception in web_method()',
-                    ev,
-                    traceback.format_exception(et, ev2, tb),
-                )
-                raise ServerError(str(ev))
-            finally:
-                # finalize
-                logger.info( request_final_json(log_parts()) )
-        return wrapper
-    return helper
-                
-class RestHandler (object):
+    return None
+
+@app.after_request
+def after_request(response):
+    if isinstance(response, flask.Response):
+        hatrac_ctx.hatrac_status = response.status
+    elif isinstance(response, RestException):
+        hatrac_ctx.hatrac_status = response.code
+    hatrac_ctx.hatrac_content_type = response.headers.get('content-type', 'none')
+    if 'content-range' in response.headers:
+        content_range = response.headers['content-range']
+        if content_range.startswith('bytes '):
+            content_range = content_range[6:]
+        hatrac_ctx.hatrac_request_content_range = content_range
+    elif 'content-length' in response.headers:
+        hatrac_ctx.hatrac_request_content_range = '*/%s' % response.headers['content-length']
+    else:
+        hatrac_ctx.hatrac_request_content_range = '*/0'
+    logger.info( request_final_json(log_parts()) )
+    return response
+
+@app.errorhandler(Exception)
+def error_handler(ev):
+    if isinstance(ev, core.HatracException):
+        # map these core errors to RestExceptions
+        ev = {
+            core.BadRequest: BadRequest,
+            core.Conflict: Conflict,
+            core.Forbidden: Forbidden,
+            core.Unauthenticated: Unauthorized,
+            core.NotFound: NotFound,
+        }[type(ev)](str(ev))
+
+    if isinstance(ev, (RestException, werkzeug.exceptions.HTTPException)):
+        # trace unless not really an error
+        if isinstance(ev, NotModified):
+            pass
+        else:
+            request_trace(str(ev))
+    else:
+        # log other internal server errors
+        et, ev2, tb = sys.exc_info()
+        hatrac_debug(
+            'Got unhandled exception in hatrac request handler: %s\n%s\n' % (
+                ev,
+                traceback.format_exception(et, ev2, tb),
+            )
+        )
+        ev = ServerError(str(ev))
+
+    return ev
+
+class RestHandler (flask.views.MethodView):
     """Generic implementation logic for Hatrac REST API handlers.
 
     """
@@ -554,25 +546,3 @@ class RestHandler (object):
         web.header('Content-Length', nbytes)
         web.ctx.hatrac_request_content_range = '*/%d' % nbytes
         return body
-
-
-    @web_method()
-    def GET(self, *args):
-        """Get resource."""
-        if hasattr(self, '_GET'):
-            return self._GET(*args)
-        else:
-            raise NoMethod('Method GET not supported for this resource.')
-
-    @web_method()
-    def HEAD(self, *args):
-        """Get resource metadata."""
-        self.get_body = False
-        if hasattr(self, '_GET'):
-            result = self._GET(*args)
-            web.ctx.hatrac_request_content_range = '*/0'
-            web.ctx.hatrac_content_type = 'none'
-            return result
-        else:
-            raise NoMethod('Method HEAD not supported for this resource.')
-

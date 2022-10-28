@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -8,17 +8,14 @@
 
 """
 
-import web
+from flask import request, make_response, g as hatrac_ctx
 
 from .. import core
-from .core import web_url, web_method, RestHandler, NoMethod, Conflict, BadRequest, NotFound, LengthRequired, \
-    PayloadTooLarge, hash_list
+from . import app
+from .core import RestHandler, \
+    NoMethod, Conflict, BadRequest, NotFound, LengthRequired, PayloadTooLarge, \
+    hash_list, hatrac_debug
 
-@web_url([
-     # path, name, version, querystr
-    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+)[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+)()'
-])
 class NameVersion (RestHandler):
     """Represent Hatrac resources addressed by version-qualified names.
 
@@ -28,8 +25,7 @@ class NameVersion (RestHandler):
 
     # client cannot specify version during PUT so no PUT method...
 
-    @web_method()
-    def DELETE(self, path, name, version, querystr):
+    def delete(self, name, version, path=''):
         """Destroy object version."""
         resource = self.resolve_version(
             path, name, version
@@ -41,9 +37,9 @@ class NameVersion (RestHandler):
         )
         return self.delete_response()
 
-    # see core.RestHandler.GET and HEAD...
-    def _GET(self, path, name, version, querystr):
+    def get(self, name, version, path='/'):
         """Get object version."""
+        self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve_version(
             path, name, version
         )
@@ -59,11 +55,13 @@ class NameVersion (RestHandler):
             return self.redirect_response(response)
         return response
 
-@web_url([
-     # path, name, querystr
-    '/((?:[^/:;?]+/)*)([^/:;?]+);versions[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+);versions()'
-])
+_NameVersion_view = app.route(
+    '/<name>:<version>'
+)(app.route(
+    '/<path:path>/<name>:<version>'
+)(NameVersion.as_view('NameVersion')))
+
+
 class NameVersions (RestHandler):
     """Represent Hatrac resources addressed by name and versions sub-resource.
 
@@ -73,9 +71,9 @@ class NameVersions (RestHandler):
     def __init__(self):
         RestHandler.__init__(self)
 
-    # see core.RestHandler.GET and HEAD...
-    def _GET(self, path, name, querystr):
+    def _get(self, name, path="/"):
         """Get version listing."""
+        self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve(
             path, name
         ).get_versions()
@@ -89,13 +87,14 @@ class NameVersions (RestHandler):
             web.ctx.webauthn2_context
         )
 
-@web_url([
-     # path, name, querystr
-    '/((?:[^/:;?]+/)*)([^/:;?]+)/?[?](.*)',
-    '/()()[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+)/?()',
-    '/()()()'
-])
+
+_NameVersions_view = app.route(
+    '/<name>;versions'
+)(app.route(
+    '/<path:path>/<name>;versions'
+)(NameVersions.as_view('NameVersions')))
+
+
 class Name (RestHandler):
     """Represent Hatrac resources addressed by bare names.
 
@@ -105,8 +104,7 @@ class Name (RestHandler):
     def __init__(self):
         RestHandler.__init__(self)
 
-    @web_method()
-    def PUT(self, path, name, querystr):
+    def put(self, name="", path="/"):
         """Create object version or empty zone."""
         in_content_type = self.in_content_type()
         
@@ -176,8 +174,7 @@ class Name (RestHandler):
                 
         return self.create_response(resource)
 
-    @web_method()
-    def DELETE(self, path, name, querystr):
+    def delete(self, name="", path="/"):
         """Destroy all object versions or empty zone."""
         resource = self.resolve(
             path, name
@@ -202,9 +199,9 @@ class Name (RestHandler):
         )
         return self.delete_response()
 
-    # see core.RestHandler.GET and HEAD...
-    def _GET(self, path, name, querystr):
+    def get(self, name="", path="/"):
         """Get latest object version or zone listing."""
+        self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve(
             path, name
         )
@@ -226,3 +223,15 @@ class Name (RestHandler):
             return self.redirect_response(response)
         return response
 
+
+_Name_view = app.route(
+    '/'
+)(app.route(
+    '/<name>'
+)(app.route(
+    '/<name>/'
+)(app.route(
+    '/<path:path>/<name>'
+)(app.route(
+    '/<path:path>/<name>/'
+)(Name.as_view('Name'))))))
