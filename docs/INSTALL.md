@@ -11,7 +11,7 @@ data-oriented collaboration.
   - Apache HTTPD
   - PostgreSQL
   - Python
-  - web.py
+  - flask
   - webauthn2
 1. Install hatrac Python package from top-level of development code.
   - `python setup.py install`
