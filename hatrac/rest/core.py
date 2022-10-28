@@ -423,7 +423,9 @@ class RestHandler (flask.views.MethodView):
         hatrac_ctx.hatrac_request_trace(msg)
         
     def _fullname(self, path, name):
-        nameparts = [ n for n in ((path or '') + (name or '')).split('/') if n ]
+        nameparts = [ n for n in path.split('/') if n ]
+        if name:
+            nameparts.append(name)
         fullname = '/' + '/'.join(nameparts)
         return fullname
 
