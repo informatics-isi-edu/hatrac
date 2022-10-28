@@ -65,9 +65,126 @@ sysloghandler.setFormatter(syslogformatter)
 logger.addHandler(sysloghandler)
 logger.setLevel(logging.INFO)
 
+def session_from_environment():
+    """
+    Get and decode session details from the environment set by the http server (with mod_weba
+uthn).
+    Returns a dictionary on success, None if the environment variable is unset (or blank).
+    Throws TypeError if the base64 decode fails and ValueError if json decode fails
+    """
+    b64_session_string = None
+    try:
+        b64_session_string = request.environ['WEBAUTHN_SESSION_BASE64']
+    except:
+        b64_session_string = os.environ.get('WEBAUTHN_SESSION_BASE64')
+
+    if b64_session_string == None or b64_session_string.strip() == '':
+        return None
+    session_string = base64.standard_b64decode(b64_session_string).decode()
+    return json.loads(session_string)
+
+def context_from_environment(fallback=True):
+    """
+    Get and decode session details from the environment set by the http server (with mod_webauthn).
+    Returns a Context instance which may be empty (anonymous).
+    If fallback=False, returns None if context was not found in environment.
+    Throws TypeError if the base64 decode fails and ValueError if json decode fails
+    """
+    context_dict = session_from_environment()
+    context = Context()
+    if context_dict:
+        context.client = context_dict['client']
+        context.attributes = context_dict['attributes']
+        context.session = {
+            k: v
+            for k, v in context_dict.items()
+            if k in {'since', 'expires', 'seconds_remaining', 'vary_headers'}
+        }
+        context.tracking = context_dict.get('tracking')
+        return context
+    elif fallback:
+        return context
+    else:
+        return None
+
 def log_parts():
-    """Generate a dictionary of interpolation keys used by our logging template."""
-    return get_log_parts('hatrac_start_time', 'hatrac_request_guid', 'hatrac_request_content_range', 'hatrac_content_type')
+    """Generate a dictionary of interpolation keys used by our logging template.
+    """
+    now = datetime.datetime.now(timezone.utc)
+    elapsed = (now - hatrac_ctx.hatrac_start_time)
+    client_identity_obj = hatrac_ctx.webauthn2_context.client if hatrac_ctx.webauthn2_context else None
+    parts = dict(
+        elapsed = elapsed.seconds + 0.001 * (elapsed.microseconds/1000),
+        client_ip = request.remote_addr,
+        client_identity_obj = client_identity_obj,
+        reqid = hatrac_ctx.hatrac_request_guid,
+        content_range = hatrac_ctx.hatrac_request_content_range,
+        content_type = hatrac_ctx.hatrac_content_type,
+    )
+    return parts
+
+def request_trace_json(tracedata, parts):
+    """Format one tracedata event as part of a request's audit trail.
+
+       tracedata: a string representation of trace event data
+       parts: dictionary of log parts
+    """
+    od = OrderedDict([
+        (k, v) for k, v in [
+            ('elapsed', parts['elapsed']),
+            ('req', parts['reqid']),
+            ('trace', tracedata),
+            ('client', parts['client_ip']),
+            ('user', parts['client_identity_obj']),
+        ]
+        if v
+    ])
+    return json.dumps(od, separators=(', ', ':'))
+
+def request_final_json(parts, extra={}):
+    try:
+        dcctx = request.environ.get('HTTP_DERIVA_CLIENT_CONTEXT', 'null')
+        dcctx = urllib.parse.unquote(dcctx)
+        dcctx = prune_excessive_dcctx(json.loads(dcctx))
+    except Exception as e:
+        hatrac_debug('Error during dcctx decoding: %s' % e)
+        dcctx = None
+
+    od = OrderedDict([
+        (k, v) for k, v in [
+            ('elapsed', parts['elapsed']),
+            ('req', parts['reqid']),
+            ('scheme', request.scheme),
+            ('host', request.host),
+            ('status', hatrac_ctx.hatrac_status),
+            ('method', request.method),
+            ('path', request.environ['REQUEST_URI']),
+            ('range', parts['content_range']),
+            ('type', parts['content_type']),
+            ('client', parts['client_ip']),
+            ('user', parts['client_identity_obj']),
+            ('referrer', request.environ.get('HTTP_REFERER')),
+            ('agent', request.environ.get('HTTP_USER_AGENT')),
+            ('track', hatrac_ctx.webauthn2_context.tracking if hatrac_ctx.webauthn2_context else None),
+            ('dcctx', dcctx),
+        ]
+        if v
+    ])
+    if len(od.get('referrer', '')) > 1000:
+        # truncate overly long URL
+        od['referrer_md5'] = hashlib.md5(od['referrer'].encode()).hexdigest()
+        od['referrer'] = od['referrer'][0:500]
+
+    if hatrac_ctx.webauthn2_context and hatrac_ctx.webauthn2_context.session:
+        session = hatrac_ctx.webauthn2_context.session
+        if hasattr(session, 'to_dict'):
+            session = session.to_dict()
+        od['session'] = session
+
+    for k, v in extra.items():
+        od[k] = v
+
+    return json.dumps(od, separators=(', ', ':'))
 
 def request_trace(tracedata):
     """Log one tracedata event as part of a request's audit trail.
