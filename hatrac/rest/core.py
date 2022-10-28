@@ -239,7 +239,7 @@ class RestException (werkzeug.exceptions.HTTPException):
         )
         # code-specific templates override default templates
         self.response_templates.update(
-            core.config.get('error_templates', {}).get(self.code, {})
+            core.config.get('error_templates', {}).get(str(self.code), {})
         )
         # legacy config syntax
         #   code_typesuffix: template,
