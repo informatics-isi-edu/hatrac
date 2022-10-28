@@ -73,7 +73,7 @@ class NameVersions (RestHandler):
     def __init__(self):
         RestHandler.__init__(self)
 
-    def _get(self, name, path="/"):
+    def get(self, name, path="/"):
         """Get version listing."""
         self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve(
