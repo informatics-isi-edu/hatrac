@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2022 University of Southern California
+# Copyright 2015-2023 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -28,8 +28,8 @@ import werkzeug.exceptions
 import werkzeug.http
 
 import webauthn2
-from webauthn2.util import Context
-from webauthn2.rest import prune_excessive_dcctx
+from webauthn2.util import Context, context_from_environment
+from webauthn2.rest import format_trace_json, format_final_json
 
 from . import app
 from .. import core
@@ -69,134 +69,18 @@ sysloghandler.setFormatter(syslogformatter)
 logger.addHandler(sysloghandler)
 logger.setLevel(logging.INFO)
 
-def session_from_environment():
-    """
-    Get and decode session details from the environment set by the http server (with mod_weba
-uthn).
-    Returns a dictionary on success, None if the environment variable is unset (or blank).
-    Throws TypeError if the base64 decode fails and ValueError if json decode fails
-    """
-    b64_session_string = None
-    try:
-        b64_session_string = request.environ['WEBAUTHN_SESSION_BASE64']
-    except:
-        b64_session_string = os.environ.get('WEBAUTHN_SESSION_BASE64')
-
-    if b64_session_string == None or b64_session_string.strip() == '':
-        return None
-    session_string = base64.standard_b64decode(b64_session_string).decode()
-    return json.loads(session_string)
-
-def context_from_environment(fallback=True):
-    """
-    Get and decode session details from the environment set by the http server (with mod_webauthn).
-    Returns a Context instance which may be empty (anonymous).
-    If fallback=False, returns None if context was not found in environment.
-    Throws TypeError if the base64 decode fails and ValueError if json decode fails
-    """
-    context_dict = session_from_environment()
-    context = Context()
-    if context_dict:
-        context.client = context_dict['client']
-        context.attributes = context_dict['attributes']
-        context.session = {
-            k: v
-            for k, v in context_dict.items()
-            if k in {'since', 'expires', 'seconds_remaining', 'vary_headers'}
-        }
-        context.tracking = context_dict.get('tracking')
-        return context
-    elif fallback:
-        return context
-    else:
-        return None
-
-def log_parts():
-    """Generate a dictionary of interpolation keys used by our logging template.
-    """
-    now = datetime.datetime.now(timezone.utc)
-    elapsed = (now - hatrac_ctx.hatrac_start_time)
-    client_identity_obj = hatrac_ctx.webauthn2_context.client if hatrac_ctx.webauthn2_context else None
-    parts = dict(
-        elapsed = elapsed.seconds + 0.001 * (elapsed.microseconds/1000),
-        client_ip = request.remote_addr,
-        client_identity_obj = client_identity_obj,
-        reqid = hatrac_ctx.hatrac_request_guid,
-        content_range = hatrac_ctx.hatrac_request_content_range,
-        content_type = hatrac_ctx.hatrac_content_type,
-    )
-    return parts
-
-def request_trace_json(tracedata, parts):
-    """Format one tracedata event as part of a request's audit trail.
-
-       tracedata: a string representation of trace event data
-       parts: dictionary of log parts
-    """
-    od = OrderedDict([
-        (k, v) for k, v in [
-            ('elapsed', parts['elapsed']),
-            ('req', parts['reqid']),
-            ('trace', tracedata),
-            ('client', parts['client_ip']),
-            ('user', parts['client_identity_obj']),
-        ]
-        if v
-    ])
-    return json.dumps(od, separators=(', ', ':'))
-
-def request_final_json(parts, extra={}):
-    try:
-        dcctx = request.environ.get('HTTP_DERIVA_CLIENT_CONTEXT', 'null')
-        dcctx = urllib.parse.unquote(dcctx)
-        dcctx = prune_excessive_dcctx(json.loads(dcctx))
-    except Exception as e:
-        hatrac_debug('Error during dcctx decoding: %s' % e)
-        dcctx = None
-
-    od = OrderedDict([
-        (k, v) for k, v in [
-            ('elapsed', parts['elapsed']),
-            ('req', parts['reqid']),
-            ('scheme', request.scheme),
-            ('host', request.host),
-            ('status', hatrac_ctx.hatrac_status),
-            ('method', request.method),
-            ('path', request.environ['REQUEST_URI']),
-            ('range', parts['content_range']),
-            ('type', parts['content_type']),
-            ('client', parts['client_ip']),
-            ('user', parts['client_identity_obj']),
-            ('referrer', request.environ.get('HTTP_REFERER')),
-            ('agent', request.environ.get('HTTP_USER_AGENT')),
-            ('track', hatrac_ctx.webauthn2_context.tracking if hatrac_ctx.webauthn2_context else None),
-            ('dcctx', dcctx),
-        ]
-        if v
-    ])
-    if len(od.get('referrer', '')) > 1000:
-        # truncate overly long URL
-        od['referrer_md5'] = hashlib.md5(od['referrer'].encode()).hexdigest()
-        od['referrer'] = od['referrer'][0:500]
-
-    if hatrac_ctx.webauthn2_context and hatrac_ctx.webauthn2_context.session:
-        session = hatrac_ctx.webauthn2_context.session
-        if hasattr(session, 'to_dict'):
-            session = session.to_dict()
-        od['session'] = session
-
-    for k, v in extra.items():
-        od[k] = v
-
-    return json.dumps(od, separators=(', ', ':'))
-
 def request_trace(tracedata):
     """Log one tracedata event as part of a request's audit trail.
 
        tracedata: a string representation of trace event data
     """
-    logger.info( request_trace_json(tracedata, log_parts()) )
-
+    logger.info(format_trace_json(
+        tracedata,
+        start_time=hatrac_ctx.hatrac_start_time,
+        req=hatrac_ctx.hatrac_request_guid,
+        client=request.remote_addr,
+        webauthn2_context=hatrac_ctx.webauthn2_context,
+    ))
 
 class RestException (werkzeug.exceptions.HTTPException):
     """Hatrac generic REST exception overriding flask/werkzeug defaults.
@@ -349,14 +233,8 @@ def before_request():
         # set once from web context if administrator did not specify in config
         directory.prefix = request.environ['SCRIPT_NAME']
 
-    try:
-        # get client authentication context
-        hatrac_ctx.webauthn2_context = context_from_environment(fallback=False)
-        if hatrac_ctx.webauthn2_context is None:
-            hatrac_debug("falling back to _webauthn2_manager.get_request_context() after failed context_from_environment(False)")
-            hatrac_ctx.webauthn2_context = _webauthn2_manager.get_request_context()
-    except (ValueError, IndexError) as ev:
-        raise Unauthorized('service access requires client authentication')
+    # get client authentication context
+    hatrac_ctx.webauthn2_context = context_from_environment(request.environ, fallback=True)
 
     return None
 
@@ -376,7 +254,17 @@ def after_request(response):
         hatrac_ctx.hatrac_request_content_range = '*/%s' % response.headers['content-length']
     else:
         hatrac_ctx.hatrac_request_content_range = '*/0'
-    logger.info( request_final_json(log_parts()) )
+    logger.info(format_final_json(
+        environ=request.environ,
+        webauthn2_context=hatrac_ctx.webauthn2_context,
+        req=hatrac_ctx.hatrac_request_guid,
+        start_time=hatrac_ctx.hatrac_start_time,
+        client=request.remote_addr,
+        status=hatrac_ctx.hatrac_status,
+        content_range=hatrac_ctx.hatrac_request_content_range,
+        content_type=hatrac_ctx.hatrac_content_type,
+        track=(hatrac_ctx.webauthn2_context.tracking if hatrac_ctx.webauthn2_context else None),
+    ))
     return response
 
 @app.errorhandler(Exception)
