@@ -39,14 +39,13 @@ jobs:
           sudo pip3 install requests
           sudo pip3 install flask
           sudo pip3 install psycopg2-binary
-          sudo pip3 install git+https://github.com/informatics-isi-edu/webpy.git
       - name: Install webauthn
         run: |
           sudo useradd -m -r webauthn
           sudo su -c '/usr/bin/python3 -c "import sys;import pprint;pprint.pprint(sys.path)"' - webauthn
           git clone https://github.com/informatics-isi-edu/webauthn.git
           cd webauthn
-          git checkout origin/master
+          git checkout origin/flask
           sudo make testvars
           sudo make install
           sudo make deploy
