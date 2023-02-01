@@ -42,6 +42,7 @@ jobs:
           sudo pip3 install oauth2client
           sudo pip3 install 'globus_sdk<3'
           sudo pip3 install pyjwkest
+          sudo pip3 install pycryptodome
       - name: Install webauthn
         run: |
           sudo useradd -m -r webauthn
