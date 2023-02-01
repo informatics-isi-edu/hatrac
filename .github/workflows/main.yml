@@ -41,7 +41,7 @@ jobs:
           sudo pip3 install psycopg2-binary
           sudo pip3 install oauth2client
           sudo pip3 install 'globus_sdk<3'
-          sudo pip3 install jwkest
+          sudo pip3 install pyjwkest
       - name: Install webauthn
         run: |
           sudo useradd -m -r webauthn
