@@ -40,7 +40,7 @@ jobs:
           sudo pip3 install flask
           sudo pip3 install psycopg2-binary
           sudo pip3 install oauth2client
-          sudo pip3 install globus_sdk
+          sudo pip3 install 'globus_sdk<3'
       - name: Install webauthn
         run: |
           sudo useradd -m -r webauthn
