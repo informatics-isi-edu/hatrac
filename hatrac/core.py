@@ -15,7 +15,7 @@ import re
 import urllib
 import json
 
-from webauthn2 import merge_config, jsonWriter
+from webauthn2.util import merge_config, jsonWriter
 
 config = merge_config(
     jsonFileName='hatrac_config.json'

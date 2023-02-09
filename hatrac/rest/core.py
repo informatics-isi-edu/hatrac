@@ -27,8 +27,8 @@ import flask.views
 import werkzeug.exceptions
 import werkzeug.http
 
-import webauthn2
 from webauthn2.util import Context, context_from_environment
+from webauthn2.manager import Manager
 from webauthn2.rest import format_trace_json, format_final_json
 
 from . import app
@@ -36,7 +36,7 @@ from .. import core
 from ..core import hatrac_debug, negotiated_content_type
 from .. import directory
 
-_webauthn2_manager = webauthn2.Manager()
+_webauthn2_manager = Manager()
 
 def hash_value(d):
     return base64.b64encode(hashlib.md5(d.encode()).digest()).decode()
@@ -225,7 +225,7 @@ def before_request():
     hatrac_ctx.hatrac_request_content_range = None
     hatrac_ctx.hatrac_content_type = None
     hatrac_ctx.webauthn2_manager = _webauthn2_manager
-    hatrac_ctx.webauthn2_context = webauthn2.Context() # set empty context for sanity
+    hatrac_ctx.webauthn2_context = Context() # set empty context for sanity
     hatrac_ctx.hatrac_request_trace = request_trace
     hatrac_ctx.hatrac_directory = directory
 
