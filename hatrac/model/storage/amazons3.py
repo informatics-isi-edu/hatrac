@@ -90,6 +90,9 @@ class HatracStorage:
         self.s3_default_session = boto3.session.Session(
             **self.s3_config.get('default_session', self.s3_config.get('session', dict())))
         self.s3_bucket_mappings = self.s3_config.get("bucket_mappings", self.s3_config.get('buckets', dict()))
+        for bucket_mapping in self.s3_bucket_mappings.values():
+            if not bucket_mapping.get("conn"):
+                bucket_mapping["conn"] = S3BucketConnection(bucket_mapping, self.s3_default_session)
 
     def _map_name(self, name):
         object_name = name.lstrip("/")
@@ -105,9 +108,6 @@ class HatracStorage:
             if not prefix.endswith("/"):
                 prefix += "/"
             object_name = "%s%s" % (prefix, object_name)
-
-        if not bucket_mapping.get("conn"):
-            bucket_mapping["conn"] = S3BucketConnection(bucket_mapping, self.s3_default_session)
 
         return S3ConnInfo(bucket_name,
                           object_name,
