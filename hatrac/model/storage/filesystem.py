@@ -190,7 +190,7 @@ class HatracStorage (object):
     def get_content(self, name, version, metadata={}, aux={}):
         return self.get_content_range(name, version, metadata, aux=aux)
      
-    def get_content_range(self, name, version, metadata={}, get_slice=None, aux={}):
+    def get_content_range(self, name, version, metadata={}, get_slice=None, aux={}, version_bytes=None):
         """Return (nbytes, metadata, data_iterator) tuple for existing file-version object."""
         dirname, relname = self._dirname_relname(name, version)
         fullname = "%s/%s" % (dirname, relname)

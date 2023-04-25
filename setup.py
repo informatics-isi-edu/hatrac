@@ -9,7 +9,7 @@ from setuptools import setup
 setup(
     name="hatrac",
     description="simple object storage service",
-    version="0.3",
+    version="0.4",
     packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage", "hatrac.rest"],
     package_data={'hatrac': ["*.wsgi"]},
     scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-utils"],
