@@ -242,6 +242,10 @@ class HatracStorage:
 
     @s3_bucket_wrap()
     def create_upload(self, name, nbytes=None, metadata={}, s3_conn_info=None):
+        bucket_versioning = s3_conn_info.client.get_bucket_versioning(Bucket=s3_conn_info.bucket_name)
+        if bucket_versioning.get("Status") != "Enabled":
+            raise Conflict("Bucket versioning is required for bucket %s but it is not currently enabled." %
+                           s3_conn_info.bucket_name)
         response = s3_conn_info.client.create_multipart_upload(
             Key=s3_conn_info.object_name,
             Bucket=s3_conn_info.bucket_name,
