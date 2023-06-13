@@ -22,7 +22,7 @@ from ...core import hatrac_debug, coalesce, max_request_payload_size_default
 from ...core import NotFound, BadRequest, Conflict, Redirect
 
 
-boto3.set_stream_logger('', level='DEBUG')
+#boto3.set_stream_logger('', level='DEBUG')
 
 S3ConnInfo = namedtuple("S3ConnInfo", ["bucket_name", "object_name", "bucket_config", "client"])
 
