@@ -1159,7 +1159,12 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         if objversion.is_deleted:
             raise core.NotFound('Resource %s is not available.' % objversion)
         if get_data:
-            nbytes, metadata, data = self.storage.get_content_range(object.name, objversion.version, objversion.metadata, get_slice, objversion.aux)
+            nbytes, metadata, data = self.storage.get_content_range(object.name,
+                                                                    objversion.version,
+                                                                    objversion.metadata,
+                                                                    get_slice,
+                                                                    objversion.aux,
+                                                                    objversion.nbytes)
         else:
             nbytes = objversion.nbytes
             metadata = objversion.metadata
