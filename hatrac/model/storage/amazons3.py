@@ -22,24 +22,7 @@ from ...core import hatrac_debug, coalesce, max_request_payload_size_default
 from ...core import NotFound, BadRequest, Conflict, Redirect
 
 
-#boto3.set_stream_logger('', level='DEBUG')
-
-S3ConnInfo = namedtuple("S3ConnInfo", ["bucket_name", "object_name", "bucket_config", "client"])
-
-
-class S3BucketConnection:
-    def __init__(self, config, session=None):
-        """Represent an S3 Bucket (and its underlying S3 low-level client) connection"""
-        self.config = config
-        self.session = None
-        session_config = self.config.get("session_config")
-        if session_config:
-            self.session = boto3.session.Session(**session_config)
-        if not self.session:
-            self.session = boto3.session.Session() if not session else session
-
-        client_config = config.get("client_config", dict())
-        self.client = self.session.client('s3', **client_config)
+boto3.set_stream_logger('', level='DEBUG')
 
 
 def s3_bucket_wrap():
@@ -51,9 +34,10 @@ def s3_bucket_wrap():
         def wrapper(*args, **kwargs):
             self = args[0]
             try:
-                s3_conn_info = self._map_name(args[1])
+                hatrac_object_name = args[1]
+                bucket_config = self.bucket_mapper.get_bucket_config(hatrac_object_name)
                 kwargs1 = dict(kwargs)
-                kwargs1['s3_conn_info'] = s3_conn_info
+                kwargs1['bucket_config'] = bucket_config
                 return orig_method(*args, **kwargs1)
                 # TODO: catch and map S3 exceptions into hatrac.core.* exceptions?
             except ClientError as s3_error:
@@ -68,17 +52,115 @@ def s3_bucket_wrap():
     return decorator
 
 
+def rewrite_path(path):
+    """Rewrite a path into a canonical form /path/. """
+    path = path.strip('/')
+    if path:
+        return '/%s/' % (path,)
+    else:
+        return '/'
+
+
+def dict_get_first(d, *keys, default=None):
+    """Return the value for the first key or return default value."""
+    for k in keys:
+        if k in d:
+            return d[k]
+    return default
+
+
+def hatrac_dirname(name):
+    """Similar to os.path.dirname
+
+    Always uses '/' separator regardless of platform.
+    Always returns leading and trailing '/'.
+    """
+    path = '/'.join(name.strip('/').split('/')[0:-1])
+    return rewrite_path(path)
+
+
+class BucketConfigMapper (object):
+    """Represent queryable configration to find bucket config for a path."""
+    def __init__(self, buckets_config, s3_default_session):
+        """Digest hatrac config.s3_config into mapper"""
+        self.prefix_map = [
+            (rewrite_path(prefix), BucketConfig(bucket_config, s3_default_session))
+            for prefix, bucket_config in buckets_config.items()
+        ]
+        # sort from longest to shortest prefix since we prefer longest matches
+        self.prefix_map.sort(key=lambda e: (len(e[0]), e), reverse=True)
+
+    def get_bucket_config(self, hatrac_object_name):
+        """Return bucket_config appropriate for given hatrac_object_name."""
+        object_path = hatrac_dirname(hatrac_object_name)
+        for prefix, bucket_config in self.prefix_map:
+            if object_path.startswith(prefix):
+                return bucket_config
+        raise NotFound("Could not find a bucket configuration for path: %s" % object_path)
+
+
+class BucketConfig (object):
+    """Represent one bucket configuration
+
+    This configuration is long-lived and may be reused for many s3 object operations.
+    """
+    def __init__(self, bucket_config, s3_default_session):
+        # parse dict once and have other code use these attributes
+        self.bucket_name = bucket_config.get("bucket_name")
+        if not self.bucket_name:
+            raise ValueError("Invalid bucket configuration, missing required key: bucket_name")
+        self.bucket_prefix = bucket_config.get("bucket_path_prefix", "hatrac").strip("/")
+        self.presigned_url_threshold = bucket_config.get("presigned_url_threshold")
+        self.presigned_url_expiration_secs = bucket_config.get("presigned_url_expiration_secs", 300)
+        if not isinstance(self.presigned_url_threshold, int) \
+           or self.presigned_url_threshold <= 0:
+            self.presigned_url_threshold = None
+        # setup boto s3 client for this bucket
+        # memoization to original config seems unnecessary but retain for now?
+        self.client = bucket_config.get("s3_boto_client")
+        if self.client is None:
+            session = s3_default_session
+            session_config = bucket_config.get("session_config")
+            if session_config:
+                session = boto3.session.Session(**session_config)
+            if session is None:
+                session = boto3.session.Session()
+            client_config = bucket_config.get("client_config", dict())
+            self.client = session.client("s3", **client_config)
+            bucket_config["s3_boto_client"] = self.client
+
+    def over_threshold(self, nbytes):
+        if self.presigned_url_threshold is not None:
+            if nbytes > self.presigned_url_threshold:
+                return True
+        return False
+
+    def object_key(self, hatrac_object_name):
+        return ("%s/%s" % (self.bucket_prefix, hatrac_object_name.lstrip('/'))).lstrip('/')
+
+
 class HatracStorage:
     """Implement HatracStorage API using one or more S3 buckets.
 
        A configured storage bucket, object name, and object version
        are combined to form one S3 object reference
 
-         https://bucket.s3.amazonaws.com/ object_name ? versionId=object_version
+         https://bucket.s3.amazonaws.com/ bucket_path_prefix object_name ? versionId=object_version
 
        consistent with Hatrac rules.  The incoming name may include
        RFC3986 percent-encoded URL characters, which we assume S3 can
        tolerate.
+
+       The object_name is the full namespace-qualified hatrac object name
+       stripped of the /hatrac/ service prefix.
+
+       The bucket_path_prefix is a configurable prefix to add to this
+       object name when storing to the bucket, defaulting to hatrac/.
+       It can be set to "" or "/" to store just the object_name path
+       directly in the root of the bucket.
+
+    This class is instantiated once and reused for the lifetime of the
+    service process to handle many storage access requests.
 
     """
     track_chunks = True
@@ -93,47 +175,27 @@ class HatracStorage:
         self.s3_config = config['s3_config']
         self.s3_default_session = boto3.session.Session(
             **self.s3_config.get('default_session', self.s3_config.get('session', dict())))
-        self.s3_bucket_mappings = self.s3_config.get("bucket_mappings", self.s3_config.get('buckets', dict()))
-        for bucket_mapping in self.s3_bucket_mappings.values():
-            if not bucket_mapping.get("conn"):
-                bucket_mapping["conn"] = S3BucketConnection(bucket_mapping, self.s3_default_session)
-
-    def _map_name(self, name):
-        object_name = name.lstrip("/")
-        path_root = "/" + (object_name.split("/")[0].strip() if "/" in object_name else object_name)
-        bucket_mapping = self.s3_bucket_mappings.get(path_root, self.s3_bucket_mappings.get("/"))
-        if not bucket_mapping:
-            raise NotFound("Could not find a bucket mapping for path: %s" % name)
-        bucket_name = bucket_mapping.get("bucket_name")
-        if not bucket_name:
-            raise ValueError("Invalid bucket configuration, missing required key: bucket_name")
-        prefix = bucket_mapping.get("bucket_path_prefix", "hatrac")
-        if prefix:
-            if not prefix.endswith("/"):
-                prefix += "/"
-            object_name = "%s%s" % (prefix, object_name)
-
-        return S3ConnInfo(bucket_name,
-                          object_name,
-                          bucket_mapping,
-                          bucket_mapping["conn"].client)
+        buckets_config = dict_get_first(self.s3_config, 'buckets', 'bucket_mappings', default={})
+        self.bucket_mapper = BucketConfigMapper(buckets_config, self.s3_default_session)
 
     @s3_bucket_wrap()
-    def create_from_file(self, name, input, nbytes, metadata={}, s3_conn_info=None):
+    def create_from_file(self, name, input, nbytes, metadata={}, bucket_config=None):
         """Create an entire file-version object from input content, returning version ID."""
-        bucket_versioning = s3_conn_info.client.get_bucket_versioning(Bucket=s3_conn_info.bucket_name)
+        bucket_versioning = bucket_config.client.get_bucket_versioning(Bucket=bucket_config.bucket_name)
         if bucket_versioning.get("Status") != "Enabled":
             raise Conflict("Bucket versioning is required for bucket %s but it is not currently enabled." %
-                           s3_conn_info.bucket_name)
+                           bucket_config.bucket_name)
 
         def helper(inp, content_length, md5, content_type, content_disposition=None):
-            response = s3_conn_info.client.put_object(Key=s3_conn_info.object_name,
-                                                      Bucket=s3_conn_info.bucket_name,
-                                                      Body=inp,
-                                                      ContentType=content_type,
-                                                      ContentLength=content_length,
-                                                      ContentDisposition=content_disposition or "",
-                                                      ContentMD5=md5[1].decode() if md5 else "")
+            response = bucket_config.client.put_object(
+                Key=bucket_config.object_key(name),
+                Bucket=bucket_config.bucket_name,
+                Body=inp,
+                ContentType=content_type,
+                ContentLength=content_length,
+                ContentDisposition=content_disposition or "",
+                ContentMD5=md5[1].decode() if md5 else ""
+            )
             return response['VersionId']
 
         return self._send_content_from_stream(input, nbytes, metadata, helper)
@@ -176,30 +238,26 @@ class HatracStorage:
 
     @s3_bucket_wrap()
     def get_content_range(self, name, version, metadata={},
-                          get_slice=None, aux={}, version_nbytes=None, s3_conn_info=None):
+                          get_slice=None, aux={}, version_nbytes=None, bucket_config=None):
         s3_version = aux.get("version") if aux else None
         version_id = version.strip() if not s3_version else s3_version.strip()
         if version_nbytes is None:
-            response = s3_conn_info.client.head_object(Key=s3_conn_info.object_name,
-                                                       Bucket=s3_conn_info.bucket_name,
-                                                       VersionId=version_id)
+            response = bucket_config.client.head_object(
+                Key=bucket_config.object_key(name),
+                Bucket=bucket_config.bucket_name,
+                VersionId=version_id
+            )
             nbytes = response["ContentLength"]
         else:
             nbytes = version_nbytes
 
-        over_threshold = False
-        presigned_url_threshold = s3_conn_info.bucket_config.get("presigned_url_size_threshold")
-        if isinstance(presigned_url_threshold, int) and presigned_url_threshold > 0:
-            if nbytes > presigned_url_threshold:
-                over_threshold = True
-
-        if over_threshold and not get_slice:
-            url = s3_conn_info.client.generate_presigned_url(
+        if bucket_config.over_threshold(nbytes) and not get_slice:
+            url = bucket_config.client.generate_presigned_url(
                 ClientMethod='get_object',
-                ExpiresIn=s3_conn_info.bucket_config.get("presigned_url_expiration_secs", 300),
+                ExpiresIn=bucket_config.presigned_url_expiration_secs,
                 Params={
-                    'Bucket': s3_conn_info.bucket_name,
-                    'Key': s3_conn_info.object_name,
+                    'Bucket': bucket_config.bucket_name,
+                    'Key': bucket_config.object_key(name),
                     'VersionId': version_id
                 }
             )
@@ -220,12 +278,14 @@ class HatracStorage:
 
         length = limit - pos
 
-        response = s3_conn_info.client.get_object(Key=s3_conn_info.object_name,
-                                                  Bucket=s3_conn_info.bucket_name,
-                                                  Range=content_range,
-                                                  VersionId=version_id)
+        response = bucket_config.client.get_object(
+            Key=bucket_config.object_key(name),
+            Bucket=bucket_config.bucket_name,
+            Range=content_range,
+            VersionId=version_id
+        )
 
-        def data_generator(conn_info):
+        def data_generator(response):
             try:
                 for chunk in iter(lambda: response['Body'].read(self._bufsize), b''):
                     yield chunk
@@ -233,57 +293,65 @@ class HatracStorage:
                 if "hatrac_request_trace" in hatrac_ctx:
                     hatrac_ctx.hatrac_request_trace("S3 read error: %s" % ev)
 
-        return length, metadata, data_generator(s3_conn_info)
+        return length, metadata, data_generator(response)
 
     @s3_bucket_wrap()
-    def delete(self, name, version, aux={}, s3_conn_info=None):
+    def delete(self, name, version, aux={}, bucket_config=None):
         """Delete object version."""
         s3_version = aux.get("version") if aux else None
         version_id = version.strip() if not s3_version else s3_version.strip()
-        response = s3_conn_info.client.delete_object(Key=s3_conn_info.object_name,
-                                                     Bucket=s3_conn_info.bucket_name,
-                                                     VersionId=version_id)
+        response = bucket_config.client.delete_object(
+            Key=bucket_config.object_key(name),
+            Bucket=bucket_config.bucket_name,
+            VersionId=version_id
+        )
 
     @s3_bucket_wrap()
-    def create_upload(self, name, nbytes=None, metadata={}, s3_conn_info=None):
-        response = s3_conn_info.client.create_multipart_upload(
-            Key=s3_conn_info.object_name,
-            Bucket=s3_conn_info.bucket_name,
+    def create_upload(self, name, nbytes=None, metadata={}, bucket_config=None):
+        response = bucket_config.client.create_multipart_upload(
+            Key=bucket_config.object_key(name),
+            Bucket=bucket_config.bucket_name,
             ContentType=metadata.get('content-type', 'application/octet-stream'),
             ContentDisposition=metadata.get('content-disposition', ''))
         return response["UploadId"]
 
     @s3_bucket_wrap()
     def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes,
-                               metadata={}, s3_conn_info=None):
+                               metadata={}, bucket_config=None):
 
         def helper(inp, length, md5, content_type=None, content_disposition=None):
-            response = s3_conn_info.client.upload_part(Key=s3_conn_info.object_name,
-                                                       Bucket=s3_conn_info.bucket_name,
-                                                       UploadId=upload_id,
-                                                       PartNumber=position + 1,
-                                                       Body=inp,
-                                                       ContentLength=length)
+            response = bucket_config.client.upload_part(
+                Key=bucket_config.object_key(name),
+                Bucket=bucket_config.bucket_name,
+                UploadId=upload_id,
+                PartNumber=position + 1,
+                Body=inp,
+                ContentLength=length
+            )
             return dict(etag=response['ETag'])
 
         return self._send_content_from_stream(input, nbytes, metadata, helper, chunksize)
 
     @s3_bucket_wrap()
-    def cancel_upload(self, name, upload_id, s3_conn_info=None):
-        s3_conn_info.client.abort_multipart_upload(Key=s3_conn_info.object_name,
-                                                   Bucket=s3_conn_info.bucket_name,
-                                                   UploadId=upload_id)
+    def cancel_upload(self, name, upload_id, bucket_config=None):
+        bucket_config.client.abort_multipart_upload(
+            Key=bucket_config.object_key(name),
+            Bucket=bucket_config.bucket_name,
+            UploadId=upload_id
+        )
         return None
 
     @s3_bucket_wrap()
-    def finalize_upload(self, name, upload_id, chunk_data, metadata={}, s3_conn_info=None):
+    def finalize_upload(self, name, upload_id, chunk_data, metadata={}, bucket_config=None):
         parts = list()
         for item in iter(chunk_data):
             parts.append({'PartNumber': item['position'] + 1, 'ETag': item['aux']['etag']})
-        response = s3_conn_info.client.complete_multipart_upload(Key=s3_conn_info.object_name,
-                                                                 Bucket=s3_conn_info.bucket_name,
-                                                                 UploadId=upload_id,
-                                                                 MultipartUpload={'Parts': parts})
+        response = bucket_config.client.complete_multipart_upload(
+            Key=bucket_config.object_key(name),
+            Bucket=bucket_config.bucket_name,
+            UploadId=upload_id,
+            MultipartUpload={'Parts': parts}
+        )
         return response["VersionId"]
 
     def delete_namespace(self, name):
@@ -292,11 +360,13 @@ class HatracStorage:
         pass
 
     @s3_bucket_wrap()
-    def purge_all_multipart_uploads(self, name, s3_conn_info=None):
+    def purge_all_multipart_uploads(self, name, bucket_config=None):
         next_key_marker = None
         while True:
-            upload_response = s3_conn_info.client.list_multipart_uploads(Bucket=s3_conn_info.bucket_name,
-                                                                         KeyMarker=next_key_marker or "")
+            upload_response = bucket_config.client.list_multipart_uploads(
+                Bucket=bucket_config.bucket_name,
+                KeyMarker=next_key_marker or ""
+            )
             uploads = upload_response.get("Uploads")
             if not uploads:
                 return
@@ -304,8 +374,11 @@ class HatracStorage:
                 key = upload["Key"]
                 upload_id = upload["UploadId"]
                 try:
-                    s3_conn_info.client.abort_multipart_upload(
-                        Bucket=s3_conn_info.bucket_name, Key=key, UploadId=upload_id)
+                    bucket_config.client.abort_multipart_upload(
+                        Bucket=bucket_config.bucket_name,
+                        Key=key,
+                        UploadId=upload_id
+                    )
                 except Exception as e:
                     sys.stderr.print("Error purging S3 multipart upload for Key [%s] with UploadId [%s]: %s" %
                                      (key, upload_id, e))
