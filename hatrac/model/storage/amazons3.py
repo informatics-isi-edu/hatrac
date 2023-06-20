@@ -61,6 +61,12 @@ def rewrite_path(path):
         return '/'
 
 
+def explode_path(p):
+    """Return list of path elements with empty list for root path"""
+    p = p.strip('/')
+    return p.split('/') if p else []
+
+
 def dict_get_first(d, *keys, default=None):
     """Return the value for the first key or return default value."""
     for k in keys:
@@ -79,24 +85,65 @@ def hatrac_dirname(name):
     return rewrite_path(path)
 
 
+class BucketTree (object):
+    def __init__(self):
+        self.children = {}
+        self.bucket_config = None
+
+    def digest(self, *path_items, path_context='/', legacy_mode=False):
+        """Build out tree structure for given path_items
+
+        :param path_items: zero or more pairs ([prefix, ...], BucketConfig)
+        :param path_context: path str of ancestor tree nodes
+        :param legacy_mode: limit tree to depth=1 if True
+        """
+        for path, bucket_config in path_items:
+            if not path:
+                if self.bucket_config is not None:
+                    hatrac_debug('WARNING: ignoring duplicate path mapping for path_context: %r' % (path_context,))
+                    continue
+                self.bucket_config = bucket_config
+                continue
+
+            subtree = self.children.setdefault(path[0], BucketTree())
+            subtree.digest(
+                (path[1:] if not legacy_mode else [], bucket_config),
+                path_context=('%s%s/' % (path_context, path[0])),
+            )
+
+
 class BucketConfigMapper (object):
     """Represent queryable configration to find bucket config for a path."""
-    def __init__(self, buckets_config, s3_default_session):
-        """Digest hatrac config.s3_config into mapper"""
-        self.prefix_map = [
-            (rewrite_path(prefix), BucketConfig(bucket_config, s3_default_session))
-            for prefix, bucket_config in buckets_config.items()
-        ]
-        # sort from longest to shortest prefix since we prefer longest matches
-        self.prefix_map.sort(key=lambda e: (len(e[0]), e), reverse=True)
+
+    def __init__(self, buckets_config, s3_default_session, legacy_mode=False):
+        """Digest hatrac config.s3_config into mapper
+
+        :param buckets_config: projected buckets config from hatrac_config JSON
+        :param s3_default_session: default boto s3 session config
+        :param legacy_mode: shallow depth=1 path mapping if True
+        """
+        self.bucket_tree = BucketTree()
+        self.bucket_tree.digest(
+            *[ (explode_path(prefix), BucketConfig(bucket_config, s3_default_session))
+               for prefix, bucket_config in buckets_config.items() ],
+            legacy_mode=legacy_mode,
+        )
 
     def get_bucket_config(self, hatrac_object_name):
         """Return bucket_config appropriate for given hatrac_object_name."""
-        object_path = hatrac_dirname(hatrac_object_name)
-        for prefix, bucket_config in self.prefix_map:
-            if object_path.startswith(prefix):
-                return bucket_config
-        raise NotFound("Could not find a bucket configuration for path: %s" % object_path)
+        object_path = explode_path(hatrac_dirname(hatrac_object_name))
+        # find most specific tree node matching object path
+        subtree = self.bucket_tree
+        last_with_bucket = subtree
+        for prefix in object_path:
+            if prefix not in subtree.children:
+                break
+            subtree = subtree.children[prefix]
+            if subtree.bucket_config is not None:
+                last_with_bucket = subtree
+        if last_with_bucket.bucket_config is None:
+            raise ValueError('Invalid bucket mapping, bucket indeterminate for object: %r' % (hatrac_object_name))
+        return last_with_bucket.bucket_config
 
 
 class BucketConfig (object):
@@ -176,7 +223,12 @@ class HatracStorage:
         self.s3_default_session = boto3.session.Session(
             **self.s3_config.get('default_session', self.s3_config.get('session', dict())))
         buckets_config = dict_get_first(self.s3_config, 'buckets', 'bucket_mappings', default={})
-        self.bucket_mapper = BucketConfigMapper(buckets_config, self.s3_default_session)
+        legacy_mode = self.s3_config.get('legacy_mapping', False)
+        self.bucket_mapper = BucketConfigMapper(
+            buckets_config,
+            self.s3_default_session,
+            legacy_mode=legacy_mode,
+        )
 
     @s3_bucket_wrap()
     def create_from_file(self, name, input, nbytes, metadata={}, bucket_config=None):
