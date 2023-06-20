@@ -216,6 +216,8 @@ class ServerError (RestException):
     code = 500
     description = 'The request encountered an error on the server.'
 
+app.url_map.strict_slashes = False
+
 @app.before_request
 def before_request():
     # request context init
