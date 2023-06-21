@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2023 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -19,6 +19,11 @@ import struct
 import io
 
 from ...core import BadRequest, Conflict, coalesce
+
+def make_random_version():
+    return base64.b32encode(
+        struct.pack('QQ', random.getrandbits(64), random.getrandbits(64))[0:26]
+    ).decode().replace('=', '') # strip off '=' padding
 
 def make_file(dirname, relname, accessmode):
     """Create and open file with accessmode, including missing parents.
@@ -79,12 +84,7 @@ class HatracStorage (object):
 
     def create_from_file(self, name, input, nbytes, metadata={}):
         """Create an entire file-version object from input content, returning version ID."""
-        
-        version = base64.b32encode( 
-            (struct.pack('Q', random.getrandbits(64))
-             + struct.pack('Q', random.getrandbits(64)))[0:26]
-        ).decode().replace('=', '') # strip off '=' padding
-
+        version = make_random_version()
         dirname, relname = self._dirname_relname(name, version)
         f = make_file(dirname, relname, 'wb')
 

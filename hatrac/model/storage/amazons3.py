@@ -20,9 +20,10 @@ from botocore.exceptions import ClientError
 from flask import g as hatrac_ctx
 from ...core import hatrac_debug, coalesce, max_request_payload_size_default
 from ...core import NotFound, BadRequest, Conflict, Redirect
+from .filesystem import make_random_version
 
 
-boto3.set_stream_logger('', level='DEBUG')
+#boto3.set_stream_logger('', level='DEBUG')
 
 
 def s3_bucket_wrap():
@@ -146,17 +147,41 @@ class BucketConfigMapper (object):
         return last_with_bucket.bucket_config
 
 
+HatracS3Method = namedtuple(
+    "HatracS3Method",
+    [
+        "expose_s3_version",
+        "s3_name_template",
+    ]
+)
+
+
 class BucketConfig (object):
     """Represent one bucket configuration
 
     This configuration is long-lived and may be reused for many s3 object operations.
     """
+    s3_methods = {
+        "pref/**/hname": HatracS3Method(
+            True,
+            "%(bucket_prefix)s/%(hatrac_object_name)s",
+        ),
+        "pref/**/hname:hver": HatracS3Method(
+            False,
+            "%(bucket_prefix)s/%(hatrac_object_name)s:%(hatrac_object_version)s",
+        ),
+    }
+
     def __init__(self, bucket_config, s3_default_session):
         # parse dict once and have other code use these attributes
         self.bucket_name = bucket_config.get("bucket_name")
         if not self.bucket_name:
             raise ValueError("Invalid bucket configuration, missing required key: bucket_name")
         self.bucket_prefix = bucket_config.get("bucket_path_prefix", "hatrac").strip("/")
+        self.s3_method_name = bucket_config.get("hatrac_s3_method", "pref/**/hname")
+        if self.s3_method_name not in self.s3_methods:
+            raise ValueError("Invalid bucket configuration, unknown hatrac_s3_method: %r" % (self.s3_method_name,))
+        self.s3_method = self.s3_methods[self.s3_method_name]
         self.presigned_url_threshold = bucket_config.get("presigned_url_threshold")
         self.presigned_url_expiration_secs = bucket_config.get("presigned_url_expiration_secs", 300)
         if not isinstance(self.presigned_url_threshold, int) \
@@ -182,8 +207,59 @@ class BucketConfig (object):
                 return True
         return False
 
-    def object_key(self, hatrac_object_name):
+    def object_key(self, hatrac_object_name, hatrac_object_version=None):
+        return (self.s3_method.s3_name_template % dict(
+            bucket_prefix=self.bucket_prefix,
+            hatrac_object_name=hatrac_object_name.lstrip('/'),
+            hatrac_object_version=hatrac_object_version,
+        )).lstrip('/')
         return ("%s/%s" % (self.bucket_prefix, hatrac_object_name.lstrip('/'))).lstrip('/')
+
+    def enforce_versioning_enabled(self):
+        bucket_versioning = self.client.get_bucket_versioning(Bucket=self.bucket_name)
+        if bucket_versioning.get("Status") != "Enabled":
+            raise Conflict(
+                "Bucket versioning is required for bucket %s but it is not currently enabled." % self.bucket_name
+            )
+
+    def boto_kwargs(self, Bucket=True, **kwargs):
+        res = { k: v for k, v in kwargs.items() if v is not None }
+        if Bucket is True:
+            res['Bucket'] = self.bucket_name
+        if not self.s3_method.expose_s3_version:
+            res.pop('VersionId', None)
+        return res
+
+    def preflight_hatrac_version(self):
+        if self.s3_method.expose_s3_version:
+            self.enforce_versioning_enabled()
+            return None
+        else:
+            return make_random_version()
+
+    def postflight_hatrac_version(self, preflight_version, s3_response):
+        if self.s3_method.expose_s3_version:
+            return s3_response['VersionId']
+        else:
+            return preflight_version
+
+    def postflight_hatrac_upload(self, preflight_version, s3_response):
+        upload = s3_response["UploadId"]
+        if self.s3_method.expose_s3_version:
+            return upload
+        else:
+            # we need to remember both parts
+            return '%s.%s' % (preflight_version, upload)
+
+    def unpack_upload_version(self, upload_id):
+        if not self.s3_method.expose_s3_version:
+            # we packed these in create_upload() results
+            parts = upload_id.split('.')
+            version = parts[0]
+            upload_id = '.'.join(parts[1:])
+        else:
+            version = None
+        return (upload_id, version)
 
 
 class HatracStorage:
@@ -233,24 +309,19 @@ class HatracStorage:
     @s3_bucket_wrap()
     def create_from_file(self, name, input, nbytes, metadata={}, bucket_config=None):
         """Create an entire file-version object from input content, returning version ID."""
-        bucket_versioning = bucket_config.client.get_bucket_versioning(Bucket=bucket_config.bucket_name)
-        if bucket_versioning.get("Status") != "Enabled":
-            raise Conflict("Bucket versioning is required for bucket %s but it is not currently enabled." %
-                           bucket_config.bucket_name)
-
-        def helper(inp, content_length, md5, content_type, content_disposition=None):
-            response = bucket_config.client.put_object(
-                Key=bucket_config.object_key(name),
-                Bucket=bucket_config.bucket_name,
+        def sendfunc(inp, content_length, md5, content_type, content_disposition=None):
+            version = bucket_config.preflight_hatrac_version()
+            response = bucket_config.client.put_object(**bucket_config.boto_kwargs(
+                Key=bucket_config.object_key(name, version),
                 Body=inp,
                 ContentType=content_type,
                 ContentLength=content_length,
-                ContentDisposition=content_disposition or "",
-                ContentMD5=md5[1].decode() if md5 else ""
-            )
-            return response['VersionId']
+                ContentDisposition=content_disposition,
+                ContentMD5=md5[1].decode() if md5 else None
+            ))
+            return bucket_config.postflight_hatrac_version(version, response)
 
-        return self._send_content_from_stream(input, nbytes, metadata, helper)
+        return self._send_content_from_stream(input, nbytes, metadata, sendfunc)
 
     def _send_content_from_stream(self, input, nbytes, metadata, sendfunc, chunksize=None):
         """Common file-sending logic to talk to S3."""
@@ -288,17 +359,23 @@ class HatracStorage:
     def get_content(self, name, version, metadata={}, aux={}):
         return self.get_content_range(name, version, metadata, None, aux=aux, version_nbytes=None)
 
+    def s3_head_object(self, name, version, s3_version, bucket_config):
+        try:
+            return bucket_config.client.head_object(**bucket_config.boto_kwargs(
+                Key=bucket_config.object_key(name, version),
+                VersionId=s3_version,
+            ))
+        except boto3.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                return False
+
     @s3_bucket_wrap()
     def get_content_range(self, name, version, metadata={},
                           get_slice=None, aux={}, version_nbytes=None, bucket_config=None):
         s3_version = aux.get("version") if aux else None
         version_id = version.strip() if not s3_version else s3_version.strip()
         if version_nbytes is None:
-            response = bucket_config.client.head_object(
-                Key=bucket_config.object_key(name),
-                Bucket=bucket_config.bucket_name,
-                VersionId=version_id
-            )
+            response = self.s3_head_object(name, version, s3_version, bucket_config)
             nbytes = response["ContentLength"]
         else:
             nbytes = version_nbytes
@@ -307,11 +384,10 @@ class HatracStorage:
             url = bucket_config.client.generate_presigned_url(
                 ClientMethod='get_object',
                 ExpiresIn=bucket_config.presigned_url_expiration_secs,
-                Params={
-                    'Bucket': bucket_config.bucket_name,
-                    'Key': bucket_config.object_key(name),
-                    'VersionId': version_id
-                }
+                Params=bucket_config.boto_kwargs(
+                    Key=bucket_config.object_key(name, version),
+                    VersionId=version_id,
+                )
             )
             response = Redirect(url)
             return nbytes, metadata, response
@@ -328,14 +404,21 @@ class HatracStorage:
         else:
             content_range = 'bytes=0-'
 
+        if pos != 0 or limit != nbytes:
+            # most object metadata does not apply to partial read content
+            metadata = {
+                k: v
+                for k, v in metadata.items()
+                if k in {'content-type'}
+            }
+
         length = limit - pos
 
-        response = bucket_config.client.get_object(
-            Key=bucket_config.object_key(name),
-            Bucket=bucket_config.bucket_name,
+        response = bucket_config.client.get_object(**bucket_config.boto_kwargs(
+            Key=bucket_config.object_key(name, version),
             Range=content_range,
-            VersionId=version_id
-        )
+            VersionId=version_id,
+        ))
 
         def data_generator(response):
             try:
@@ -352,59 +435,62 @@ class HatracStorage:
         """Delete object version."""
         s3_version = aux.get("version") if aux else None
         version_id = version.strip() if not s3_version else s3_version.strip()
-        response = bucket_config.client.delete_object(
-            Key=bucket_config.object_key(name),
-            Bucket=bucket_config.bucket_name,
-            VersionId=version_id
-        )
+        response = bucket_config.client.delete_object(**bucket_config.boto_kwargs(
+            Key=bucket_config.object_key(name, version),
+            VersionId=version_id,
+        ))
 
     @s3_bucket_wrap()
     def create_upload(self, name, nbytes=None, metadata={}, bucket_config=None):
-        response = bucket_config.client.create_multipart_upload(
-            Key=bucket_config.object_key(name),
-            Bucket=bucket_config.bucket_name,
+        # thread version state needed for _some_ naming schemes
+        version = bucket_config.preflight_hatrac_version()
+        response = bucket_config.client.create_multipart_upload(**bucket_config.boto_kwargs(
+            Key=bucket_config.object_key(name, version),
             ContentType=metadata.get('content-type', 'application/octet-stream'),
-            ContentDisposition=metadata.get('content-disposition', ''))
-        return response["UploadId"]
+            ContentDisposition=metadata.get('content-disposition', '')
+        ))
+        return bucket_config.postflight_hatrac_upload(version, response)
 
     @s3_bucket_wrap()
     def upload_chunk_from_file(self, name, upload_id, position, chunksize, input, nbytes,
                                metadata={}, bucket_config=None):
 
         def helper(inp, length, md5, content_type=None, content_disposition=None):
-            response = bucket_config.client.upload_part(
-                Key=bucket_config.object_key(name),
-                Bucket=bucket_config.bucket_name,
-                UploadId=upload_id,
+            upload, version = bucket_config.unpack_upload_version(upload_id)
+            response = bucket_config.client.upload_part(**bucket_config.boto_kwargs(
+                Key=bucket_config.object_key(name, version),
+                UploadId=upload,
                 PartNumber=position + 1,
                 Body=inp,
-                ContentLength=length
-            )
+                ContentLength=length,
+            ))
             return dict(etag=response['ETag'])
 
         return self._send_content_from_stream(input, nbytes, metadata, helper, chunksize)
 
     @s3_bucket_wrap()
     def cancel_upload(self, name, upload_id, bucket_config=None):
-        bucket_config.client.abort_multipart_upload(
-            Key=bucket_config.object_key(name),
-            Bucket=bucket_config.bucket_name,
-            UploadId=upload_id
-        )
+        upload, version = bucket_config.unpack_upload_version(upload_id)
+        bucket_config.client.abort_multipart_upload(**bucket_config.boto_kwargs(
+            Key=bucket_config.object_key(name, version),
+            UploadId=upload
+        ))
         return None
 
     @s3_bucket_wrap()
     def finalize_upload(self, name, upload_id, chunk_data, metadata={}, bucket_config=None):
-        parts = list()
-        for item in iter(chunk_data):
-            parts.append({'PartNumber': item['position'] + 1, 'ETag': item['aux']['etag']})
-        response = bucket_config.client.complete_multipart_upload(
-            Key=bucket_config.object_key(name),
-            Bucket=bucket_config.bucket_name,
-            UploadId=upload_id,
-            MultipartUpload={'Parts': parts}
-        )
-        return response["VersionId"]
+        upload, version = bucket_config.unpack_upload_version(upload_id)
+        response = bucket_config.client.complete_multipart_upload(**bucket_config.boto_kwargs(
+            Key=bucket_config.object_key(name, version),
+            UploadId=upload,
+            MultipartUpload={
+                'Parts': [
+                    {'PartNumber': item['position'] + 1, 'ETag': item['aux']['etag']}
+                    for item in iter(chunk_data)
+                ]
+            },
+        ))
+        return bucket_config.postflight_hatrac_version(version, response)
 
     def delete_namespace(self, name):
         """Tidy up after an empty namespace that has been deleted."""
@@ -413,6 +499,7 @@ class HatracStorage:
 
     @s3_bucket_wrap()
     def purge_all_multipart_uploads(self, name, bucket_config=None):
+        # NOTE: this only works with the naming method using hatrac names as s3 object keys
         next_key_marker = None
         while True:
             upload_response = bucket_config.client.list_multipart_uploads(
