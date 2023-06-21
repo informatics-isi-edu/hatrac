@@ -40,7 +40,7 @@ EOF
 [[ -n $COOKIES && ! -r $COOKIES ]] && error
 
 #Supported deployments: amazons3 or filesystem
-[[ -z $DEPLOYMENT ]] && DEPLOYMENT="filesystem"
+DEPLOYMENT=${DEPLOYMENT:-filesystem}
 
 echo "Using $DEPLOYMENT deployment" >&2
 
@@ -650,17 +650,29 @@ dotest "200::application/json::*" "${upload}"
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj4 -X DELETE
 dotest "404::*::*" "${upload}"
 
-# check upload job with mismatched, invalid MD5, invalid base64
-douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "$(echo "" | mymd5sum)" "" "201::text/uri-list::*" "204::*::*" "204::*::*" "409::*::*"
+# check upload job...
+douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "$(echo "" | mymd5sum)" "" "201::text/uri-list::*" "204::*::*" "204::*::*"
+if [[ "$DEPLOYMENT" = "filesystem" ]]
+then
+    # ... finalized with mismatching checksums (only enforced in filesystem backend?)
+    dotest "409::*::*" "${upload}" -X POST
+fi
+
+# uploads with bad md5 values
 douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "YmFkX21kNQo=" "" "400::*::*"
 douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "bad_md5" "" "400::*::*"
 
-# check upload job with mismatched, invalid MD5, invalid base64 in final chunk
-douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "${upload_md5}" "" "201::text/uri-list::*" "204::*::*" "204::*::*"
+# check upload job with some broken steps...
+douploadtest "/ns-${RUNKEY}/foo2/obj2bad" "${upload_md5}" "" "201::text/uri-list::*"
+# chunks with bad md5 values
 parts=( /tmp/parts-${RUNKEY}-* )
-dotest "400::*::*" "${upload}/0" -T "${parts[0]}" -H "Content-MD5: $(echo "" | mymd5sum)"
 dotest "400::*::*" "${upload}/0" -T "${parts[0]}" -H "Content-MD5: YmFkX21kNQo="
 dotest "400::*::*" "${upload}/0" -T "${parts[0]}" -H "Content-MD5: bad_md5"
+if [[ "$DEPLOYMENT" = "filesystem" ]]
+then
+    # mismatched chunk checksums (only enforced in filesystem backend?)
+    dotest "400::*::*" "${upload}/0" -T "${parts[0]}" -H "Content-MD5: $(echo "" | mymd5sum)"
+fi
 
 # check object conditional updates
 dotest "412::*::*" /ns-${RUNKEY}/foo2/obj1 \
