@@ -136,6 +136,16 @@ def negotiated_content_type(environ, supported_types=['text/csv', 'application/j
 
     return default
 
+class ObjectVersionMissing(Exception):
+    """Internal exception useful in storage backends.
+
+    This would be an internal server error if raised from a storage
+    backend, because it means the DB and storage are out of sync. But,
+    the overlay provider may catch this and search additional
+    backends...
+    """
+    pass
+
 class HatracException (Exception):
     """Base class for Hatrac API exceptions."""
     pass

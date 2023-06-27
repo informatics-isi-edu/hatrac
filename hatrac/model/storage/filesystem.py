@@ -18,7 +18,7 @@ import random
 import struct
 import io
 
-from ...core import BadRequest, Conflict, coalesce
+from ...core import BadRequest, Conflict, ObjectVersionMissing, coalesce
 
 def make_random_version():
     return base64.b32encode(
@@ -194,7 +194,12 @@ class HatracStorage (object):
         """Return (nbytes, metadata, data_iterator) tuple for existing file-version object."""
         dirname, relname = self._dirname_relname(name, version)
         fullname = "%s/%s" % (dirname, relname)
-        nbytes = os.path.getsize(fullname)
+
+        try:
+            nbytes = os.path.getsize(fullname)
+        except FileNotFoundError as e:
+            # this matters for overlay backend scenarios
+            raise ObjectVersionMissing(e)
 
         if get_slice is not None:
             pos = coalesce(get_slice.start, 0)
@@ -252,7 +257,11 @@ class HatracStorage (object):
         """Delete object version."""
         dirname, relname = self._dirname_relname(name, version)
         fullname = "%s/%s" % (dirname, relname)
-        os.remove(fullname)
+        try:
+            os.remove(fullname)
+        except FileNotFoundError as e:
+            # this matters for overlay backend scenarios
+            raise ObjectVersionMissing(e)
 
     def delete_namespace(self, name):
         """Tidy up after an empty namespace that has been deleted."""

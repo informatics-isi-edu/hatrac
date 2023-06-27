@@ -19,7 +19,7 @@ from io import BufferedRandom, BytesIO
 from botocore.exceptions import ClientError
 from flask import g as hatrac_ctx
 from ...core import hatrac_debug, coalesce, max_request_payload_size_default
-from ...core import NotFound, BadRequest, Conflict, Redirect
+from ...core import NotFound, BadRequest, Conflict, Redirect, ObjectVersionMissing
 from .filesystem import make_random_version
 
 
@@ -365,7 +365,7 @@ class HatracStorage:
                 Key=bucket_config.object_key(name, version),
                 VersionId=s3_version,
             ))
-        except boto3.exceptions.ClientError as e:
+        except ClientError as e:
             if e.response['Error']['Code'] == '404':
                 return False
 
@@ -414,11 +414,21 @@ class HatracStorage:
 
         length = limit - pos
 
-        response = bucket_config.client.get_object(**bucket_config.boto_kwargs(
-            Key=bucket_config.object_key(name, version),
-            Range=content_range,
-            VersionId=version_id,
-        ))
+        try:
+            response = bucket_config.client.get_object(**bucket_config.boto_kwargs(
+                Key=bucket_config.object_key(name, version),
+                Range=content_range,
+                VersionId=version_id,
+            ))
+        # these matter for overlay backend scenarios
+        except bucket_config.client.exceptions.NoSuchKey as e:
+            raise ObjectVersionMissing(e)
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'InvalidArgument' \
+               and e.response['Error']['ArgumentName'] == 'versionId':
+                raise ObjectVersionMissing(e)
+            hatrac_debug('got unexpected ClientError in amazons3 get_content_range', e, type(e), e.response)
+            raise
 
         def data_generator(response):
             try:
@@ -435,10 +445,20 @@ class HatracStorage:
         """Delete object version."""
         s3_version = aux.get("version") if aux else None
         version_id = version.strip() if not s3_version else s3_version.strip()
-        response = bucket_config.client.delete_object(**bucket_config.boto_kwargs(
-            Key=bucket_config.object_key(name, version),
-            VersionId=version_id,
-        ))
+        try:
+            response = bucket_config.client.delete_object(**bucket_config.boto_kwargs(
+                Key=bucket_config.object_key(name, version),
+                VersionId=version_id,
+            ))
+        # these matter for overlay backend scenarios
+        except bucket_config.client.exceptions.NoSuchKey as e:
+            raise ObjectVersionMissing(e)
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'InvalidArgument' \
+               and e.response['Error']['ArgumentName'] == 'versionId':
+                raise ObjectVersionMissing(e)
+            #hatrac_debug('got unexpected ClientError in amazons3 delete', e, type(e), e.response)
+            raise
 
     @s3_bucket_wrap()
     def create_upload(self, name, nbytes=None, metadata={}, bucket_config=None):
