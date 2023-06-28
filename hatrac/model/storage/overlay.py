@@ -132,16 +132,20 @@ class HatracStorage (object):
      
     def get_content_range(self, name, version, metadata={}, get_slice=None, aux={}, nbytes=None):
         if get_slice is None:
-            # HACK: supplying a slice will prevent amazons3 backends from using signed-url redirects
-            # so we can get a synchronous data result or an ObjectversionMissing exception
-            get_slice = slice(0, nbytes)
-        for backend in self.backends:
+            search_slice = slice(0, nbytes)
+        else:
+            search_slice = get_slice
+
+        for backend in self.backends[0:-1]:
             try:
-                return backend.get_content_range(name, version, metadata, get_slice, aux, nbytes)
+                # HACK: search_slice forces the s3 backend to do a synchronous object_get to check for presence...
+                return backend.get_content_range(name, version, metadata, search_slice, aux, nbytes)
             except ObjectVersionMissing as e:
                 # this is expected for overlay scenario, so try next backend...
                 pass
-        raise ObjectVersionMissing('Could not locate object version %r:%r' % (name, version))
+
+        # if we get here, object MUST be in final backend or we have an internal error anyway...
+        return self.backends[-1].get_content_range(name, version, metadata, get_slice, aux, nbytes)
 
     def delete(self, name, version, aux={}):
         try:
