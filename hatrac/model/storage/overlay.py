@@ -111,6 +111,9 @@ class HatracStorage (object):
 
     # method params are passed by position from hatrac.model.directory.pgsql
     # except where specifically proxied as param=value below
+    @property
+    def track_chunks(self):
+        return self.backends[0].track_chunks
 
     def create_from_file(self, name, input, nbytes, metadata={}):
         return self.backends[0].create_from_file(name, input, nbytes, metadata)
