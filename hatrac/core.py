@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2022 University of Southern California
+# Copyright 2015-2023 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -18,10 +18,36 @@ import json
 from webauthn2.util import merge_config, jsonWriter
 
 config = merge_config(
-    jsonFileName='hatrac_config.json'
+    jsonFileName='hatrac_config.json',
+    built_ins={
+        # backwards compatible default firewall behavior
+        "firewall_acls": {
+            "create": ["*"],
+            "delete": ["*"],
+            "manage_acl": ["*"],
+            "manage_metadata": ["*"],
+        },
+    },
 )
+# digest firewall acls into sets once for reuse across requests...
+config["firewall_acls"] = { k: set(v) for k, v in config['firewall_acls'].items() }
 
 max_request_payload_size_default = 1024 * 1024 * 128  # ~135MB
+
+def set_acl_match_attributes(client_context):
+    """Idempotently set client_context.acl_match_attributes"""
+    if hasattr(client_context, 'acl_match_attributes'):
+        return
+
+    match_attributes = set([
+        attr['id'] if isinstance(attr, dict) else attr
+        for attr in client_context.attributes
+    ])
+    match_attributes.add('*')
+    if client_context.client:
+        client = client_context.client
+        match_attributes.add(client['id'] if isinstance(client, dict) else client)
+    client_context.acl_match_attributes = match_attributes
 
 def hatrac_debug(*args):
     """Shim for non-logger diagnostics

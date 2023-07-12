@@ -99,6 +99,26 @@ This configuration works for an Amazon AWS S3 deployment:
         "database_max_retries": 5
     }
 
+This configuration block enables an optional static firewall to require clients
+to have certain attributes in order to perform certain operations:
+
+    {
+        ...
+        "firewall_acls": {
+            "create": ["object-or-ns-uploader-group"],
+            "delete": ["object-or-ns-deletion-group"],
+            "manage_acls": ["acl-admin-group"],
+            "manage_metadata": ["metadata-curator-group"]
+        }
+    }
+
+For backwards compatibility, `firewall_acls` uses a default ACL of
+`["*"]` when an ACL is not configured. This permissive mode then
+allows the normal fine-grained authorization checks to proceed for
+each request.  A more restrictive firewall ACL can block a request
+that would normally be allowed due to the fine-grained ACL state in
+the hatrac namespace hierarchy.
+
 ## REST API testing
 
 You can perform system testing of the whole web service stack, if

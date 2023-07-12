@@ -47,7 +47,7 @@ class ObjectTransferChunk (RestHandler):
                 metadata[hdr] = val
                 
         upload = self.resolve_upload(path, name, job)
-        upload.enforce_acl(['owner'], hatrac_ctx.webauthn2_context)
+        upload.enforce_acl(['owner'])
         self.http_check_preconditions('PUT')
         upload.upload_chunk_from_file(
             chunk, 
@@ -77,6 +77,7 @@ class ObjectTransfer (RestHandler):
 
     def post(self, name, job, path="/"):
         """Update status of transfer job to finalize."""
+        self.enforce_firewall('create')
         upload = self.resolve_upload(path, name, job)
         self.http_check_preconditions('POST')
         version = upload.finalize(hatrac_ctx.webauthn2_context)
@@ -114,6 +115,7 @@ class ObjectTransfers (RestHandler):
 
     def post(self, name, path="/"):
         """Create a new chunked transfer job."""
+        self.enforce_firewall('create')
         in_content_type = self.in_content_type()
 
         if in_content_type != 'application/json':

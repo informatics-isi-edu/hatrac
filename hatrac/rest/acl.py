@@ -19,6 +19,7 @@ class ACLEntry (RestHandler):
 
     def put(self, access, role, path="/", name="", version=""):
         """Add entry to ACL."""
+        self.enforce_firewall('manage_acl')
         resource = self.resolve_name_or_version(
             path, name, version
         )
@@ -33,6 +34,7 @@ class ACLEntry (RestHandler):
 
     def delete(self, access, role, path="/", name="", version=""):
         """Remove entry from ACL."""
+        self.enforce_firewall('manage_acl')
         resource = self.resolve_name_or_version(
             path, name, version
         )
@@ -74,6 +76,7 @@ class ACL (RestHandler):
 
     def put(self, access, path="/", name="", version=""):
         """Replace ACL."""
+        self.enforce_firewall('manage_acl')
         in_content_type = self.in_content_type()
         if in_content_type != 'application/json':
             raise BadRequest('Only application/json input is accepted for ACLs.')
@@ -100,6 +103,7 @@ class ACL (RestHandler):
 
     def delete(self, access, path="/", name="", version=""):
         """Clear ACL."""
+        self.enforce_firewall('manage_acl')
         resource = self.resolve_name_or_version(
             path, name, version
         )

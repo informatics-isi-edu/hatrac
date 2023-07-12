@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2022 University of Southern California
+# Copyright 2015-2023 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -50,7 +50,7 @@ import datetime
 import psycopg2
 import psycopg2.pool
 from psycopg2.extras import DictCursor
-from flask import request
+from flask import request, g as hatrac_ctx
 
 from webauthn2.util import jsonWriter
 
@@ -203,19 +203,14 @@ class HatracName (object):
     def is_object(self):
         raise NotImplementedError()
 
-    def enforce_acl(self, accesses, client_context):
+    def enforce_acl(self, accesses, client_context=None):
+        if client_context is None:
+            client_context = hatrac_ctx.webauthn2_context
+        core.set_acl_match_attributes(client_context)
         acl = set()
         for access in accesses:
             acl.update( self.acls.get(access, ACL()))
-        client = client_context.client or None
-        client = client['id'] if type(client) is dict else client
-        attributes = set([
-            attr['id'] if type(attr) is dict else attr
-            for attr in client_context.attributes
-        ])
-        if '*' in acl \
-           or client in acl \
-           or acl.intersection(attributes):
+        if not acl.isdisjoint(client_context.acl_match_attributes):
             return True
         elif client_context.client is not None:
             raise core.Forbidden('Access to %s forbidden.' % self)

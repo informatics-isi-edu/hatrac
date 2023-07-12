@@ -27,6 +27,7 @@ class NameVersion (RestHandler):
 
     def delete(self, name, version, path=''):
         """Destroy object version."""
+        self.enforce_firewall('delete')
         resource = self.resolve_version(
             path, name, version
         )
@@ -108,6 +109,7 @@ class Name (RestHandler):
 
     def put(self, name="", path="/"):
         """Create object version or empty zone."""
+        self.enforce_firewall('create')
         in_content_type = self.in_content_type()
         
         resource = self.resolve(path, name, False)
@@ -133,7 +135,7 @@ class Name (RestHandler):
                 hash_list([ r.asurl() for r in resource.directory.namespace_enumerate_names(resource, False, False)])
             )
             self.http_check_preconditions('PUT')
-            resource.enforce_acl(['owner'], hatrac_ctx.webauthn2_context)
+            resource.enforce_acl(['owner'])
             raise Conflict('Namespace %s already exists.' % resource)
         else:
             try:
@@ -177,6 +179,7 @@ class Name (RestHandler):
 
     def delete(self, name="", path="/"):
         """Destroy all object versions or empty zone."""
+        self.enforce_firewall('delete')
         resource = self.resolve(
             path, name
         )
