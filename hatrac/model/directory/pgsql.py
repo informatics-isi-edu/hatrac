@@ -258,6 +258,7 @@ class HatracNamespace (HatracName):
 
     def get_content(self, client_context, get_data=True):
         """Return (nbytes, metadata, data_generator) for namespace."""
+        self.enforce_acl(['owner', 'read', 'ancestor_owner', 'ancestor_read'], client_context)
         return negotiated_uri_list(self, self.directory.namespace_enumerate_names(self, False))
 
 class HatracObject (HatracName):
