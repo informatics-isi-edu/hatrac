@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2022 University of Southern California
+# Copyright 2015-2023 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -175,10 +175,6 @@ class HatracName (object):
     def asurl(self):
         return self.directory.prefix + '/'.join(map(lambda s: urllib.parse.quote(s, ''), self.name.split('/')))
 
-    def _reload(self, conn, cur, raise_notfound=True):
-        result = self.directory._name_lookup(conn, cur, self.name, raise_notfound)
-        return type(self)(self.directory, **result)
-
     def _acl_load(self, **args):
         for an in self._acl_names:
             self.acls[an] = ACL(coalesce(args.get('%s' % an), []))
@@ -352,11 +348,6 @@ class HatracObjectVersion (HatracName):
     def asurl(self):
         return '%s:%s' % (self.object.asurl(), urllib.parse.quote(self.version, ''))
 
-    def _reload(self, conn, cur):
-        object1 = self.object._reload(conn, cur)
-        result = self.directory._version_lookup(conn, cur, object1, self.version)
-        return type(self)(self.directory, object1, **result)
-
     def is_object(self):
         return True
 
@@ -423,10 +414,6 @@ class HatracUpload (HatracName):
 
     def asurl(self):
         return '%s;upload/%s' % (self.object.asurl(), urllib.parse.quote(self.job, ''))
-
-    def _reload(self, conn, cur):
-        object = self.object._reload(conn, cur)
-        return type(self)(self.directory, object, **self.directory._upload_lookup(conn, cur, object, self.job))
 
     def upload_chunk_from_file(self, position, input, client_context, nbytes, metadata={}):
         return self.directory.upload_chunk_from_file(self, position, input, client_context, nbytes, metadata)
@@ -801,11 +788,8 @@ CREATE TABLE IF NOT EXISTS hatrac.chunk (
 );
 """
 
-def db_wrap(reload_pos=None, transform=lambda x: x, enforce_acl=None):
+def db_wrap(transform=lambda x: x, enforce_acl=None):
     """Decorate a HatracDirectory method whose body should run in pc.perform(...)
-
-       If reload_pos is not None: 
-          replace args[reload_pos] with args[reload_pos]._reload(conn, cur)
 
        If enforce_acl is (rpos, cpos, acls):
           call args[rpos].enforce_acl(acls, args[cpos])
@@ -817,8 +801,6 @@ def db_wrap(reload_pos=None, transform=lambda x: x, enforce_acl=None):
             def db_thunk(conn, cur):
                 args1 = list(args)
                 kwargs1 = dict(kwargs)
-                if reload_pos is not None:
-                    args1[reload_pos] = args1[reload_pos]._reload(conn, cur)
                 if enforce_acl is not None:
                     rpos, cpos, acls = enforce_acl
                     args1[rpos].enforce_acl(acls, args[cpos])
@@ -1013,7 +995,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         self._set_resource_acl_role(conn, cur, resource, 'owner', client_context.client)
         return resource
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
+    @db_wrap(enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
     def delete_name(self, resource, client_context, conn=None, cur=None):
         """Delete an existing namespace or object resource."""
         if resource.name == '/':
@@ -1057,13 +1039,13 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
 
         return cleanup
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
+    @db_wrap(enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
     def delete_version(self, resource, client_context, conn=None, cur=None):
         """Delete an existing version."""
         self._delete_version(conn, cur, resource)
         return lambda : self.storage.delete(resource.name, resource.version, aux=resource.aux)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
+    @db_wrap(enforce_acl=(1, 2, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version(self, object, client_context, nbytes=None, metadata={}, conn=None, cur=None):
         """Create, persist, and return a HatracObjectVersion instance.
 
@@ -1095,7 +1077,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     def version_aux_url_delete(self, resource, client_context=None, conn=None, cur=None):
         self._hatrac_version_aux_url_delete(conn, cur, resource)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
+    @db_wrap(enforce_acl=(1, 3, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
         job = self.storage.create_upload(object.name, nbytes, metadata)
         resource = HatracUpload(self, object, **self._create_upload(conn, cur, object, job, chunksize, nbytes, metadata))
@@ -1129,7 +1111,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         if self.storage.track_chunks:
             self.pc.perform(db_thunk)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner']))
+    @db_wrap(enforce_acl=(1, 2, ['owner']))
     def upload_finalize(self, upload, client_context, conn=None, cur=None):
         if self.storage.track_chunks:
             chunk_aux = list(self._chunk_list(conn, cur, upload))
@@ -1143,17 +1125,17 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         version.version = version_id
         return version
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
+    @db_wrap(enforce_acl=(1, 2, ['owner', 'ancestor_owner']), transform=lambda thunk: thunk())
     def upload_cancel(self, upload, client_context, conn=None, cur=None):
         self._delete_upload(conn, cur, upload)
         return lambda : self.storage.cancel_upload(upload.name, upload.job)
 
-    @db_wrap(reload_pos=1, transform=lambda thunk: thunk())
+    @db_wrap(transform=lambda thunk: thunk())
     def _upload_cancel(self, upload, conn=None, cur=None):
         self._delete_upload(conn, cur, upload)
         return lambda : self.storage.cancel_upload(upload.name, upload.job)
 
-    @db_wrap(reload_pos=2, enforce_acl=(2, 4, ['owner', 'read', 'ancestor_owner', 'ancestor_read']))
+    @db_wrap(enforce_acl=(2, 4, ['owner', 'read', 'ancestor_owner', 'ancestor_read']))
     def get_version_content_range(self, object, objversion, get_slice, client_context, get_data=True, conn=None, cur=None):
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
@@ -1195,13 +1177,13 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             **self._version_lookup(conn, cur, object, version, not raise_notfound)
         )
 
-    @db_wrap(reload_pos=1)
+    @db_wrap()
     def upload_resolve(self, object, job, raise_notfound=True, conn=None, cur=None):
         """Return a HatracUpload instance corresponding to referenced job.
         """
         return HatracUpload(self, object, **self._upload_lookup(conn, cur, object, job))
 
-    @db_wrap(reload_pos=1)
+    @db_wrap()
     def get_current_version(self, object, conn=None, cur=None):
         """Return a HatracObjectVersion instance corresponding to latest.
         """
@@ -1212,33 +1194,33 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         else:
             raise core.Conflict('Object %s currently has no content.' % object)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
+    @db_wrap(enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
     def update_resource_metadata(self, resource, updates, client_context, conn=None, cur=None):
         self._update_resource_metadata(conn, cur, resource, updates)
         
-    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
+    @db_wrap(enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
     def pop_resource_metadata(self, resource, fieldname, client_context, conn=None, cur=None):
         self._pop_resource_metadata(conn, cur, resource, fieldname)
         
-    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
+    @db_wrap(enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def set_resource_acl_role(self, resource, access, role, client_context, conn=None, cur=None):
         self._set_resource_acl_role(conn, cur, resource, access, role)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
+    @db_wrap(enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def drop_resource_acl_role(self, resource, access, role, client_context, conn=None, cur=None):
         if role not in resource.acls[access]:
             raise core.NotFound('Resource %s;acl/%s/%s not found.' % (resource, access, role))
         self._drop_resource_acl_role(conn, cur, resource, access, role)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
+    @db_wrap(enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def set_resource_acl(self, resource, access, acl, client_context, conn=None, cur=None):
         self._set_resource_acl(conn, cur, resource, access, acl)
 
-    @db_wrap(reload_pos=1, enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
+    @db_wrap(enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
     def clear_resource_acl(self, resource, access, client_context, conn=None, cur=None):
         self._set_resource_acl(conn, cur, resource, access, [])
 
-    @db_wrap(reload_pos=1)
+    @db_wrap()
     def object_enumerate_versions(self, object, conn=None, cur=None):
         """Return a list of versions
         """
@@ -1247,14 +1229,14 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             for row in self._version_list(conn, cur, object.id) 
         ]
 
-    @db_wrap(reload_pos=1)
+    @db_wrap()
     def namespace_enumerate_names(self, resource, recursive=True, need_acls=True, conn=None, cur=None):
         return [
             HatracName.construct(self, **row)
             for row in self._namespace_enumerate_names(conn, cur, resource, recursive, need_acls)
         ]
 
-    @db_wrap(reload_pos=1)
+    @db_wrap()
     def namespace_enumerate_uploads(self, resource, recursive=True, conn=None, cur=None):
         return [
             HatracUpload(self, HatracName.construct(self, subtype=1, **row), **row)
