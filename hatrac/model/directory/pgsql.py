@@ -323,7 +323,7 @@ class HatracVersions (object):
         return self.object.asurl()
 
     def get_content(self, client_context, get_data=True):
-        self.object.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        self.object.enforce_acl(['owner', 'ancestor_owner', 'read', 'ancestor_read'], client_context)
         return negotiated_uri_list(self, self.object.directory.object_enumerate_versions(self.object))
 
 class HatracObjectVersion (HatracName):
