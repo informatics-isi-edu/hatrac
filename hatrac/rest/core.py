@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2023 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -11,7 +11,6 @@
 import re
 import logging
 from logging.handlers import SysLogHandler
-import web
 import json
 from collections import OrderedDict
 import random
@@ -20,20 +19,24 @@ import datetime
 from datetime import timezone
 import struct
 import urllib
-
 import sys
 import traceback
 import hashlib
+from flask import request, g as hatrac_ctx
+import flask.views
+import werkzeug.exceptions
+import werkzeug.http
 
-import webauthn2
-from webauthn2.util import context_from_environment
-from webauthn2.rest import get_log_parts, request_trace_json, request_final_json
+from webauthn2.util import Context, context_from_environment
+from webauthn2.manager import Manager
+from webauthn2.rest import format_trace_json, format_final_json
 
+from . import app
 from .. import core
+from ..core import hatrac_debug, negotiated_content_type
 from .. import directory
 
-_webauthn2_manager = webauthn2.Manager()
-
+_webauthn2_manager = Manager()
 
 def hash_value(d):
     return base64.b64encode(hashlib.md5(d.encode()).digest()).decode()
@@ -41,7 +44,7 @@ def hash_value(d):
 def hash_multi(d):
     if d is None:
         return '_'
-    elif isinstance(d, str):
+    elif isinstance(d, (str, bytes)):
         return hash_value(d)
     elif isinstance(d, (list, set)):
         return hash_list(d)
@@ -58,25 +61,6 @@ def hash_list(l):
 def hash_dict(d):
     return hash_list([ hash_multi(k) + hash_multi(v) for k, v in d.items() ])
 
-# map URL pattern (regexp) to handler class
-dispatch_rules = dict()
-
-def web_url(url_patterns):
-    """Annotate and track web request handler class and dispatch URL patterns.
-
-       url_patterns: sequence of URL regular expression patterns that
-         will be mapped to the modified handler class in web.py
-         dispatch
-
-    """
-    def helper(original_class):
-        original_class.url_patterns = url_patterns
-        for url_pattern in url_patterns:
-            assert url_pattern not in dispatch_rules
-            dispatch_rules[url_pattern] = original_class
-        return original_class
-    return helper
-
 ## setup logger and web request log helpers
 logger = logging.getLogger('hatrac')
 sysloghandler = SysLogHandler(address='/dev/log', facility=SysLogHandler.LOG_LOCAL1)
@@ -85,179 +69,238 @@ sysloghandler.setFormatter(syslogformatter)
 logger.addHandler(sysloghandler)
 logger.setLevel(logging.INFO)
 
-def log_parts():
-    """Generate a dictionary of interpolation keys used by our logging template."""
-    return get_log_parts('hatrac_start_time', 'hatrac_request_guid', 'hatrac_request_content_range', 'hatrac_content_type')
-
 def request_trace(tracedata):
     """Log one tracedata event as part of a request's audit trail.
 
        tracedata: a string representation of trace event data
     """
-    logger.info( request_trace_json(tracedata, log_parts()) )
+    logger.info(format_trace_json(
+        tracedata,
+        start_time=hatrac_ctx.hatrac_start_time,
+        req=hatrac_ctx.hatrac_request_guid,
+        client=request.remote_addr,
+        webauthn2_context=hatrac_ctx.webauthn2_context,
+    ))
 
-class RestException (web.HTTPError):
-    message = None
-    status = None
-    headers = {
-        'Content-Type': 'text/plain'
-    }
+class RestException (werkzeug.exceptions.HTTPException):
+    """Hatrac generic REST exception overriding flask/werkzeug defaults.
 
-    def __init__(self, message=None, headers=None):
-        if headers:
-            hdr = dict(self.headers)
-            hdr.update(headers)
-        else:
-            hdr = self.headers
-        msg = message or self.message
-        web.HTTPError.__init__(self, self.status, hdr, msg + '\n' if msg is not None else '')
-        web.ctx.hatrac_content_type = hdr['Content-Type']
+    Our API defaults to text/plain error responses but supports
+    negotiated HTML and some customization by legacy
+    hatrac_config.json content.
+    """
+
+    # werkzeug fields
+    code = None
+    description = None
+
+    # refactoring of prior hatrac templating
+    title = None
+    response_templates = OrderedDict([
+        ("text/plain", "%(message)s"),
+        ("text/html", "<html><body><h1>%(title)s</h1><p>%(message)s</p></body></html>"),
+    ])
+
+    def __init__(self, description=None, headers={}):
+        self.headers = dict(headers)
+        if description is not None:
+            self.description = description
+        super().__init__()
+        # allow ourselves to customize the error title for our UX
+        if self.title is None:
+            self.title = werkzeug.http.HTTP_STATUS_CODES.get(self.code)
+
+        # lookup templates overrides in hatrac_config.json
+        #
+        # OrderedDict.update() maintains ordering for keys already
+        # controlled above, but has indeterminate order for new
+        # additions from JSON dict!
+        #
+        # default templates override built-in templates
+        self.response_templates = self.response_templates.copy()
+        self.response_templates.update(
+            core.config.get('error_templates', {}).get("default", {})
+        )
+        # code-specific templates override default templates
+        self.response_templates.update(
+            core.config.get('error_templates', {}).get(str(self.code), {})
+        )
+        # legacy config syntax
+        #   code_typesuffix: template,
+        #   ...
+        for content_type in list(self.response_templates.keys()):
+            template_key = '%s_%s' % (self.code, content_type.split('/')[-1])
+            if template_key in core.config:
+                self.response_templates[content_type] = core.config[template_key]
+
+        # find client's negotiated type
+        supported_content_types = list(self.response_templates.keys())
+        default_content_type = supported_content_types[0]
+        self.content_type = negotiated_content_type(request.environ, supported_content_types, default_content_type)
+        self.headers['content-type'] = self.content_type
+
+    # override the werkzeug base exception to use our state management
+    def get_description(self, environ=None, scope=None):
+        return self.description
+
+    def get_body(self, environ=None, scope=None):
+        template = self.response_templates[self.content_type]
+        description = self.get_description()
+        return (template + '\n') % {
+            "code": self.code,
+            "description": description,
+            "message": description, # for existing hatrac_config template feature
+            "title": self.title, # for our new generic templates
+        }
+
+    def get_headers(self, environ=None, scope=None):
+        return self.headers
 
 class NotModified (RestException):
-    status = '304 Not Modified'
-    message = None
+    code = 304
+    description = None
 
 class BadRequest (RestException):
-    status = '400 Bad Request'
-    message = 'Request malformed.'
+    code = 400
+    description = 'Request malformed.'
 
-class TemplatedRestException (RestException):
-    error_type = ''
-    supported_content_types = ['text/plain', 'text/html']
-    def __init__(self, message=None, headers=None):
-        # filter types to those for which we have a response template, or text/plain which we always support
-        supported_content_types = [
-            content_type for content_type in self.supported_content_types
-            if "%s_%s" % (self.error_type, content_type.split('/')[-1]) in core.config or content_type == 'text/plain'
-        ]
-        default_content_type = supported_content_types[0]
-        # find client's preferred type
-        content_type = webauthn2.util.negotiated_content_type(supported_content_types, default_content_type)
-        # lookup template and use it if available
-        template_key = '%s_%s' % (self.error_type, content_type.split('/')[-1])
-        if template_key in core.config:
-            message = core.config[template_key] % dict(message=message)
-        RestException.__init__(self, message, headers)
-        web.header('Content-Type', content_type)
-        
-class Unauthorized (TemplatedRestException):
-    error_type = '401'
-    status = '401 Unauthorized'
-    message = 'Access requires authentication.'
+class Unauthorized (RestException):
+    code = 401
+    description = 'Access requires authentication.'
+    title = 'Authentication Required'
 
-class Forbidden (TemplatedRestException):
-    error_type = '403'
-    status = '403 Forbidden'
-    message = 'Access forbidden.'
+class Forbidden (RestException):
+    code = 403
+    description = 'Access forbidden.'
+    title = 'Access Forbidden'
 
 class NotFound (RestException):
-    status = '404 Not Found'
-    message = 'Resource not found.'
+    code = 404
+    description = 'Resource not found.'
 
 class NoMethod (RestException):
-    status = '405 Method Not Allowed'
-    message = 'Request method not allowed on this resource.'
+    code = 405
+    description = 'Request method not allowed on this resource.'
 
 class Conflict (RestException):
-    status = '409 Conflict'
-    message = 'Request conflicts with state of server.'
+    code = 409
+    description = 'Request conflicts with state of server.'
 
 class LengthRequired (RestException):
-    status = '411 Length Required'
-    message = 'Content-Length header is required for this request.'
+    code = 411
+    description = 'Content-Length header is required for this request.'
 
 class PreconditionFailed (RestException):
-    status = '412 Precondition Failed'
-    message = 'Resource state does not match requested preconditions.'
+    code = 412
+    description = 'Resource state does not match requested preconditions.'
 
 class PayloadTooLarge (RestException):
-    status = '413 Payload Too Large'
-    message = 'Request body size is larger than the current limit defined by the server, which is %s bytes.' % \
+    code = 413
+    description = 'Request body size is larger than the current limit defined by the server, which is %s bytes.' % \
               core.config.get("max_request_payload_size", core.max_request_payload_size_default)
 
 class BadRange (RestException):
-    status = '416 Requested Range Not Satisfiable'
-    message = 'Requested Range is not satisfiable for this resource.'
-    def __init__(self, msg=None, headers=None, nbytes=None):
-        RestException.__init__(self, msg, headers)
+    code = 416
+    description = 'Requested Range is not satisfiable for this resource.'
+
+    def __init__(self, description=None, headers={}, nbytes=None):
+        super().__init__(description=description, headers=headers)
         if nbytes is not None:
-            web.header('Content-Range', 'bytes */%d' % nbytes)
+            self.headers['content-range'] = 'bytes */%d' % nbytes
 
 class NotImplemented (RestException):
-    status = '501 Not Implemented'
-    message = 'Request not implemented for this resource.'
+    code = 501
+    description = 'Request not implemented for this resource.'
 
 class ServerError (RestException):
-    status = '500 Internal Server Error'
-    message = 'The request encountered an error on the server: %s.'
+    code = 500
+    description = 'The request encountered an error on the server.'
 
-def web_method():
-    """Augment web handler method with common service logic."""
-    def helper(original_method):
-        def wrapper(*args):
-            # request context init
-            web.ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) ).decode()
-            web.ctx.hatrac_start_time = datetime.datetime.now(timezone.utc)
-            web.ctx.hatrac_request_content_range = None
-            web.ctx.hatrac_content_type = None
-            web.ctx.webauthn2_manager = _webauthn2_manager
-            web.ctx.webauthn2_context = webauthn2.Context() # set empty context for sanity
-            web.ctx.hatrac_request_trace = request_trace
-            web.ctx.hatrac_directory = directory
+app.url_map.strict_slashes = False
 
-            if directory.prefix is None:
-                # set once from web context if administrator did not specify in config
-                directory.prefix = web.ctx.env['SCRIPT_NAME']
-            
-            try:
-                # get client authentication context
-                web.ctx.webauthn2_context = context_from_environment(fallback=False)
-                if web.ctx.webauthn2_context is None:
-                    web.debug("falling back to _webauthn2_manager.get_request_context() after failed context_from_environment(False)")
-                    web.ctx.webauthn2_context = _webauthn2_manager.get_request_context()
-            except (ValueError, IndexError) as ev:
-                raise Unauthorized('service access requires client authentication')
+@app.before_request
+def before_request():
+    # request context init
+    hatrac_ctx.hatrac_status = None
+    hatrac_ctx.hatrac_request_guid = base64.b64encode( struct.pack('Q', random.getrandbits(64)) ).decode()
+    hatrac_ctx.hatrac_start_time = datetime.datetime.now(timezone.utc)
+    hatrac_ctx.hatrac_request_content_range = None
+    hatrac_ctx.hatrac_content_type = None
+    hatrac_ctx.webauthn2_manager = _webauthn2_manager
+    hatrac_ctx.webauthn2_context = Context() # set empty context for sanity
+    hatrac_ctx.hatrac_request_trace = request_trace
+    hatrac_ctx.hatrac_directory = directory
 
-            try:
-                # run actual method
-                return original_method(*args)
+    if directory.prefix is None:
+        # set once from web context if administrator did not specify in config
+        directory.prefix = request.environ['SCRIPT_NAME']
 
-            except core.BadRequest as ev:
-                request_trace(str(ev))
-                raise BadRequest(str(ev))
-            except core.Unauthenticated as ev:
-                request_trace(str(ev))
-                raise Unauthorized(str(ev))
-            except core.Forbidden as ev:
-                request_trace(str(ev))
-                raise Forbidden(str(ev))
-            except core.NotFound as ev:
-                request_trace(str(ev))
-                raise NotFound(str(ev))
-            except core.Conflict as ev:
-                request_trace(str(ev))
-                raise Conflict(str(ev))
-            except RestException as ev:
-                # pass through rest exceptions already generated by handlers
-                if not isinstance(ev, NotModified):
-                    request_trace(str(ev))
-                raise
-            except Exception as ev:
-                # log and rethrow all errors so web.ctx reflects error prior to request_final_log below...
-                et, ev2, tb = sys.exc_info()
-                web.debug(
-                    'Got unhandled exception in web_method()',
-                    ev,
-                    traceback.format_exception(et, ev2, tb),
-                )
-                raise ServerError(str(ev))
-            finally:
-                # finalize
-                logger.info( request_final_json(log_parts()) )
-        return wrapper
-    return helper
-                
-class RestHandler (object):
+    # get client authentication context
+    hatrac_ctx.webauthn2_context = context_from_environment(request.environ, fallback=True)
+
+    return None
+
+@app.after_request
+def after_request(response):
+    if isinstance(response, flask.Response):
+        hatrac_ctx.hatrac_status = response.status
+    elif isinstance(response, RestException):
+        hatrac_ctx.hatrac_status = response.code
+    hatrac_ctx.hatrac_content_type = response.headers.get('content-type', 'none')
+    if 'content-range' in response.headers:
+        content_range = response.headers['content-range']
+        if content_range.startswith('bytes '):
+            content_range = content_range[6:]
+        hatrac_ctx.hatrac_request_content_range = content_range
+    elif 'content-length' in response.headers:
+        hatrac_ctx.hatrac_request_content_range = '*/%s' % response.headers['content-length']
+    else:
+        hatrac_ctx.hatrac_request_content_range = '*/0'
+    logger.info(format_final_json(
+        environ=request.environ,
+        webauthn2_context=hatrac_ctx.webauthn2_context,
+        req=hatrac_ctx.hatrac_request_guid,
+        start_time=hatrac_ctx.hatrac_start_time,
+        client=request.remote_addr,
+        status=hatrac_ctx.hatrac_status,
+        content_range=hatrac_ctx.hatrac_request_content_range,
+        content_type=hatrac_ctx.hatrac_content_type,
+        track=(hatrac_ctx.webauthn2_context.tracking if hatrac_ctx.webauthn2_context else None),
+    ))
+    return response
+
+@app.errorhandler(Exception)
+def error_handler(ev):
+    if isinstance(ev, core.HatracException):
+        # map these core errors to RestExceptions
+        ev = {
+            core.BadRequest: BadRequest,
+            core.Conflict: Conflict,
+            core.Forbidden: Forbidden,
+            core.Unauthenticated: Unauthorized,
+            core.NotFound: NotFound,
+        }[type(ev)](str(ev))
+
+    if isinstance(ev, (RestException, werkzeug.exceptions.HTTPException)):
+        # trace unless not really an error
+        if isinstance(ev, NotModified):
+            pass
+        else:
+            request_trace(str(ev))
+    else:
+        # log other internal server errors
+        et, ev2, tb = sys.exc_info()
+        hatrac_debug(
+            'Got unhandled exception in hatrac request handler: %s\n%s\n' % (
+                ev,
+                traceback.format_exception(et, ev2, tb),
+            )
+        )
+        ev = ServerError(str(ev))
+
+    return ev
+
+class RestHandler (flask.views.MethodView):
     """Generic implementation logic for Hatrac REST API handlers.
 
     """
@@ -267,16 +310,18 @@ class RestHandler (object):
         self.http_vary = _webauthn2_manager.get_http_vary()
 
     def trace(self, msg):
-        web.ctx.hatrac_request_trace(msg)
+        hatrac_ctx.hatrac_request_trace(msg)
         
     def _fullname(self, path, name):
-        nameparts = [ n for n in ((path or '') + (name or '')).split('/') if n ]
+        nameparts = [ n for n in path.split('/') if n ]
+        if name:
+            nameparts.append(name)
         fullname = '/' + '/'.join(nameparts)
         return fullname
 
     def resolve(self, path, name, raise_notfound=True):
         fullname = self._fullname(path, name)
-        return web.ctx.hatrac_directory.name_resolve(fullname, raise_notfound)
+        return hatrac_ctx.hatrac_directory.name_resolve(fullname, raise_notfound)
 
     def resolve_version(self, path, name, version):
         object = self.resolve(path, name)
@@ -293,22 +338,12 @@ class RestHandler (object):
             return self.resolve(path, name)
 
     def in_content_type(self):
-        in_content_type = web.ctx.env.get('CONTENT_TYPE')
+        in_content_type = request.headers.get('content-type')
         if in_content_type is not None:
             return in_content_type.lower().split(";", 1)[0].strip()
         else:
             return None
 
-    def parse_querystr(self, querystr):
-        params = querystr.split('&')
-        result = {}
-        for param in params:
-            if param:
-                parts = param.split('=')
-                if parts:
-                    result[ parts[0] ] = '='.join(parts[1:])
-        return result
-        
     def set_http_etag(self, version):
         """Set an ETag from version key.
 
@@ -363,7 +398,7 @@ class RestHandler (object):
     def http_check_preconditions(self, method='GET', resource_exists=True):
         failed = False
 
-        match_etags = self.parse_client_etags(web.ctx.env.get('HTTP_IF_MATCH', ''))
+        match_etags = self.parse_client_etags(request.environ.get('HTTP_IF_MATCH', ''))
         if match_etags:
             if resource_exists:
                 if self.http_etag and self.http_etag not in match_etags \
@@ -372,7 +407,7 @@ class RestHandler (object):
             else:
                 failed = True
         
-        nomatch_etags = self.parse_client_etags(web.ctx.env.get('HTTP_IF_NONE_MATCH', ''))
+        nomatch_etags = self.parse_client_etags(request.environ.get('HTTP_IF_NONE_MATCH', ''))
         if nomatch_etags:
             if resource_exists:
                 if self.http_etag and self.http_etag in nomatch_etags \
@@ -391,7 +426,7 @@ class RestHandler (object):
 
     def get_content(self, resource, client_context, get_body=True):
         """Form response w/ bulk resource content."""
-        get_range = web.ctx.env.get('HTTP_RANGE')
+        get_range = request.environ.get('HTTP_RANGE')
         get_slice = None
         if get_range:
             # parse HTTP Range header which can encode a set of ranges
@@ -473,106 +508,73 @@ class RestHandler (object):
                 raise ev
             except Exception as ev:
                 # HTTP spec says to ignore a Range header w/ syntax errors
-                web.debug('Ignoring HTTP Range header %s due to error: %s' % (get_range, ev))
+                hatrac_debug('Ignoring HTTP Range header %s due to error: %s' % (get_range, ev))
                 pass
+
+        status = 200
+        headers = {}
 
         if get_slice is not None:
             nbytes, metadata, data_generator \
                 = resource.get_content_range(client_context, get_slice, get_data=self.get_body)
-            web.header(
-                'Content-Range', 'bytes %d-%d/%d' 
-                % (get_slice.start, get_slice.stop - 1, resource.nbytes)
-            )
-            web.ctx.hatrac_request_content_range = '%d-%d/%d' % (get_slice.start, get_slice.stop - 1, resource.nbytes)
-            web.ctx.status = '206 Partial Content'
+            status = 206
+            crange = '%d-%d/%d' % (get_slice.start, get_slice.stop - 1, resource.nbytes)
+            headers['content-range'] = 'bytes %s' % crange
         else:
             nbytes, metadata, data_generator = resource.get_content(client_context, get_data=self.get_body)
-            web.ctx.hatrac_request_content_range = '*/%d' % nbytes
-            web.ctx.status = '200 OK'
 
-        web.header('Content-Length', nbytes)
+        if resource.is_object() and self.get_body is False:
+            headers['accept-ranges'] = 'bytes'
+        headers['Content-Length'] = nbytes
 
         metadata = core.Metadata(metadata)
-        if 'content-type' in metadata:
-            web.ctx.hatrac_content_type = metadata['content-type']
-
         metadata = metadata.to_http()
-            
-        for hdr, val in metadata.items():
-            web.header(hdr, val)
+        headers.update(metadata)
 
         if resource.is_object() and resource.is_version():
-            web.header('Content-Location', resource.asurl())
+            headers['content-location'] = resource.asurl()
             if 'content-disposition' not in resource.metadata:
-                web.header('Content-Disposition', "filename*=UTF-8''%s" % urllib.parse.quote(str(resource.object).split("/")[-1]))
+                headers['content-disposition'] = "filename*=UTF-8''%s" % urllib.parse.quote(str(resource.object).split("/")[-1])
             
         if self.http_etag:
-            web.header('ETag', self.http_etag)
+            headers['ETag'] = self.http_etag
             
         if self.http_vary:
-            web.header('Vary', ', '.join(self.http_vary))
+            headers['Vary'] = ', '.join(self.http_vary)
 
-        return data_generator
+        return (data_generator, status, headers)
 
     def create_response(self, resource):
         """Form response for resource creation request."""
-        web.ctx.status = '201 Created'
-        web.header('Location', resource.asurl())
+        status = 201
         content_type = 'text/uri-list'
-        web.header('Content-Type', content_type)
-        web.ctx.hatrac_content_type = content_type
         body = resource.asurl() + '\n'
         nbytes = len(body)
-        web.header('Content-Length', nbytes)
-        web.ctx.hatrac_request_content_range = '*/%d' % nbytes
-        return body
+        headers = {
+            'location': resource.asurl(),
+            'content-type': content_type,
+            'content-length': nbytes,
+        }
+        return (body, status, headers)
 
     def delete_response(self):
         """Form response for deletion request."""
-        web.ctx.status = '204 No Content'
-        web.ctx.hatrac_request_content_range = '*/0'
-        web.ctx.hatrac_content_type = 'none'
-        return ''
+        return ('', 204)
 
     def update_response(self):
         """Form response for update request."""
-        web.ctx.status = '204 No Content'
-        web.ctx.hatrac_request_content_range = '*/0'
-        web.ctx.hatrac_content_type = 'none'
-        return ''
+        return ('', 204)
 
     def redirect_response(self, redirect):
         """Form response for redirect."""
         assert isinstance(redirect, core.Redirect)
-        web.header('Location', redirect.url)
-        web.ctx.status = '303 See Other'
+        status = 303
         content_type = 'text/uri-list'
-        web.header('Content-Type', content_type)
-        web.ctx.hatrac_content_type = content_type
         body = redirect.url + '\n'
         nbytes = len(body)
-        web.header('Content-Length', nbytes)
-        web.ctx.hatrac_request_content_range = '*/%d' % nbytes
-        return body
-
-
-    @web_method()
-    def GET(self, *args):
-        """Get resource."""
-        if hasattr(self, '_GET'):
-            return self._GET(*args)
-        else:
-            raise NoMethod('Method GET not supported for this resource.')
-
-    @web_method()
-    def HEAD(self, *args):
-        """Get resource metadata."""
-        self.get_body = False
-        if hasattr(self, '_GET'):
-            result = self._GET(*args)
-            web.ctx.hatrac_request_content_range = '*/0'
-            web.ctx.hatrac_content_type = 'none'
-            return result
-        else:
-            raise NoMethod('Method HEAD not supported for this resource.')
-
+        headers = {
+            'location': redirect.url,
+            'content-type': content_type,
+            'content-length': nbytes,
+        }
+        return (body, status, headers)

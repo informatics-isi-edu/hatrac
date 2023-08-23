@@ -1,35 +1,28 @@
 
 #
-# Copyright 2016-2019 University of Southern California
+# Copyright 2016-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-import web
+from flask import request, g as hatrac_ctx
 
-from .core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, hash_value, hash_dict
+from . import app
+from .core import RestHandler, \
+    NoMethod, Conflict, NotFound, BadRequest, \
+    hash_value, hash_dict
 
-@web_url([
-    # path, name, version, fieldname, querystr
-    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+);metadata/([^/:;?]+)[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+)();metadata/([^/:;?]+)[?](.*)',
-    '/()()();metadata/([^/:;?]+)[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;]+);metadata/([^/:;?]+)()',
-    '/((?:[^/:;?]+/)*)([^/:;?]+)();metadata/([^/:;?]+)()',
-    '/()()();metadata/([^/:;?]+)()'
-])
 class Metadata (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    @web_method()
-    def PUT(self, path, name, version, fieldname, querystr):
+    def put(self, fieldname, path="/", name="", version=""):
         """Replace Metadata value."""
         in_content_type = self.in_content_type()
         if in_content_type != 'text/plain':
             raise BadRequest('Only text/plain input is accepted for metadata.')
 
-        value = web.ctx.env['wsgi.input'].read().decode()
+        value = request.stream.read().decode()
 
         if version:
             resource = self.resolve_version(path, name, version)
@@ -43,13 +36,12 @@ class Metadata (RestHandler):
         self.http_check_preconditions('PUT')
 
         resource.update_metadata(
-            web.ctx.hatrac_directory.metadata_from_http({ fieldname: value }),
-            web.ctx.webauthn2_context
+            hatrac_ctx.hatrac_directory.metadata_from_http({ fieldname: value }),
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
-    @web_method()
-    def DELETE(self, path, name, version, fieldname, querystr):
+    def delete(self, fieldname, path="/", name="", version=""):
         """Clear Metadata value."""
         if version:
             resource = self.resolve_version(path, name, version)
@@ -64,12 +56,13 @@ class Metadata (RestHandler):
 
         resource.pop_metadata(
             fieldname,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
-    def _GET(self, path, name, version, fieldname, querystr):
+    def get(self, fieldname, path="/", name="", version=""):
         """Get Metadata value."""
+        self.get_body = False if request.method == 'HEAD' else True
         if version:
             resource = self.resolve_version(path, name, version)
         else:
@@ -82,25 +75,28 @@ class Metadata (RestHandler):
 
         self.set_http_etag(hash_value(resource))
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
-        
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
-@web_url([
-    # path, name, version, querystr
-    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+);metadata/?[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+)();metadata/?[?](.*)',
-    '/()()();metadata/?[?](.*)',
-    '/((?:[^/:;?]+/)*)([^/:;?]+):([^/:;?]+);metadata/?()',
-    '/((?:[^/:;?]+/)*)([^/:;?]+)();metadata/?()',
-    '/()()();metadata/?()'
-])
+_Metadata_view = app.route(
+    '/;metadata/<fieldname>'
+)(app.route(
+    '/<name>;metadata/<fieldname>'
+)(app.route(
+    '/<name>:<version>;metadata/<fieldname>'
+)(app.route(
+    '/<path:path>/<name>;metadata/<fieldname>'
+)(app.route(
+    '/<path:path>/<name>:<version>;metadata/<fieldname>'
+)(Metadata.as_view('Metadata'))))))
+
 class MetadataCollection (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    def _GET(self, path, name, version, querystr):
+    def get(self, path="/", name="", version=""):
         """Get Metadata collection."""
+        self.get_body = False if request.method == 'HEAD' else True
         if version:
             resource = self.resolve_version(path, name, version)
         else:
@@ -113,5 +109,27 @@ class MetadataCollection (RestHandler):
 
         self.set_http_etag(hash_dict(resource))
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
+
+_MetadataCollection_view = app.route(
+    '/;metadata'
+)(app.route(
+    '/;metadata/'
+)(app.route(
+    '/<name>;metadata'
+)(app.route(
+    '/<name>;metadata/'
+)(app.route(
+    '/<name>:<version>;metadata'
+)(app.route(
+    '/<name>:<version>;metadata/'
+)(app.route(
+    '/<path:path>/<name>;metadata'
+)(app.route(
+    '/<path:path>/<name>;metadata/'
+)(app.route(
+    '/<path:path>/<name>:<version>;metadata'
+)(app.route(
+    '/<path:path>/<name>:<version>;metadata/'
+)(MetadataCollection.as_view('MetadataCollection')))))))))))
 

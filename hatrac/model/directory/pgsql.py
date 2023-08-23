@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -40,7 +40,6 @@ version of any particular object.
 
 import os
 import sys
-import web
 import json
 import urllib
 import binascii
@@ -51,10 +50,11 @@ import datetime
 import psycopg2
 import psycopg2.pool
 from psycopg2.extras import DictCursor
+from flask import request
 
-from webauthn2.util import jsonWriter, negotiated_content_type
+from webauthn2.util import jsonWriter
 
-from ...core import coalesce, Metadata, sql_literal, sql_identifier, Redirect
+from ...core import coalesce, Metadata, sql_literal, sql_identifier, Redirect, hatrac_debug, web_storage, negotiated_content_type
 from ... import core
 
 def regexp_escape(s):
@@ -125,6 +125,7 @@ def negotiated_uri_list(parent, resources, metadata={}):
     """Returns nbytes, Metadata, body"""
     metadata = dict(metadata)
     metadata['content-type'] = negotiated_content_type(
+        request.environ,
         ['application/json', 'text/uri-list', 'text/html'],
         'application/json'
     )
@@ -692,7 +693,7 @@ class PooledConnection (object):
                     conn.rollback()
                 if verbose:
                     et, ev, tb = sys.exc_info()
-                    web.debug(u'got exception "%s" during PooledConnection.perform()' % (ev,),
+                    hatrac_debug(u'got exception "%s" during PooledConnection.perform()' % (ev,),
                               traceback.format_exception(et, ev, tb))
                 raise
         finally:
@@ -1024,16 +1025,16 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         deleted_names = []
 
         for row in self._namespace_enumerate_uploads(conn, cur, resource):
-            deleted_uploads.append( web.storage(row) )
+            deleted_uploads.append( web_storage(row) )
 
         for row in self._namespace_enumerate_versions(conn, cur, resource):
             obj = HatracObject(self, **row)
             HatracObjectVersion(self, obj, **row).enforce_acl(['owner', 'subtree-owner', 'ancestor_owner'], client_context)
-            deleted_versions.append( web.storage(row) )
+            deleted_versions.append( web_storage(row) )
 
         for row in self._namespace_enumerate_names(conn, cur, resource):
             HatracName.construct(self, **row).enforce_acl(['owner', 'ancestor_owner'], client_context)
-            deleted_names.append( web.storage(row) )
+            deleted_names.append( web_storage(row) )
 
         # we only get here if no ACL raised an exception above
         deleted_names.append(resource)

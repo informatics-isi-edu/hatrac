@@ -1,27 +1,23 @@
 
 #
-# Copyright 2015-2019 University of Southern California
+# Copyright 2015-2022 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
-import web
-from webauthn2.util import jsonReader
+import json
+from flask import request, g as hatrac_ctx
 
-from .core import web_url, web_method, RestHandler, NoMethod, Conflict, NotFound, BadRequest, hash_list, hash_dict
+from . import app
+from .core import RestHandler, \
+    NoMethod, Conflict, NotFound, BadRequest, \
+    hash_list, hash_dict
 
-@web_url([
-    # path, name, version, access, role
-    '/((?:[^/:;]+/)*)([^/:;]+):([^/:;]+);acl/([^/:;]+)/([^/:;]+)',
-    '/((?:[^/:;]+/)*)([^/:;]+)();acl/([^/:;]+)/([^/:;]+)',
-    '/()()();acl/([^/:;]+)/([^/:;]+)'
-])
 class ACLEntry (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    @web_method()
-    def PUT(self, path, name, version, access, role):
+    def put(self, access, role, path="/", name="", version=""):
         """Add entry to ACL."""
         resource = self.resolve_name_or_version(
             path, name, version
@@ -31,12 +27,11 @@ class ACLEntry (RestHandler):
         resource.set_acl_role(
             access, 
             role, 
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
-    @web_method()
-    def DELETE(self, path, name, version, access, role):
+    def delete(self, access, role, path="/", name="", version=""):
         """Remove entry from ACL."""
         resource = self.resolve_name_or_version(
             path, name, version
@@ -46,37 +41,44 @@ class ACLEntry (RestHandler):
         resource.drop_acl_role(
             access, 
             role, 
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.delete_response()
 
-    def _GET(self, path, name, version, access, role):
+    def get(self, access, role, path="/", name="", version=""):
         """Get entry from ACL."""
+        self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve_name_or_version(path, name, version).acls[access]
         self.set_http_etag(hash_list(resource))
         resource = resource[role]
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
-@web_url([
-    # path, name, version, access
-    '/((?:[^/:;]+/)*)([^/:;]+):([^/:;]+);acl/([^/:;]+)/?',
-    '/((?:[^/:;]+/)*)([^/:;]+)();acl/([^/:;]+)/?',
-    '/()()();acl/([^/:;]+)/?'
-])
+_ACLEntry_view = app.route(
+    '/;acl/<access>/<role>'
+)(app.route(
+    '/<name>;acl/<access>/<role>'
+)(app.route(
+    '/<name>:<version>;acl/<access>/<role>'
+)(app.route(
+    '/<path:path>/<name>;acl/<access>/<role>'
+)(app.route(
+    '/<path:path>/<name>:<version>;acl/<access>/<role>'
+)(ACLEntry.as_view('ACLEntry'))))))
+
+
 class ACL (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    @web_method()
-    def PUT(self, path, name, version, access):
+    def put(self, access, path="/", name="", version=""):
         """Replace ACL."""
         in_content_type = self.in_content_type()
         if in_content_type != 'application/json':
             raise BadRequest('Only application/json input is accepted for ACLs.')
         try:
-            acl = jsonReader(web.ctx.env['wsgi.input'].read().decode())
+            acl = json.loads(request.stream.read().decode())
         except:
             raise BadRequest('Error reading JSON input.')
         if not isinstance(acl, list):
@@ -92,12 +94,11 @@ class ACL (RestHandler):
         resource.set_acl(
             access,
             acl,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
-    @web_method()
-    def DELETE(self, path, name, version, access):
+    def delete(self, access, path="/", name="", version=""):
         """Clear ACL."""
         resource = self.resolve_name_or_version(
             path, name, version
@@ -106,33 +107,72 @@ class ACL (RestHandler):
         self.http_check_preconditions('DELETE')
         resource.clear_acl(
             access,
-            web.ctx.webauthn2_context
+            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
-    def _GET(self, path, name, version, access):
+    def get(self, access, path="/", name="", version=""):
         """Get ACL."""
+        self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve_name_or_version(path, name, version).acls[access]
         self.set_http_etag(hash_list(resource))
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
-        
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
-@web_url([
-    # path, name, version
-    '/((?:[^/:;]+/)*)([^/:;]+):([^/:;]+);acl/?',
-    '/((?:[^/:;]+/)*)([^/:;]+)();acl/?',
-    '/()()();acl/?'
-])
+_ACL_view = app.route(
+    '/;acl/<access>'
+)(app.route(
+    '/;acl/<access>/'
+)(app.route(
+    '/<name>;acl/<access>'
+)(app.route(
+    '/<name>;acl/<access>/'
+)(app.route(
+    '/<name>:<version>;acl/<access>'
+)(app.route(
+    '/<name>:<version>;acl/<access>/'
+)(app.route(
+    '/<path:path>/<name>;acl/<access>'
+)(app.route(
+    '/<path:path>/<name>;acl/<access>/'
+)(app.route(
+    '/<path:path>/<name>:<version>;acl/<access>'
+)(app.route(
+    '/<path:path>/<name>:<version>;acl/<access>/'
+)(ACL.as_view('ACL')))))))))))
+
+
 class ACLs (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
 
-    def _GET(self, path, name, version):
+    def get(self, path="/", name="", version=""):
         """Get ACLs."""
+        self.get_body = False if request.method == 'HEAD' else True
         resource = self.resolve_name_or_version(path, name, version).acls
         self.set_http_etag(hash_dict(resource))
         self.http_check_preconditions()
-        return self.get_content(resource, web.ctx.webauthn2_context)
+        return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
+_ACLs_view = app.route(
+    '/;acl'
+)(app.route(
+    '/;acl/'
+)(app.route(
+    '/<name>;acl'
+)(app.route(
+    '/<name>;acl/'
+)(app.route(
+    '/<name>:<version>;acl'
+)(app.route(
+    '/<name>:<version>;acl/'
+)(app.route(
+    '/<path:path>/<name>;acl'
+)(app.route(
+    '/<path:path>/<name>;acl/'
+)(app.route(
+    '/<path:path>/<name>:<version>;acl'
+)(app.route(
+    '/<path:path>/<name>:<version>;acl/'
+)(ACLs.as_view('ACLs')))))))))))

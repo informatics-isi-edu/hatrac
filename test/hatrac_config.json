@@ -1,10 +1,17 @@
 {
-    "storage_backend": "filesystem",
-    "storage_path": "/var/www/hatrac",
-    "database_type": "postgres",
-    "database_dsn": "dbname=hatrac",
-    "database_schema": "hatrac",
-    "database_max_retries": 5,
-    "403_html": "<html><body><h1>Access Forbidden</h1><p>%(message)s</p></body></html>",
-    "401_html": "<html><body><h1>Authentication Required</h1><p>%(message)s</p></body></html>"
+   "storage_backend": "filesystem",
+   "storage_path": "/var/www/hatrac",
+   "database_type": "postgres",
+   "database_dsn": "dbname=hatrac",
+   "database_schema": "hatrac",
+   "database_max_retries": 5,
+   "error_tempates": {
+      "401": {
+         "text/html": "<html><body><h1>Authentication Required</h1><p>%(message)s</p></body></html>"
+      },
+      "default": {
+         "text/html": "<html><body><h1>%(title)s</h1><p>%(description)s</p></body></html>",
+         "text/plain": "%(description)s"
+      }
+   }
 }

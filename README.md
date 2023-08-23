@@ -44,9 +44,9 @@ Hatrac is developed and tested primarily on an enterprise Linux
 distribution with Python 2.7. It has a conventional web service stack:
 - Apache HTTPD
 - mod_wsgi 
-- web.py lightweight web framework
+- flask web framework
 - psycopg2 database driver
-- PostgreSQL 9.5 or newer
+- PostgreSQL 10 or newer
 - webauthn2 security adaptation layer (another product of our group)
 
 ### Installation
