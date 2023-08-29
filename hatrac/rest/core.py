@@ -534,7 +534,7 @@ class RestHandler (flask.views.MethodView):
         if resource.is_object() and resource.is_version():
             headers['content-location'] = resource.asurl()
             if 'content-disposition' not in resource.metadata:
-                headers['content-disposition'] = "filename*=UTF-8''%s" % urllib.parse.quote(str(resource.object).split("/")[-1])
+                headers['content-disposition'] = "filename*=UTF-8''%s" % str(resource.object).split("/")[-1]
             
         if self.http_etag:
             headers['ETag'] = self.http_etag

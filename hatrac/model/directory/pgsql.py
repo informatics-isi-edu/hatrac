@@ -173,7 +173,7 @@ class HatracName (object):
         return self.directory.prefix + self.name
 
     def asurl(self):
-        return self.directory.prefix + '/'.join(map(lambda s: urllib.parse.quote(s, ''), self.name.split('/')))
+        return self.directory.prefix + self.name
 
     def _reload(self, conn, cur, raise_notfound=True):
         result = self.directory._name_lookup(conn, cur, self.name, raise_notfound)
