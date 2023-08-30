@@ -16,6 +16,7 @@ import sys
 import os
 from collections import namedtuple
 from io import BufferedRandom, BytesIO
+import urllib.parse
 from botocore.exceptions import ClientError
 from flask import g as hatrac_ctx
 from ...core import hatrac_debug, coalesce, max_request_payload_size_default
@@ -182,6 +183,7 @@ class BucketConfig (object):
         if self.s3_method_name not in self.s3_methods:
             raise ValueError("Invalid bucket configuration, unknown hatrac_s3_method: %r" % (self.s3_method_name,))
         self.s3_method = self.s3_methods[self.s3_method_name]
+        self.unquote_object_keys = bool(bucket_config.get("unquote_object_keys", False))
         self.presigned_url_threshold = bucket_config.get("presigned_url_threshold")
         self.presigned_url_expiration_secs = bucket_config.get("presigned_url_expiration_secs", 300)
         if not isinstance(self.presigned_url_threshold, int) \
@@ -208,12 +210,14 @@ class BucketConfig (object):
         return False
 
     def object_key(self, hatrac_object_name, hatrac_object_version=None):
-        return (self.s3_method.s3_name_template % dict(
+        key = (self.s3_method.s3_name_template % dict(
             bucket_prefix=self.bucket_prefix,
             hatrac_object_name=hatrac_object_name.lstrip('/'),
             hatrac_object_version=hatrac_object_version,
         )).lstrip('/')
-        return ("%s/%s" % (self.bucket_prefix, hatrac_object_name.lstrip('/'))).lstrip('/')
+        if self.unquote_object_keys:
+            key = urllib.parse.unquote(key)
+        return key
 
     def enforce_versioning_enabled(self):
         bucket_versioning = self.client.get_bucket_versioning(Bucket=self.bucket_name)
