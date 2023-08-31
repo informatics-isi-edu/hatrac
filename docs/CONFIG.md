@@ -53,8 +53,6 @@ Each backend introduces additional backend-specific configuration syntax as well
 
 The mounted path where the `"filesystem"` backend reads and writes bulk objects. The default storage path is `"/var/www/hatrac"`.
 
-```
-
 ### `s3_config` (amazons3 backend)
 
 A nested document containing many configuration fields for the amazons3 backend.
