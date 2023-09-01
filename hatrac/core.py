@@ -19,16 +19,14 @@ from webauthn2.util import merge_config, jsonWriter
 
 config = merge_config(
     jsonFileName='hatrac_config.json',
-    built_ins={
-        # backwards compatible default firewall behavior
-        "firewall_acls": {
-            "create": ["*"],
-            "delete": ["*"],
-            "manage_acl": ["*"],
-            "manage_metadata": ["*"],
-        },
-    },
+    built_ins={},
 )
+# emulate legacy config for backwards compat
+default_firewall_acl = [] if config.get("read_only", False) else ["*"]
+# add defaults incrementally in case local config is sparsely populated
+config.setdefault("firewall_acls", {})
+for aclname in ["create", "delete", "manage_acl", "manage_metadata"]:
+    config["firewall_acls"].setdefault(aclname, default_firewall_acl)
 # digest firewall acls into sets once for reuse across requests...
 config["firewall_acls"] = { k: set(v) for k, v in config['firewall_acls'].items() }
 
