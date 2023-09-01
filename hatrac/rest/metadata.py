@@ -78,15 +78,15 @@ class Metadata (RestHandler):
         return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _Metadata_view = app.route(
-    '/;metadata/<fieldname>'
+    '/;metadata/<hstring:fieldname>'
 )(app.route(
-    '/<name>;metadata/<fieldname>'
+    '/<hstring:name>;metadata/<hstring:fieldname>'
 )(app.route(
-    '/<name>:<version>;metadata/<fieldname>'
+    '/<hstring:name>:<hstring:version>;metadata/<hstring:fieldname>'
 )(app.route(
-    '/<path:path>/<name>;metadata/<fieldname>'
+    '/<hpath:path>/<hstring:name>;metadata/<hstring:fieldname>'
 )(app.route(
-    '/<path:path>/<name>:<version>;metadata/<fieldname>'
+    '/<hpath:path>/<hstring:name>:<hstring:version>;metadata/<hstring:fieldname>'
 )(Metadata.as_view('Metadata'))))))
 
 class MetadataCollection (RestHandler):
@@ -116,20 +116,20 @@ _MetadataCollection_view = app.route(
 )(app.route(
     '/;metadata/'
 )(app.route(
-    '/<name>;metadata'
+    '/<hstring:name>;metadata'
 )(app.route(
-    '/<name>;metadata/'
+    '/<hstring:name>;metadata/'
 )(app.route(
-    '/<name>:<version>;metadata'
+    '/<hstring:name>:<hstring:version>;metadata'
 )(app.route(
-    '/<name>:<version>;metadata/'
+    '/<hstring:name>:<hstring:version>;metadata/'
 )(app.route(
-    '/<path:path>/<name>;metadata'
+    '/<hpath:path>/<hstring:name>;metadata'
 )(app.route(
-    '/<path:path>/<name>;metadata/'
+    '/<hpath:path>/<hstring:name>;metadata/'
 )(app.route(
-    '/<path:path>/<name>:<version>;metadata'
+    '/<hpath:path>/<hstring:name>:<hstring:version>;metadata'
 )(app.route(
-    '/<path:path>/<name>:<version>;metadata/'
+    '/<hpath:path>/<hstring:name>:<hstring:version>;metadata/'
 )(MetadataCollection.as_view('MetadataCollection')))))))))))
 

@@ -9,8 +9,20 @@ import re
 import itertools
 import urllib
 from flask import Flask, request
+from werkzeug.routing import BaseConverter
 
 from ..core import config
+
+class HatracPathElemConverter(BaseConverter):
+    """Hatrac-specific path elements are more limited than Flask
+    """
+    regex = '[^?/:;]+'
+
+class HatracPathConverter(BaseConverter):
+    """Hatrac-specific path elements are more limited than Flask
+    """
+    regex = '[^?/:;][^?:;]+'
+    weight = 200
 
 def raw_path_app(app_orig, raw_uri_env_key='REQUEST_URI'):
     """Allow routes to distinguish raw reserved chars from escaped ones.
@@ -31,6 +43,8 @@ def raw_path_app(app_orig, raw_uri_env_key='REQUEST_URI'):
 
 app = Flask(__name__)
 app.wsgi_app = raw_path_app(app.wsgi_app)
+app.url_map.converters['hstring'] = HatracPathElemConverter
+app.url_map.converters['hpath'] = HatracPathConverter
 
 read_only = config.get("read_only", False)
 # TODO: add method decorator for this!!

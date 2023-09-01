@@ -55,15 +55,15 @@ class ACLEntry (RestHandler):
         return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _ACLEntry_view = app.route(
-    '/;acl/<access>/<role>'
+    '/;acl/<hstring:access>/<hstring:role>'
 )(app.route(
-    '/<name>;acl/<access>/<role>'
+    '/<hstring:name>;acl/<hstring:access>/<hstring:role>'
 )(app.route(
-    '/<name>:<version>;acl/<access>/<role>'
+    '/<hstring:name>:<hstring:version>;acl/<hstring:access>/<hstring:role>'
 )(app.route(
-    '/<path:path>/<name>;acl/<access>/<role>'
+    '/<hpath:path>/<hstring:name>;acl/<hstring:access>/<hstring:role>'
 )(app.route(
-    '/<path:path>/<name>:<version>;acl/<access>/<role>'
+    '/<hpath:path>/<hstring:name>:<hstring:version>;acl/<hstring:access>/<hstring:role>'
 )(ACLEntry.as_view('ACLEntry'))))))
 
 
@@ -120,25 +120,25 @@ class ACL (RestHandler):
         return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _ACL_view = app.route(
-    '/;acl/<access>'
+    '/;acl/<hstring:access>'
 )(app.route(
-    '/;acl/<access>/'
+    '/;acl/<hstring:access>/'
 )(app.route(
-    '/<name>;acl/<access>'
+    '/<hstring:name>;acl/<hstring:access>'
 )(app.route(
-    '/<name>;acl/<access>/'
+    '/<hstring:name>;acl/<hstring:access>/'
 )(app.route(
-    '/<name>:<version>;acl/<access>'
+    '/<hstring:name>:<hstring:version>;acl/<hstring:access>'
 )(app.route(
-    '/<name>:<version>;acl/<access>/'
+    '/<hstring:name>:<hstring:version>;acl/<hstring:access>/'
 )(app.route(
-    '/<path:path>/<name>;acl/<access>'
+    '/<hpath:path>/<hstring:name>;acl/<hstring:access>'
 )(app.route(
-    '/<path:path>/<name>;acl/<access>/'
+    '/<hpath:path>/<hstring:name>;acl/<hstring:access>/'
 )(app.route(
-    '/<path:path>/<name>:<version>;acl/<access>'
+    '/<hpath:path>/<hstring:name>:<hstring:version>;acl/<hstring:access>'
 )(app.route(
-    '/<path:path>/<name>:<version>;acl/<access>/'
+    '/<hpath:path>/<hstring:name>:<hstring:version>;acl/<hstring:access>/'
 )(ACL.as_view('ACL')))))))))))
 
 
@@ -160,19 +160,19 @@ _ACLs_view = app.route(
 )(app.route(
     '/;acl/'
 )(app.route(
-    '/<name>;acl'
+    '/<hstring:name>;acl'
 )(app.route(
-    '/<name>;acl/'
+    '/<hstring:name>;acl/'
 )(app.route(
-    '/<name>:<version>;acl'
+    '/<hstring:name>:<hstring:version>;acl'
 )(app.route(
-    '/<name>:<version>;acl/'
+    '/<hstring:name>:<hstring:version>;acl/'
 )(app.route(
-    '/<path:path>/<name>;acl'
+    '/<hpath:path>/<hstring:name>;acl'
 )(app.route(
-    '/<path:path>/<name>;acl/'
+    '/<hpath:path>/<hstring:name>;acl/'
 )(app.route(
-    '/<path:path>/<name>:<version>;acl'
+    '/<hpath:path>/<hstring:name>:<hstring:version>;acl'
 )(app.route(
-    '/<path:path>/<name>:<version>;acl/'
+    '/<hpath:path>/<hstring:name>:<hstring:version>;acl/'
 )(ACLs.as_view('ACLs')))))))))))
