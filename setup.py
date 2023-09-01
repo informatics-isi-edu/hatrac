@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2022 University of Southern California
+# Copyright 2015-2023 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -13,7 +13,7 @@ setup(
     packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage", "hatrac.rest"],
     package_data={'hatrac': ["*.wsgi"]},
     scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-utils"],
-    requires=["flask", "psycopg2", "webauthn2", "boto3", "botocore"],
+    install_requires=["flask", "psycopg2", "webauthn2", "boto3", "botocore"],
     maintainer_email="isrd-support@isi.edu",
     license='Apache 2.0',
     classifiers=[
