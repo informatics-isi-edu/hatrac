@@ -50,7 +50,7 @@ import datetime
 import psycopg2
 import psycopg2.pool
 from psycopg2.extras import DictCursor
-from flask import request
+from flask import request, g as hatrac_ctx
 
 from webauthn2.util import jsonWriter
 
@@ -173,7 +173,7 @@ class HatracName (object):
         return self.directory.prefix + self.name
 
     def asurl(self):
-        return self.directory.prefix + '/'.join(map(lambda s: urllib.parse.quote(s, ''), self.name.split('/')))
+        return self.directory.prefix + self.name
 
     def _acl_load(self, **args):
         for an in self._acl_names:
@@ -199,19 +199,14 @@ class HatracName (object):
     def is_object(self):
         raise NotImplementedError()
 
-    def enforce_acl(self, accesses, client_context):
+    def enforce_acl(self, accesses, client_context=None):
+        if client_context is None:
+            client_context = hatrac_ctx.webauthn2_context
+        core.set_acl_match_attributes(client_context)
         acl = set()
         for access in accesses:
             acl.update( self.acls.get(access, ACL()))
-        client = client_context.client or None
-        client = client['id'] if type(client) is dict else client
-        attributes = set([
-            attr['id'] if type(attr) is dict else attr
-            for attr in client_context.attributes
-        ])
-        if '*' in acl \
-           or client in acl \
-           or acl.intersection(attributes):
+        if not acl.isdisjoint(client_context.acl_match_attributes):
             return True
         elif client_context.client is not None:
             raise core.Forbidden('Access to %s forbidden.' % self)
@@ -259,6 +254,7 @@ class HatracNamespace (HatracName):
 
     def get_content(self, client_context, get_data=True):
         """Return (nbytes, metadata, data_generator) for namespace."""
+        self.enforce_acl(['owner', 'read', 'ancestor_owner', 'ancestor_read'], client_context)
         return negotiated_uri_list(self, self.directory.namespace_enumerate_names(self, False))
 
 class HatracObject (HatracName):
@@ -323,7 +319,7 @@ class HatracVersions (object):
         return self.object.asurl()
 
     def get_content(self, client_context, get_data=True):
-        self.object.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        self.object.enforce_acl(['owner', 'ancestor_owner', 'read', 'ancestor_read'], client_context)
         return negotiated_uri_list(self, self.object.directory.object_enumerate_versions(self.object))
 
 class HatracObjectVersion (HatracName):

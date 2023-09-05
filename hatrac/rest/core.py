@@ -33,7 +33,7 @@ from webauthn2.rest import format_trace_json, format_final_json
 
 from . import app
 from .. import core
-from ..core import hatrac_debug, negotiated_content_type
+from ..core import hatrac_debug, negotiated_content_type, set_acl_match_attributes
 from .. import directory
 
 _webauthn2_manager = Manager()
@@ -236,7 +236,9 @@ def before_request():
         directory.prefix = request.environ['SCRIPT_NAME']
 
     # get client authentication context
-    hatrac_ctx.webauthn2_context = context_from_environment(request.environ, fallback=True)
+    client_context = context_from_environment(request.environ, fallback=True)
+    set_acl_match_attributes(client_context)
+    hatrac_ctx.webauthn2_context = client_context
 
     return None
 
@@ -308,6 +310,17 @@ class RestHandler (flask.views.MethodView):
         self.get_body = True
         self.http_etag = None
         self.http_vary = _webauthn2_manager.get_http_vary()
+
+    @classmethod
+    def enforce_firewall(cls, aclname):
+        # see hatrac.core for built-in firewall_acls
+        acl = core.config.get("firewall_acls")[aclname]
+        if not acl.isdisjoint(hatrac_ctx.webauthn2_context.acl_match_attributes):
+            return True
+        elif hatrac_ctx.webauthn2_context.client is not None:
+            raise core.Forbidden('%s access forbidden.' % aclname)
+        else:
+            raise core.Unauthenticated('Authentication required for %s access' % aclname)
 
     def trace(self, msg):
         hatrac_ctx.hatrac_request_trace(msg)
@@ -534,7 +547,7 @@ class RestHandler (flask.views.MethodView):
         if resource.is_object() and resource.is_version():
             headers['content-location'] = resource.asurl()
             if 'content-disposition' not in resource.metadata:
-                headers['content-disposition'] = "filename*=UTF-8''%s" % urllib.parse.quote(str(resource.object).split("/")[-1])
+                headers['content-disposition'] = "filename*=UTF-8''%s" % str(resource.object).split("/")[-1]
             
         if self.http_etag:
             headers['ETag'] = self.http_etag
