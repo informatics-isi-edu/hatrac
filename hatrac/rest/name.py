@@ -59,9 +59,9 @@ class NameVersion (RestHandler):
         return resp
 
 _NameVersion_view = app.route(
-    '/<name>:<version>'
+    '/<hstring:name>:<hstring:version>'
 )(app.route(
-    '/<path:path>/<name>:<version>'
+    '/<hpath:path>/<hstring:name>:<hstring:version>'
 )(NameVersion.as_view('NameVersion')))
 
 
@@ -92,9 +92,9 @@ class NameVersions (RestHandler):
 
 
 _NameVersions_view = app.route(
-    '/<name>;versions'
+    '/<hstring:name>;versions'
 )(app.route(
-    '/<path:path>/<name>;versions'
+    '/<hpath:path>/<hstring:name>;versions'
 )(NameVersions.as_view('NameVersions')))
 
 
@@ -232,11 +232,11 @@ class Name (RestHandler):
 _Name_view = app.route(
     '/'
 )(app.route(
-    '/<name>'
+    '/<hstring:name>'
 )(app.route(
-    '/<name>/'
+    '/<hstring:name>/'
 )(app.route(
-    '/<path:path>/<name>'
+    '/<hpath:path>/<hstring:name>'
 )(app.route(
-    '/<path:path>/<name>/'
+    '/<hpath:path>/<hstring:name>/'
 )(Name.as_view('Name'))))))

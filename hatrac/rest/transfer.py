@@ -64,9 +64,9 @@ class ObjectTransferChunk (RestHandler):
         raise NoMethod()
 
 _ObjectTransferChunk_view = app.route(
-    '/<name>;upload/<job>/<chunk>'
+    '/<hstring:name>;upload/<hstring:job>/<hstring:chunk>'
 )(app.route(
-    '/<path:path>/<name>;upload/<job>/<chunk>'
+    '/<hpath:path>/<hstring:name>;upload/<hstring:job>/<hstring:chunk>'
 )(ObjectTransferChunk.as_view('ObjectTransferChunk')))
 
 
@@ -98,13 +98,13 @@ class ObjectTransfer (RestHandler):
         return self.get_content(upload, hatrac_ctx.webauthn2_context)
 
 _ObjectTransfer_view = app.route(
-    '/<name>;upload/<job>'
+    '/<hstring:name>;upload/<hstring:job>'
 )(app.route(
-    '/<name>;upload/<job>/'
+    '/<hstring:name>;upload/<hstring:job>/'
 )(app.route(
-    '/<path:path>/<name>;upload/<job>'
+    '/<hpath:path>/<hstring:name>;upload/<hstring:job>'
 )(app.route(
-    '/<path:path>/<name>;upload/<job>/'
+    '/<hpath:path>/<hstring:name>;upload/<hstring:job>/'
 )(ObjectTransfer.as_view('ObjectTransfer')))))
 
 
@@ -185,11 +185,11 @@ class ObjectTransfers (RestHandler):
         return self.get_content(resource, hatrac_ctx.webauthn2_context)
 
 _ObjectTransfers_view = app.route(
-    '/<name>;upload'
+    '/<hstring:name>;upload'
 )(app.route(
-    '/<name>;upload/'
+    '/<hstring:name>;upload/'
 )(app.route(
-    '/<path:path>/<name>;upload'
+    '/<hpath:path>/<hstring:name>;upload'
 )(app.route(
-    '/<path:path>/<name>;upload/'
+    '/<hpath:path>/<hstring:name>;upload/'
 )(ObjectTransfers.as_view('ObjectTransfers')))))
