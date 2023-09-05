@@ -18,6 +18,7 @@ class Metadata (RestHandler):
 
     def put(self, fieldname, path="/", name="", version=""):
         """Replace Metadata value."""
+        self.enforce_firewall('manage_metadata')
         in_content_type = self.in_content_type()
         if in_content_type != 'text/plain':
             raise BadRequest('Only text/plain input is accepted for metadata.')
@@ -43,6 +44,7 @@ class Metadata (RestHandler):
 
     def delete(self, fieldname, path="/", name="", version=""):
         """Clear Metadata value."""
+        self.enforce_firewall('manage_metadata')
         if version:
             resource = self.resolve_version(path, name, version)
         else:
