@@ -13,7 +13,13 @@ setup(
     packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage", "hatrac.rest"],
     package_data={'hatrac': ["*.wsgi"]},
     scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-utils"],
-    install_requires=["flask", "psycopg2", "webauthn2", "boto3", "botocore"],
+    install_requires=[
+        "flask>=2.3.4",
+        "psycopg2",
+        "webauthn2",
+        "boto3",
+        "botocore",
+    ],
     maintainer_email="isrd-support@isi.edu",
     license='Apache 2.0',
     classifiers=[
