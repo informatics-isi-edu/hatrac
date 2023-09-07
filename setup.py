@@ -14,7 +14,7 @@ setup(
     package_data={'hatrac': ["*.wsgi"]},
     scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-utils"],
     install_requires=[
-        "flask>=2.3.4",
+        "flask>=2.3.3",
         "psycopg2",
         "webauthn2",
         "boto3",
