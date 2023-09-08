@@ -1186,7 +1186,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         assert object.id is not None, object
         results = self._version_list(conn, cur, object.id, limit=1)
         if results:
-            return HatracObjectVersion(self, object, **results[0])
+            return self.version_resolve(object, results[0]['version'], conn=conn, cur=cur)
         else:
             raise core.Conflict('Object %s currently has no content.' % object)
 
