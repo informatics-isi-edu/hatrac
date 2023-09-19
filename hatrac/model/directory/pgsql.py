@@ -42,6 +42,7 @@ import os
 import sys
 import json
 import urllib
+import html
 import binascii
 import base64
 import random
@@ -134,8 +135,11 @@ def negotiated_uri_list(parent, resources, metadata={}):
         body = '\n'.join(uris) + '\n'
     elif metadata['content-type'] == 'text/html':
         body = "<!DOCTYPE html>\n<html>\n  <h1>Index of {parent}</h1>\n{children}\n</html>".format(
-            parent=parent.asurl(),
-            children='<br/>\n'.join(['  <a href="%s">%s</a>' % (uri, os.path.basename(uri)) for uri in uris])
+            parent=html.escape(parent.asurl()),
+            children='<br/>\n'.join([
+                '  <a href="%s">%s</a>' % (html.escape(uri), html.escape(os.path.basename(uri)))
+                for uri in uris
+            ])
         )
     else:
         body = jsonWriter(uris) + b'\n'
