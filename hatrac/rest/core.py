@@ -148,13 +148,13 @@ class RestException (werkzeug.exceptions.HTTPException):
         template = self.response_templates[self.content_type]
         description = self.get_description()
         parts = {
-            "code": str(self.code),
+            "code": self.code,
             "description": description,
             "message": description, # for existing hatrac_config template feature
             "title": self.title, # for our new generic templates
         }
         if self.content_type == 'text/html':
-            parts = { k: html.escape(v) for k, v in parts.items() }
+            parts = { k: html.escape(str(v)) for k, v in parts.items() }
         return (template + '\n') % parts
 
     def get_headers(self, environ=None, scope=None):
