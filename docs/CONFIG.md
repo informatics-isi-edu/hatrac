@@ -14,6 +14,7 @@ whole:
 {
   "service_prefix": <URL path prefix string>,
   "database_dsn": <database connection DSN string>,
+  "allowed_url_char_class": <regular expression string>,
   "max_request_payload_size": <integer (default 134217728)>,
   "firewall_acls": { <aclname>: <acl>, ... },
   "read_only": <boolean>,
@@ -34,6 +35,22 @@ This is a *developer* option which should not be used in practice.
 The connection string used when opening the service database via the `psycopg2` database API.
 
 A typical value for a single-host deployment would be `"dbname=hatrac"`. In a more complex deployment, this might include remote database server addresses or other connection options.
+
+### `allowed_url_char_class`
+
+A Python RE representing the class of single characters allowed in the
+pathname component of a Hatrac URL. The default is a strict
+definition: `[-._~A-Za-z0-9/]`. This default combines RFC 3986 and
+Hatrac URL parsing rules:
+
+- Non-reserved characters are ASCII alpha-numeric A-Z, a-z, 0-9, and the limited punctuation `-`, `.`, `_`, and `~`.
+- Hatrac pathnames can be formed with the non-reserved characters and the `/` path separator, or with percent-encoded UTF-8 sequences.
+
+The purpose of this configuration field is to allow an administrator
+to slightly relax the strict rules and allow for additional bare ASCII
+characters to be used outside of this specification. It is recommended
+that this feature not be used, and instead deployments be updated to
+follow the strict quoting rules described above.
 
 ### `max_request_payload_size`
 

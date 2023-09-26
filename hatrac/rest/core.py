@@ -336,8 +336,18 @@ class RestHandler (flask.views.MethodView):
         fullname = '/' + '/'.join(nameparts)
         return fullname
 
+    # RFC 3986
+    #
+    # reserved chars:      : / ? # [ ] @ ! $ & ' ( ) * + , ; =
+    # non-reserved chars:  [-._~A-Za-z0-9]
+    #
+
     def resolve(self, path, name, raise_notfound=True):
         fullname = self._fullname(path, name)
+        allowed_char_class = core.config.get("allowed_url_char_class", '[-._~A-Za-z0-9/]')
+        pat = "^(" + allowed_char_class + "|%[0-9a-fA-F][0-9a-fA-F])+$"
+        if not re.match(pat, fullname):
+            raise BadRequest('Request malformed. Hatrac URL path names may only include characters A-Z, a-z, 0-9, "-", ".", "~", or UTF-8 bytes percent-encoded with 2-digit hex values.')
         return hatrac_ctx.hatrac_directory.name_resolve(fullname, raise_notfound)
 
     def resolve_version(self, path, name, version):

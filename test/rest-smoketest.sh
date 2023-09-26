@@ -408,6 +408,12 @@ dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DA
 
 # test path with escaped unicode name "ǝɯɐuǝlᴉɟ ǝpoɔᴉun"
 TEST_DISPOSITION="filename*=UTF-8''%C7%9D%C9%AF%C9%90u%C7%9Dl%E1%B4%89%C9%9F%20%C7%9Dpo%C9%94%E1%B4%89un"
+TEST_NS="${TEST_DISPOSITION:17}" # strip off prefix: filename*=UTF-8''
+
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/${TEST_NS}"       -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "200::application/json::*" /ns-${RUNKEY}/"${TEST_NS}"
+dotest "204::*::*" /ns-${RUNKEY}/"${TEST_NS}" -X DELETE
+dotest "404::*::*" /ns-${RUNKEY}/"${TEST_NS}"
 
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj1 -X DELETE
 dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1?cid=smoke" -X DELETE
