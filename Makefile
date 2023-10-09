@@ -53,7 +53,7 @@ DEPLOY_FILES=\
 	$(HTTPDCONFDIR)/wsgi_hatrac.conf \
 	$(DAEMONHOME)/hatrac_config.json
 
-deploy: $(DEPLOY_FILES) force
+deploy: install $(DEPLOY_FILES) force
 
 uninstall: force
 	pip3 uninstall -y ermresolve

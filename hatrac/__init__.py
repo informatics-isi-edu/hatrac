@@ -77,7 +77,7 @@ AllowEncodedSlashes On
 
 WSGIPythonOptimize 1
 WSGIDaemonProcess hatrac processes=4 threads=4 user=hatrac maximum-requests=2000
-WSGIScriptAlias /hatrac %(hatrac_location)s/hatrac.wsgi
+WSGIScriptAlias /hatrac %(hatrac_location)s/hatrac.wsgi process-group=hatrac
 WSGIPassAuthorization On
 
 WSGISocketPrefix /var/run/httpd/wsgi
