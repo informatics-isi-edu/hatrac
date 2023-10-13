@@ -202,6 +202,10 @@ The smallest object size in bytes that will be served with signed URL redirectio
 
 When an integer size greater than `0` is configured, objects smaller than the threshold will be returned immediately by proxying content, while larger objects will be returned indirectly via redirection with signed URLs that allow the client to directly retrieve object content from the S3-compatible object store.
 
+For backwards-compatibility, the alternate per-bucket field name `presigned_url_size_threshold` will be recognized as a fallback.
+
+NOTE: When the `amazons3` backend is used in conjunction with the `overlay` backend, this signed-URL threshold only affect the amazons3 backend when it is the final backend on the entire overlay chain. Other non-final backends are forced to operate in synchronous proxy mode, so that the service can determine whether content has been located or search must continue with the next backend.
+
 #### `s3_config`.`buckets`.`presigned_url_expiration_secs`
 
 The integer number of seconds that a presigned URL will delegate access privileges to the client. Default `300` (5 minutes).
