@@ -222,7 +222,7 @@ class Name (RestHandler):
             hatrac_ctx.webauthn2_context
         )
         if isinstance(body, core.Redirect):
-            return self.redirect_response(response)
+            return self.redirect_response(body)
         # we need to build the response or flask discards the content-length
         resp = make_response(body, status)
         for k, v in headers.items():

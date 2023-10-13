@@ -184,7 +184,8 @@ class BucketConfig (object):
             raise ValueError("Invalid bucket configuration, unknown hatrac_s3_method: %r" % (self.s3_method_name,))
         self.s3_method = self.s3_methods[self.s3_method_name]
         self.unquote_object_keys = bool(bucket_config.get("unquote_object_keys", False))
-        self.presigned_url_threshold = bucket_config.get("presigned_url_threshold")
+        self.presigned_url_threshold = \
+            bucket_config.get("presigned_url_threshold", bucket_config.get("presigned_url_size_threshold"))
         self.presigned_url_expiration_secs = bucket_config.get("presigned_url_expiration_secs", 300)
         if not isinstance(self.presigned_url_threshold, int) \
            or self.presigned_url_threshold <= 0:
