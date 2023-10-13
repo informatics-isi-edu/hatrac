@@ -429,6 +429,8 @@ class HatracStorage:
         except bucket_config.client.exceptions.NoSuchKey as e:
             raise ObjectVersionMissing(e)
         except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchVersion':
+                raise ObjectVersionMissing(e)
             if e.response['Error']['Code'] == 'InvalidArgument' \
                and e.response['Error']['ArgumentName'] == 'versionId':
                 raise ObjectVersionMissing(e)
