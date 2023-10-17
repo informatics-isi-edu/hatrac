@@ -28,7 +28,7 @@ import flask.views
 import werkzeug.exceptions
 import werkzeug.http
 
-from webauthn2.util import Context, context_from_environment
+from webauthn2.util import Context, ClientSessionCachedProxy
 from webauthn2.manager import Manager
 from webauthn2.rest import format_trace_json, format_final_json
 
@@ -222,6 +222,8 @@ class ServerError (RestException):
 
 app.url_map.strict_slashes = False
 
+_client_session_proxy = ClientSessionCachedProxy(core.config.get('webauthn_proxy_config'))
+
 @app.before_request
 def before_request():
     # request context init
@@ -240,7 +242,7 @@ def before_request():
         directory.prefix = request.environ['SCRIPT_NAME']
 
     # get client authentication context
-    client_context = context_from_environment(request.environ, fallback=True)
+    client_context = _client_session_proxy.get_context(request.environ, request.cookies, fallback=True)
     set_acl_match_attributes(client_context)
     hatrac_ctx.webauthn2_context = client_context
 

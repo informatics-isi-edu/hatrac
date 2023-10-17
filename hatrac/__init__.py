@@ -84,8 +84,10 @@ WSGISocketPrefix /var/run/httpd/wsgi
 
 <Location /hatrac>
 
-   AuthType webauthn
-   Require webauthn-optional
+   AuthType none
+   Require all granted
+   #AuthType webauthn
+   #Require webauthn-optional
 
    WSGIProcessGroup hatrac
     
