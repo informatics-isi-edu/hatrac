@@ -726,7 +726,7 @@ as a document:
 	Host: authority_name
 	Accept: application/json
 	If-None-Match: etag_value
-	
+
 for which the successful response is:
 
     200 OK
@@ -816,18 +816,20 @@ each resource type is:
 - Namespace
   - `owner`: lists roles considered to be owners of the namespace.
   - `create`: lists roles permitted to create new children in the namespace.
+  - `read`: lists roles permitted to read the list of child names in the namespace.
   - `subtree-owner`: lists roles considered to be owners of any namespace, object, or object version beneath the namespace.
   - `subtree-create`: lists roles permitted to create new children of the namespace or of any namespace beneath the namespace.
   - `subtree-update`: lists roles permitted to update data on any object beneath the namespace.
-  - `subtree-read`: lists roles permitted to read any object version beneath the namespace.
+  - `subtree-read`: lists roles permitted to read any object version or list children of any namespace beneath the namespace.
 - Object
   - `owner`: lists roles considered to be owners of the object.
   - `update`: lists roles permitted to update object with new versions.
+  - `read`: lists roles permitted to list versions of the named object.
   - `subtree-owner`: lists roles considered to be owners of any object version for the object.
-  - `subtree-read`: lists roles permitted to read any object version for the object.
+  - `subtree-read`: lists roles permitted to read any object version content for the object.
 - Object Version
   - `owner`: lists roles considered to be owners of the object version.
-  - `read`: lists roles permitted to read the object version.
+  - `read`: lists roles permitted to read the object version content.
 
 ### Lifecycle and Ownership
 
