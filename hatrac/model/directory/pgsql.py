@@ -241,8 +241,8 @@ class HatracName (object):
 
 class HatracNamespace (HatracName):
     """Represent a bound namespace."""
-    _acl_names = ['owner', 'create', 'subtree-owner', 'subtree-create', 'subtree-read', 'subtree-update']
-    _ancestor_acl_names = ['ancestor_owner', 'ancestor_create']
+    _acl_names = ['owner', 'create', 'read', 'subtree-owner', 'subtree-create', 'subtree-read', 'subtree-update']
+    _ancestor_acl_names = ['ancestor_owner', 'ancestor_create', 'ancestor_read']
 
     def __init__(self, directory, **args):
         HatracName.__init__(self, directory, **args)
