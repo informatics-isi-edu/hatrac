@@ -264,7 +264,7 @@ class HatracNamespace (HatracName):
 class HatracObject (HatracName):
     """Represent a bound object."""
     _acl_names = ['owner', 'update', 'read', 'subtree-owner', 'subtree-read']
-    _ancestor_acl_names = ['ancestor_owner', 'ancestor_update']
+    _ancestor_acl_names = ['ancestor_owner', 'ancestor_update', 'ancestor_read']
 
     def __init__(self, directory, **args):
         HatracName.__init__(self, directory, **args)
@@ -483,7 +483,7 @@ class connection (psycopg2.extensions.connection):
           WHERE n.name = $1 AND (NOT n.is_deleted OR NOT $2) ;
 
         PREPARE hatrac_version_lookup (int8, text) AS
-          SELECT v.*, n.name, n.pid, n.ancestors, %(owner_acl)s, %(read_acl)s
+          SELECT v.*, n.name, n.pid, n.ancestors, n."subtree-owner", n."subtree-read", %(owner_acl)s, %(read_acl)s
           FROM hatrac.version v
           JOIN hatrac.name n ON (v.nameid = n.id)
           WHERE v.nameid = $1 AND v.version = $2 ;
@@ -1135,7 +1135,8 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         self._delete_upload(conn, cur, upload)
         return lambda : self.storage.cancel_upload(upload.name, upload.job)
 
-    @db_wrap(enforce_acl=(2, 4, ['owner', 'read', 'ancestor_owner', 'ancestor_read']))
+    # subtree-owner and subtree-read are from the parent object name record
+    @db_wrap(enforce_acl=(2, 4, ['owner', 'read', 'ancestor_owner', 'ancestor_read', 'subtree-owner', 'subtree-read']))
     def get_version_content_range(self, object, objversion, get_slice, client_context, get_data=True, conn=None, cur=None):
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
