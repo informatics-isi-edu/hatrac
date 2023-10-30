@@ -246,7 +246,8 @@ class MetadataValue (str):
         return False
 
     def get_content(self, client_context, get_data=True):
-        self.container.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        # subtree-read is copied from object to object-version
+        self.container.resource.enforce_acl(['owner', 'read', 'ancestor_owner', 'ancestor_read', 'subtree-read'], client_context)
         body = self + '\n'
         return len(body), Metadata({'content-type': 'text/plain'}), body
 
@@ -255,7 +256,8 @@ class MetadataBytes (bytes):
         return False
 
     def get_content(self, client_context, get_data=True):
-        self.container.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        # subtree-read is copied from object to object-version
+        self.container.resource.enforce_acl(['owner', 'read', 'ancestor_owner', 'ancestor_read', 'subtree-read'], client_context)
         body = base64.b64encode(self) + b'\n'
         return len(body), Metadata({'content-type': 'text/plain'}), body
 
@@ -313,11 +315,12 @@ class Metadata (dict):
         return False
 
     def get_content(self, client_context, get_data=True):
-        self.resource.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        # subtree-read is copied from object to object-version
+        self.resource.enforce_acl(['owner', 'read', 'ancestor_owner', 'ancestor_read', 'subtree-read'], client_context)
         body = jsonWriter(self.to_http()) + b'\n'
         nbytes = len(body)
         return nbytes, Metadata({'content-type': 'application/json'}), body
-    
+
     def _sql_encoded_val(self, k, v):
         enc, dec = self._sql_codecs.get(k, (lambda x: x, lambda x: x))
         return enc(v)

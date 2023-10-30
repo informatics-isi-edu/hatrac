@@ -36,8 +36,8 @@ EOF
     exit 1
 }
 
-[[ -z $GOAUTH  && -z $COOKIES ]] && error
-[[ -n $COOKIES && ! -r $COOKIES ]] && error
+[[ -z $GOAUTH  && -z $COOKIES ]] && error must set COOKIES or GOAUTH env var
+[[ -n $COOKIES && ! -r $COOKIES ]] && error COOKIES file must be readable
 
 #Supported deployments: amazons3 or filesystem
 DEPLOYMENT=${DEPLOYMENT:-filesystem}
@@ -48,10 +48,15 @@ RUNKEY=smoketest-$RANDOM
 RESPONSE_HEADERS=/tmp/${RUNKEY}-response-headers
 RESPONSE_CONTENT=/tmp/${RUNKEY}-response-content
 TEST_DATA=/tmp/${RUNKEY}-test-data
+TEST_ACL_ANON=/tmp/${RUNKEY}-test-acl-anon.json
+
+cat > ${TEST_ACL_ANON} <<EOF
+["*"]
+EOF
 
 cleanup()
 {
-    rm -f ${RESPONSE_HEADERS} ${RESPONSE_CONTENT} ${TEST_DATA}
+    rm -f ${RESPONSE_HEADERS} ${RESPONSE_CONTENT} ${TEST_DATA} ${TEST_ACL_ANON}
     rm -f /tmp/parts-${RUNKEY}*
     rm -f /tmp/dummy-${RUNKEY}
 }
@@ -74,7 +79,8 @@ mycurl()
     if [[ -n $GOAUTH ]] 
     then
         curl_options+=( -H "Authorization: Globus-Goauthtoken $GOAUTH" )
-    else
+    elif [[ -n $COOKIES ]]
+    then
 	curl_options+=( -b "$COOKIES" -c "$COOKIES" )
     fi
     curl "${curl_options[@]}" "$@"
@@ -221,10 +227,32 @@ dotest()
     pattern="$1"
     url="$2"
     shift 2
+    dotest_auth "$pattern" "$url" true "$@"
+}
+
+dotest_anon()
+{
+    pattern="$1"
+    url="$2"
+    shift 2
+    dotest_auth "$pattern" "$url" false "$@"
+}
+
+dotest_auth()
+{
+    pattern="$1"
+    url="$2"
+    auth="$3"
+    shift 3
 
     request=( "$@" "${BASE_URL}$url" )
     printf "%s " "${request[@]}"  >&2
-    summary=$(mycurl "${request[@]}" )
+    if [[ "$auth" = true ]]
+    then
+        summary=$(mycurl "${request[@]}" )
+    else
+        summary=$(COOKIES= GOAUTH= mycurl "${request[@]}" )
+    fi
 
     if [[ "${request[0]}" = '--head' ]]
     then
@@ -335,6 +363,15 @@ dotest "200::text/html*::*" "/ns-${RUNKEY}/foo" -H "Accept: text/html"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo?cid=smoke" --head
 dotest "409::*::*" "/ns-${RUNKEY}/foo?cid=smoke" -X PUT -H "Content-Type: application/json"
 
+# check namespace authz corner cases
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/bar"
+dotest "204::*::*" "/ns-${RUNKEY}/foo;acl/read" -T ${TEST_ACL_ANON} -H "Content-Type: application/json"
+dotest_anon "200::application/json::*" "/ns-${RUNKEY}/foo"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/bar"
+dotest "204::*::*" "/ns-${RUNKEY}/foo;acl/subtree-read" -T ${TEST_ACL_ANON} -H "Content-Type: application/json"
+dotest_anon "200::application/json::*" "/ns-${RUNKEY}/foo/bar"
+
 # test objects
 md5=$(mymd5sum < $0)
 sha=$(mysha256sum < $0)
@@ -343,6 +380,51 @@ script_size=$(stat -c "%s" $0)
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
 obj1_vers0="$(cat ${RESPONSE_CONTENT})"
 obj1_vers0="${obj1_vers0#/hatrac}"
+
+# sanity check object status for owner
+dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1"
+dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;versions"
+dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
+dotest "200::*::*" "${obj1_vers0}"
+dotest "200::*::*" "${obj1_vers0};metadata/"
+
+# check read authz corner cases
+# namespace subtree-read (set above) grants all reads to objects and versions below
+dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1"
+dotest_anon "200::*::*" "${obj1_vers0}"
+dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1;versions"
+dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
+dotest_anon "200::*::*" "${obj1_vers0};metadata/"
+# without read, all read interfaces are blocked
+dotest "204::*::*" "/ns-${RUNKEY}/foo;acl/subtree-read" -X DELETE
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1"
+dotest_anon "401::*::*" "${obj1_vers0}"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1;versions"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
+dotest_anon "401::*::*" "${obj1_vers0};metadata/"
+# obj read grants versions listing but not content access
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;acl/read" -T ${TEST_ACL_ANON} -H "Content-Type: application/json"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1"
+dotest_anon "401::*::*" "${obj1_vers0}"
+dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1;versions"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
+dotest_anon "401::*::*" "${obj1_vers0};metadata/"
+# vers read grants content access
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;acl/read" -X DELETE
+dotest "204::*::*" "${obj1_vers0};acl/read" -T ${TEST_ACL_ANON} -H "Content-Type: application/json"
+dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1"
+dotest_anon "200::*::*" "${obj1_vers0}"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1;versions"
+dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
+dotest_anon "200::*::*" "${obj1_vers0};metadata/"
+# obj subtree-read grants content access
+dotest "204::*::*" "${obj1_vers0};acl/read" -X DELETE
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;acl/subtree-read" -T ${TEST_ACL_ANON} -H "Content-Type: application/json"
+dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1"
+dotest_anon "200::*::*" "${obj1_vers0}"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1;versions"
+dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
+dotest_anon "200::*::*" "${obj1_vers0};metadata/"
 
 # metadata on object-version
 dotest "200::application/json::*" "${obj1_vers0};metadata/"
