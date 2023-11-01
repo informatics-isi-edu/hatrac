@@ -558,11 +558,12 @@ class RestHandler (flask.views.MethodView):
         metadata = metadata.to_http()
         headers.update(metadata)
 
-        if resource.is_object() and resource.is_version():
-            headers['content-location'] = resource.asurl()
-            if 'content-disposition' not in resource.metadata:
-                headers['content-disposition'] = "filename*=UTF-8''%s" % str(resource.object).split("/")[-1]
-            
+        if resource.is_object():
+            headers.setdefault('content-type', 'application/octet-stream')
+            headers.setdefault('content-location', resource.asurl())
+            basename = (str(resource.object) if resource.is_version() else str(resource)).split("/")[-1]
+            headers.setdefault('content-disposition', "filename*=UTF-8''%s" % basename)
+
         if self.http_etag:
             headers['ETag'] = self.http_etag
             
