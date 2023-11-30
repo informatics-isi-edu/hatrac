@@ -405,7 +405,7 @@ class HatracStorage:
             limit = nbytes
 
         if pos != 0 or limit != nbytes:
-            content_range = 'bytes=%d-%d' % (pos, limit)
+            content_range = 'bytes=%d-%d' % (pos, limit - 1)
         else:
             content_range = 'bytes=0-'
 
