@@ -115,11 +115,11 @@ class HatracStorage (object):
     def track_chunks(self):
         return self.backends[0].track_chunks
 
-    def create_from_file(self, name, input, nbytes, metadata={}):
-        return self.backends[0].create_from_file(name, input, nbytes, metadata)
+    def create_from_file(self, name, input, nbytes, metadata={}, predefined_version=None):
+        return self.backends[0].create_from_file(name, input, nbytes, metadata, predefined_version)
 
-    def create_upload(self, name, nbytes=None, metadata={}):
-        return self.backends[0].create_upload(name, nbytes, metadata)
+    def create_upload(self, name, nbytes=None, metadata={}, predefined_version=None):
+        return self.backends[0].create_upload(name, nbytes, metadata, predefined_version)
 
     def cancel_upload(self, name, upload_id):
         return self.backends[0].cancel_upload(name, upload_id)

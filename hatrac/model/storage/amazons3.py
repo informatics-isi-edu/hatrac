@@ -235,10 +235,13 @@ class BucketConfig (object):
             res.pop('VersionId', None)
         return res
 
-    def preflight_hatrac_version(self):
+    def preflight_hatrac_version(self, predefined_version=None):
         if self.s3_method.expose_s3_version:
             self.enforce_versioning_enabled()
             return None
+        elif predefined_version is not None:
+            # this is used by migration tasks, not the REST API
+            return predefined_version
         else:
             return make_random_version()
 
@@ -312,10 +315,10 @@ class HatracStorage:
         )
 
     @s3_bucket_wrap()
-    def create_from_file(self, name, input, nbytes, metadata={}, bucket_config=None):
+    def create_from_file(self, name, input, nbytes, metadata={}, predefined_version=None, bucket_config=None):
         """Create an entire file-version object from input content, returning version ID."""
         def sendfunc(inp, content_length, md5, content_type, content_disposition=None):
-            version = bucket_config.preflight_hatrac_version()
+            version = bucket_config.preflight_hatrac_version(predefined_version)
             response = bucket_config.client.put_object(**bucket_config.boto_kwargs(
                 Key=bucket_config.object_key(name, version),
                 Body=inp,
@@ -468,9 +471,9 @@ class HatracStorage:
             raise
 
     @s3_bucket_wrap()
-    def create_upload(self, name, nbytes=None, metadata={}, bucket_config=None):
+    def create_upload(self, name, nbytes=None, metadata={}, predefined_version=None, bucket_config=None):
         # thread version state needed for _some_ naming schemes
-        version = bucket_config.preflight_hatrac_version()
+        version = bucket_config.preflight_hatrac_version(predefined_version)
         response = bucket_config.client.create_multipart_upload(**bucket_config.boto_kwargs(
             Key=bucket_config.object_key(name, version),
             ContentType=metadata.get('content-type', 'application/octet-stream'),
