@@ -223,7 +223,7 @@ def check_work(dbfile):
         if num_pending > 0:
             logger.warning("%d/%d object versions are unprocessed" % (num_pending, num_total))
 
-        cur.execute("""SELECT count(*) FROM version_move_state WHERE metadata -> '$.content-md5' IS NULL""")
+        cur.execute("""SELECT count(*) FROM version_move_state WHERE metadata -> '$.content-sha256' IS NULL""")
         num_cant_verify = cur.fetchone()[0]
 
         if num_cant_verify > 0:
@@ -233,7 +233,7 @@ def check_work(dbfile):
 SELECT
    count(*)
 FROM version_move_state
-WHERE dst_aux -> '$.error' != metadata -> '$.content-sha256'
+WHERE dst_aux -> '$.measured_sha256' != metadata -> '$.content-sha256'
         """)
         num_sha256_mismatch=cur.fetchone()[0]
 
