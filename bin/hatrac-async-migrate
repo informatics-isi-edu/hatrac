@@ -466,19 +466,43 @@ LIMIT 1
 
         logger.info('work complete for %r' % (dbfile,))
 
-help_txt = """
+brief_help_txt = """
 Usage: hatrac-async-migrate <cmd> <arg>...
 
 Workflow synopsis:
 
+0. help
 1. plan <num_workers>
 2. perform <dst_hatrac_config_file> <worker_db_file>...
 3. check <worker_db_file>...
 4. merge <worker_db_file>...
 
+Environment:
+
+The file ~/hatrac_config.json describes the existing Hatrac service
+configuration. This includes the service database and the source bulk
+storage backend.
+
+The dst_hatrac_config_file describes the destination bulk storage
+backend, where this migration tool will copy source object content.
+
+To avoid corruption or other malfunction, the source and destination
+bulk storage configurations SHOULD NOT share any actual storage
+resources.
+
+See the full 'help' text for more detailed guidance.
+
+"""
+
+help_txt = brief_help_txt.strip() + """
+
+Migration considerations:
+
 Run steps (1) and (4) as the daemon user with access to the service
-postgres database. Steps (2) and (3) access worker_db_files and
-step (2) accesses source and destination bulk storage.
+postgres database.
+
+Steps (2) and (3) access worker_db_files and step (2) accesses source
+and destination bulk storage.
 
 During steps (1)-(3), the hatrac service can remain online with its
 original hatrac_config.json pointing the service at the original
@@ -693,9 +717,11 @@ def main(cmd, options):
             logger.error('Existing non-zero with %d detected problems' % (num_problems,))
             return 2
         return 0
+    elif cmd == 'help':
+        sys.stdout.write(help_txt)
+        return 0
     else:
-        sys.stderr.write(help_txt)
-        return 1
+        raise ValueError('Unknown sub-command %r' % (cmd,))
 
 if __name__ == '__main__':
     try:
@@ -704,7 +730,7 @@ if __name__ == '__main__':
         res = main(sys.argv[1], sys.argv[2:])
     except Exception as e:
         logger.error(e)
-        #sys.stderr.write(help_txt)
+        sys.stderr.write(brief_help_txt)
         raise
         exit(2)
     exit(res)
