@@ -1,0 +1,780 @@
+#!/usr/bin/python3
+
+import os
+import sys
+import sqlite3
+import json
+import logging
+from dataclasses import dataclass
+from io import BufferedRandom, BytesIO
+import binascii
+import hashlib
+import datetime
+
+from deriva.core import init_logging
+import hatrac
+import hatrac.model.storage.amazons3
+import hatrac.model.storage.filesystem
+import hatrac.model.storage.overlay
+from hatrac.core import sql_literal
+
+logger = logging.getLogger(__name__)
+
+# this must be constant across all workers/restarts!
+chunk_size = 16 * 1024 * 1024
+
+# we pickup ~/hatrac_config.json as SOURCE config
+src_hatrac_config = hatrac.core.config
+dst_hatrac_config = None
+
+def adapt_dict(d):
+    return json.dumps(d)
+
+def convert_json(d):
+    return json.loads(d)
+
+sqlite3.register_adapter(dict, adapt_dict)
+sqlite3.register_converter("json", convert_json)
+
+supported_aux_keys = {'version',}
+
+@hatrac.model.directory.pgsql.db_wrap()
+def generate_worker_dbs(hdir, num_workers=4, conn=None, cur=None):
+    """Generate sqlite3 database(s) with data movement plans for N workers.
+
+    """
+    def generate_worker_db(worker):
+        dbfile = 'hatrac_async_migrate_%d_of_%d.sqlite3' % (worker, num_workers)
+        logger.info('  %d opening %s...' % (worker, dbfile))
+
+        name_pattern = os.getenv('MATCH_NAME_PATTERN', '.*')
+
+        with sqlite3.connect(dbfile) as conn2:
+            cur2 = conn2.cursor()
+            cur2.execute("""
+CREATE TABLE IF NOT EXISTS transfer_chunks (
+   uploadid text NOT NULL,
+   position integer NOT NULL,
+   aux json,
+   UNIQUE(uploadid, position)
+);
+            """)
+            cur2.execute("""
+CREATE TABLE IF NOT EXISTS version_move_state (
+   id integer PRIMARY KEY,
+   nameid integer NOT NULL,
+   nbytes integer NOT NULL,
+   version text NOT NULL,
+   "name" text NOT NULL,
+   metadata json NOT NULL,
+   src_aux json,
+   active_transfer text,
+   dst_aux json
+);
+            """)
+            rcnt = 0
+            cur.execute("""
+SELECT
+  v.id,
+  v.nameid,
+  v.nbytes,
+  v.version,
+  n.name,
+  v.metadata,
+  v.aux
+FROM hatrac.version v
+JOIN hatrac.name n ON (v.nameid = n.id)
+WHERE NOT v.is_deleted
+  AND NOT n.is_deleted
+  AND n.name ~ %(name_pattern)s
+  AND mod(v.id, %(num_workers)d) = %(worker)d;
+            """ % {
+                "num_workers": num_workers,
+                "worker": worker,
+                "name_pattern": sql_literal(name_pattern),
+            })
+            for row in cur:
+                cur2.execute(
+                    """
+INSERT INTO version_move_state
+  (id, nameid, nbytes, version, "name", metadata, src_aux)
+  VALUES(?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT DO NOTHING
+                    """,
+                    row
+                )
+                rcnt += cur2.rowcount
+            logger.info('  %d inserted %d version movement records' % (worker, rcnt))
+
+    cur.execute("""SELECT DISTINCT json_object_keys(aux) FROM hatrac.version""")
+    unsupported_aux_keys = { row[0] for row in cur }.difference(supported_aux_keys)
+    if unsupported_aux_keys:
+        logger.error('Migration not supported with one or more version.aux JSON column keys: %r' % (unsupported_aux_keys,))
+        raise ValueError(unsupported_aux_keys)
+
+    logger.info('Generating %d worker database%s' % (num_workers, 's' if num_workers > 1 else ''))
+    for n in range(num_workers):
+        generate_worker_db(worker=n)
+
+@hatrac.model.directory.pgsql.db_wrap()
+def transactional_merge(src_directory, dbfiles, conn=None, cur=None):
+    num_problems = 0
+    for dbfile in dbfiles:
+        num_problems += check_work(dbfile)
+
+    if num_problems > 0:
+        logger.error('Refusing to merge with %d detected problems in db_worker_files' % (num_problems,))
+        raise ValueError({ 'num_problems': num_problems })
+
+    cur.execute("""SELECT count(*) FROM hatrac.version WHERE aux->>'measured_sha256' IS NOT NULL""")
+    num_measured_sha256 = cur.fetchone()[0]
+    if num_measured_sha256:
+        logger.error('Refusing to merge when hatrac service DB has one or more version.aux "measured_sha256" values')
+        raise ValueError({ 'num_measured_sha256': num_measured_sha256 })
+
+    for dbfile in dbfiles:
+        merge_work(src_directory, dbfile, conn, cur)
+
+    name_pattern = os.getenv('MATCH_NAME_PATTERN', '.*')
+
+    cur.execute(
+        """
+SELECT count(*)
+FROM hatrac.version v
+JOIN hatrac.name n ON (v.nameid = n.id)
+WHERE NOT v.is_deleted
+  AND NOT n.is_deleted
+  AND n.name ~ %(name_pattern)s
+  AND NOT COALESCE(v.aux, '{}')::jsonb ? 'measured_sha256'
+        """ % {
+            "name_pattern": sql_literal(name_pattern),
+        })
+    num_not_migrated = cur.fetchone()[0]
+    if num_not_migrated:
+        logger.error('Aborting merge due to %d non-migrated object versions. Repeat plan and perform steps first?' % (num_not_migrated,))
+        raise ValueError({ "num_not_migrated": num_not_migrated })
+
+    # convert measured_sha256 from migration to metadata if not already present
+    cur.execute(
+        """
+UPDATE hatrac.version v
+SET metadata = COALESCE(metadata, '{}')::jsonb || jsonb_build_object('content-sha256', aux->'measured_sha256')
+WHERE metadata->'content-sha256' IS NULL
+  AND aux->'measured_sha256' IS NOT NULL
+        """)
+
+    # drop measured_sha256 litter from this migration tool, used to detect completion above
+    cur.execute(
+        """
+UPDATE hatrac.version v
+SET aux = aux::jsonb - 'measured_sha256'
+WHERE aux::jsonb ? 'measured_sha256'
+        """)
+
+    # commit happens implicitly due to the db_wrap() decorator
+    return 0
+
+def merge_work(src_directory, dbfile, conn=None, cur=None):
+    logger.info('Merging state from %r' % (dbfile,))
+    with sqlite3.connect(dbfile, detect_types=sqlite3.PARSE_DECLTYPES) as conn2:
+        cur2 = conn2.cursor()
+        cur2.execute("""SELECT id, dst_aux FROM version_move_state""")
+        updates = [ { "id": row[0], "aux": row[1] } for row in cur2 ]
+    cnt = 0
+    for d in updates:
+        cur.execute("""
+UPDATE version SET aux = %(aux)s WHERE id = %(id)s
+        """ % {
+            "id": sql_literal(d["id"]),
+            "aux": sql_literal(json.dumps(d["aux"])),
+        })
+        cnt += cur.rowcount
+    logger.info('Merged aux data for %d rows' % (cnt,))
+
+class Hashers:
+    def __init__(self, src):
+        self.checksums = dict()
+        self.hashers = dict()
+        # always compute sha256
+        self.hashers['sha256'] = hashlib.sha256()
+        if isinstance(src, dict):
+            if 'content-md5' in src:
+                self.checksums['md5'] = src['content-md5']
+                # compute md5 if we have a source one to verify
+                self.hashers['md5'] = hashlib.md5()
+            if 'content-sha256' in src:
+                self.checksums['sha256'] = src['content-sha256']
+        elif isinstance(src, Hashers):
+            self.checksums['sha256'] = src.hashers['sha256'].hexdigest()
+            if 'content-md5' in src.hashers:
+                self.checksums['md5'] = src.hashers['md5'].hexdigest()
+                self.hashers['md5'] = hashlib.md5()
+
+    def update(self, data):
+        for hasher in self.hashers.values():
+            hasher.update(data)
+
+    def is_valid(self):
+        for algo in self.checksums:
+            if self.checksums[algo] != self.hashers[algo].hexdigest():
+                return False
+        return True
+
+def check_work(dbfile):
+    logger.info('Checking state in %r' % (dbfile,))
+    with sqlite3.connect(dbfile, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
+        cur = conn.cursor()
+
+        cur.execute("""SELECT count(*) FROM version_move_state""")
+        num_total = cur.fetchone()[0]
+
+        cur.execute("""SELECT count(*) FROM version_move_state WHERE dst_aux IS NULL""")
+        num_pending = cur.fetchone()[0]
+
+        if num_pending > 0:
+            logger.warning("%d/%d object versions are unprocessed" % (num_pending, num_total))
+
+        cur.execute("""SELECT count(*) FROM version_move_state WHERE metadata -> '$.content-sha256' IS NULL""")
+        num_cant_verify = cur.fetchone()[0]
+
+        if num_cant_verify > 0:
+            logger.info("%d/%d object versions lack preexisting sha256 hashes" % (num_cant_verify, num_total))
+
+        cur.execute("""
+SELECT
+   count(*)
+FROM version_move_state
+WHERE dst_aux -> '$.measured_sha256' != metadata -> '$.content-sha256'
+        """)
+        num_sha256_mismatch=cur.fetchone()[0]
+
+        if num_sha256_mismatch > 0:
+            logger.error("%d/%d object version copies have sha256 MISMATCH" % (num_sha256_mismatch, num_total))
+
+        cur.execute("""
+SELECT
+   count(*),
+   dst_aux -> '$.error'
+FROM version_move_state
+WHERE dst_aux -> '$.error' IS NOT NULL
+GROUP BY dst_aux -> '$.error'
+        """)
+        nums_error = {
+            row[1]: row[0]
+            for row in cur
+        }
+
+        if nums_error:
+            for err, cnt in nums_error.items():
+                logger.error("%d/%d object versions recorded error %r" % (cnt, num_total, err))
+
+        num_problems = num_pending + num_sha256_mismatch
+        for cnt in nums_error.values():
+            num_problems += cnt
+
+        if num_problems > 0:
+            logger.warning("%d/%d object versions have some detected problem" % (num_problems, num_total))
+
+        logger.info("%d/%d object versions look successfully copied" % (num_total - num_problems, num_total))
+        return num_problems
+                
+total_download_bytes = 0
+total_download_s = 0.0000001
+total_upload_bytes = 0
+total_upload_s = 0.0000001
+
+@dataclass
+class Task:
+    id: int
+    nameid: str
+    nbytes: int
+    version: str
+    name: str
+    metadata: dict
+    src_aux: dict
+    active_transfer: str
+    dst_aux: dict
+
+    def copy(self, src_store, dst_store, conn, cur):
+        if self.dst_aux is not None:
+            return
+
+        if self.src_aux is None:
+            self.src_aux = dict()
+
+        unsupported_aux_keys = set(self.src_aux.keys()).difference(supported_aux_keys)
+        if unsupported_aux_keys:
+            logger.error('Refusing to perform migration with one or more unsupported source version.aux keys: %r' % unsupprted_aux_keys)
+            raise ValueError(unsupported_aux_keys)
+
+        if self.active_transfer is None:
+            self.active_transfer = dst_store.create_upload(self.name, self.nbytes, self.metadata, self.version)
+            cur.execute(
+                """UPDATE version_move_state SET active_transfer = ? WHERE id = ?""",
+                (self.active_transfer, self.id)
+            )
+            conn.commit()
+
+        cur.execute(
+            """SELECT COALESCE(max(position), -1) FROM transfer_chunks WHERE uploadid = ?""",
+            (self.active_transfer,)
+        )
+        next_chunk = cur.fetchone()[0] + 1
+
+        hashers = Hashers(self.metadata)
+        self.replay_hash_prefix(hashers, src_store, next_chunk) # for partial xfer recovery
+
+        logger.info('Starting bulk copy %r...' % (self,))
+        next_pos = next_chunk * chunk_size
+        while next_pos < self.nbytes:
+            buf, next_len = self.get_chunk(src_store, self.src_aux, next_pos)
+            hashers.update(buf)
+            self.send_dst_chunk(dst_store, next_chunk, next_len, buf, conn, cur)
+            next_chunk += 1
+            next_pos += next_len
+
+        logger.info('Finalizing transfer %r...' % (self,))
+        self.finalize(dst_store, hashers, conn, cur)
+
+    def hash_content(self, hashers, store, aux, next_chunk=None):
+        if next_chunk is None:
+            nbytes = self.nbytes
+        else:
+            nbytes = min(next_chunk * chunk_size, self.nbytes)
+
+        next_chunk = 0
+        next_pos = 0
+        while next_pos < nbytes:
+            buf, next_len = self.get_chunk(store, aux, next_pos, nbytes=nbytes)
+            hashers.update(buf)
+            next_chunk += 1
+            next_pos += next_len
+
+    def replay_hash_prefix(self, hashers, store, next_chunk):
+        if next_chunk > 0:
+            logger.info('Recovering hasher state on partial transfer up to chunk %d...' % (next_chunk,))
+        self.hash_content(hashers, store, self.src_aux, next_chunk)
+
+    def get_chunk(self, store, aux, next_pos, nbytes=None):
+        global total_download_bytes
+        global total_download_s
+
+        t0 = datetime.datetime.now()
+
+        if nbytes is None:
+            nbytes = self.nbytes
+
+        next_len = min(chunk_size, nbytes - next_pos)
+        get_slice = slice(next_pos, next_pos + next_len)
+
+        buf_len, metadata, data = store.get_content_range(
+            self.name, self.version, {}, # don't need to pass metadata here
+            get_slice, aux, self.nbytes
+        )
+        assert buf_len == next_len, "buf_len %r != next_len %r" % (buf_len, next_len)
+        buf = b''.join(data)
+        logger.info('get_chunk next_pos=%d next_len=%d get_slice=%r len(buf)=%r nbytes=%d' % (
+            next_pos, next_len, get_slice, len(buf), nbytes,
+        ))
+        assert len(buf) == next_len, "len(buf) %r != next_len %r" % (len(buf), next_len)
+
+        t1 = datetime.datetime.now()
+        total_download_bytes += next_len
+        total_download_s += (t1 - t0).total_seconds()
+
+        logger.info("downloaded slice(%x,%x) at %f MiB/sec" % (next_pos, next_pos+next_len, next_len/(t1 - t0).total_seconds()/1024/1024))
+        return buf, next_len
+
+    def send_dst_chunk(self, dst_store, next_chunk, next_len, buf, conn, cur):
+        global total_upload_bytes
+        global total_upload_s
+        t0 = datetime.datetime.now()
+
+        aux = dst_store.upload_chunk_from_file(
+            self.name, self.active_transfer, next_chunk, chunk_size, BytesIO(buf), next_len
+        )
+        cur.execute(
+            """INSERT INTO transfer_chunks (uploadid, position, aux) VALUES(?, ?, ?)""",
+            (self.active_transfer, next_chunk, aux)
+        )
+        conn.commit()
+
+        t1 = datetime.datetime.now()
+        total_upload_bytes += next_len
+        total_upload_s += (t1 - t0).total_seconds()
+
+        next_pos = next_chunk * chunk_size
+        logger.info("uploaded slice(%x,%x) at %f MiB/sec" % (next_pos, next_pos+next_len, next_len/(t1 - t0).total_seconds()/1024/1024))
+
+    def finalize(self, dst_store, hashers, conn, cur):
+        src_valid = hashers.is_valid()
+        if src_valid:
+            logger.info('Source download checksums are valid, finalizing job...')
+            if dst_store.track_chunks:
+                cur.execute(
+                    """SELECT * FROM transfer_chunks WHERE uploadid = ? ORDER BY position""",
+                    (self.active_transfer,)
+                )
+                chunk_data = [
+                    { 'uploadid': row[0], 'position': row[1], 'aux': row[2] }
+                    for row in cur
+                ]
+            else:
+                chunk_data = None
+            metadata = {
+                k: binascii.unhexlify(v)
+                for k, v in self.metadata.items()
+                if k in { 'content-md5', 'content-sha256'}
+            }
+            version = dst_store.finalize_upload(self.name, self.active_transfer, chunk_data, metadata)
+            if version != self.version:
+                aux = { 'version': version }
+            else:
+                aux = dict()
+        else:
+            logger.warning('Download checksums are invalid!')
+            dst_store.cancel_upload(self.name, self.active_transfer)
+            aux = { "error": "source checksum mismatch" }
+
+        self.active_transfer = None
+        cur.execute(
+            """UPDATE version_move_state SET dst_aux = ?, active_transfer = NULL WHERE id = ?""",
+            (aux, self.id)
+        )
+        conn.commit()
+        self.dst_aux = aux
+
+    def verify_destination(self, dst_store, conn, cur):
+        logger.info('Checksumming destination...')
+        dst_hashers = Hashers(self.metadata)
+        self.hash_content(dst_hashers, dst_store, self.dst_aux, next_chunk=None)
+        self.dst_aux["measured_sha256"] = dst_hashers.hashers['sha256'].hexdigest()
+        cur.execute(
+            """UPDATE version_move_state SET dst_aux = ? WHERE id = ?""",
+            (self.dst_aux, self.id)
+        )
+        conn.commit()
+
+def process_work(dbfile, src_store, dst_store):
+    with sqlite3.connect(dbfile, detect_types=sqlite3.PARSE_DECLTYPES) as conn2:
+        cur2 = conn2.cursor()
+        # loop until no pending rows are found
+        while True:
+            cur2.execute("""
+SELECT *
+FROM version_move_state
+WHERE dst_aux IS NULL
+   OR dst_aux -> '$.measured_sha256' IS NULL
+LIMIT 1
+            """)
+            row = cur2.fetchone()
+            if row is None:
+                break
+            task = Task(*row)
+            if task.dst_aux is None:
+                task.copy(src_store, dst_store, conn2, cur2)
+            task.verify_destination(dst_store, conn2, cur2)
+
+        logger.info('work complete for %r' % (dbfile,))
+
+brief_help_txt = """
+Usage: hatrac-async-migrate <cmd> <arg>...
+
+Workflow synopsis:
+
+0. help
+1. plan <num_workers>
+2. perform <dst_hatrac_config_file> <worker_db_file>...
+3. check <worker_db_file>...
+4. merge <worker_db_file>...
+
+Environment:
+
+The file ~/hatrac_config.json describes the existing Hatrac service
+configuration. This includes the service database and the source bulk
+storage backend.
+
+The dst_hatrac_config_file describes the destination bulk storage
+backend, where this migration tool will copy source object content.
+
+To avoid corruption or other malfunction, the source and destination
+bulk storage configurations SHOULD NOT share any actual storage
+resources.
+
+Environment variable MATCH_NAME_PATTERN, using PostgreSQL regexp,
+limits which object names will be included in the migration. This is
+an expert-only feature.
+
+See the full 'help' text for more detailed guidance.
+
+"""
+
+help_txt = brief_help_txt.strip() + """
+
+Migration considerations:
+
+Run steps (1) and (4) as the daemon user with access to the service
+postgres database. Pass identical MATCH_NAME_PATTERN regexp to both
+steps to limit which source service objects are migrated.
+
+Steps (2) and (3) access worker_db_files and step (2) accesses source
+and destination bulk storage.
+
+During steps (1)-(3), the hatrac service can remain online with its
+original hatrac_config.json pointing the service at the original
+(source) storage content. The bulk data is copied to the new storage
+system ahead of time.
+
+Step (4) should be performed with the hatrac service offline, since
+the service configuration needs to be changed in concert with the
+merged database updates.
+
+The use of MATCH_NAME_PATTERN is an expert feature and may create
+invalid migrations. Generally, you MUST migrate all objects in a
+particular storage backend.
+
+See below for more detailed guidance.
+
+
+Commands:
+
+1. The "plan" command creates sqlite3 database files with exported
+state from the configured Hatrac service database. Run this command as
+the hatrac service daemon since it accesses the real hatrac postgresql
+database to read existing object version information.
+
+Repeating this command in the presence of existing output
+worker_db_files will idempotently extend those files with any newly
+discovered hatrac object versions. I.e. if new objects were created
+since the initial planning, they will be added to the set of work to
+be performed.
+
+WARNING: The planning step must be repeated with the same num_workers
+argument and the same service database. Otherwise, the idempotence
+logic will fail to reliably detect existing work items. Hatrac object
+versions are each assigned to exactly one worker file via modular
+arithmetic, approximating a round-robin strategy in a typical case.
+
+2. The "perform" command processes work items in the supplied sqlite3
+database file(s) to actually copy object version content from a source
+to a destination storage system. It tracks progress with updates to
+this sqlite3 database. The worker needs to be able to access both
+source and destination bulk storage, but does not access the service
+database.
+
+The perform step can be invoked repeatedly on a worker_db_file and
+will resume working on the next unprocessed or incompletely processed
+object version. Certain failures may mark object versions in an error
+state which will not be processed further. These problems will also be
+revealed in subsequent check or merge steps, and expert assistance may
+be needed to resolve such issues.
+
+3. The "check" command runs read-only tests against the state of the
+sqlite3 database file(s) to check for migration problems. These tests
+are also performed as a preliminary part of the "merge" command, so
+the check command is a convenience to check in a read-only fashion.
+
+4. The "merge" command idempotently integrates sqlite3 database
+results back into the configured Hatrac service database. Run this
+command as the hatrac service daemon since it accesses the real
+service postgresql database to write backend storage aux information.
+
+Before merging, several kinds of checks are made against the set of
+worker_db_files:
+
+   - no pending/incomplete object versions
+   - no object versions recorded with a source checksum error
+   - no object version metadata conflicts with destination checksums
+
+The merge command attemps to make an atomic update of the service
+database, either merging all state or leaving it unmodified if errors
+are detected. As final atomic check is made with the real service
+database:
+
+   - no object versions untouched by merge process
+
+Thus, merge will fail if any new hatrac object versions were created
+after the most recent migration planning step, even if all object
+versions in the plan were successfully copied.
+
+
+Recommended best practices:
+
+As a precaution, take a backup/dump of the service database prior to
+performing the merge step. Merge is designed to be transactionally
+atomic, but a backup can enable a last minute decision to revert to
+the original source storage setup even after a successful merge.
+
+The check step (3) is optional, but useful to identify any bulk data
+migration problems. The merge step (4) will implicitly check and abort
+if any problems are detected.
+
+The merge step (4) should be done with the hatrac service OFFLINE, and
+the service MUST be restarted with its hatrac_config.json reconfigured
+to match dst_hatrac_config_file. After merge, the hatrac service
+database has been modified to reference the destination storage
+objects and will no longer work with the original source storage.
+
+The worker_db_files are stateful and reflect incremental progress of
+the perform step. If using multiple workers, be careful to maintain
+one authoritative copy of each worker_db_file. Never invoke more than
+one concurrent worker on the same worker_db_file nor on copies of the
+file. Such misuse of a worker_db_file may cause redundent copy work
+and wasted space with orphan object versions in the destination
+storage.
+
+You can also iterate this process by repeating steps 1-3, in which
+case the plan step will idempotently augment the worker_db_file(s)
+with any new hatrac object versions added since the prior plan
+step. Repeating the perform step will then copy these new files to the
+destination, hopefully converging to a fully replicated state.
+
+Choose a num_workers 2x or 3x larger than your anticipated maximum
+worker parallelism. You can later decide to process multiple
+worker_db_files with one worker or distribute them more widely based
+on your effective transfer bandwidth. Due to the naive, round-robin
+distribution, the amount of work may vary between worker_db_files,
+e.g. due to different byte count sizes of the object version tasks.
+
+
+Configuration:
+
+All commands expect ~/hatrac_config.json to describe the existing
+(source) hatrac service database and/or bulk storage.
+
+The "perform" command takes a second destination hatrac config JSON
+file as its first positional argument, providing the destination
+storage configuration to which bulk data will be written.
+
+The "perform" command instantiates hatrac storage backends for both
+source and destination based on these configurations and performs bulk
+data reads and writes using the same backend functions used normally
+by the web service. It also reads and writes the worker_db_files,
+but does not access the hatrac service database.
+
+Environment variable MATCH_NAME_PATTERN defaults to '.*' and is used
+to plan (and merge) a partial migration. During the "plan" step, the
+pattern selects which objects to include in the worker_db_files.  All
+entries in the worker_db_files will be processed in subsequent
+steps. The pattern also limits which objects are validated in the
+hatrac service database in the "merge" step, so that the objects
+excluded by the pattern are not detected as problems.
+
+Viable scenarios for migrating a subset of objects:
+
+1. An entire "amazons3" mapped bucket will be included in the future
+   service config under the same mapping. The namespace(s) mapped to
+   this bucket should be excluded from the migration.
+
+2. The future service config will use the "overlay" backend and map
+   the new migration destination storage on top of the original source
+   storage. In this case, ad hoc subsets are possible. It is the
+   caller's responsibility to delete migrated objects from the source
+   storage, as desired. The migration tool only copies content to the
+   destination, never attempting to modify the source.
+
+Non-expert users should avoid the MATCH_NAME_PATTERN feature and
+always plan to do a full migration.
+
+
+Environmental Considerations:
+
+The "plan" and "merge" commands should be run as the daemon account or
+in an equivalent environment providing access to the postgresql
+database identified in ~/hatrac_config.json.
+
+The "perform" worker environment needs to contain any credentials or
+other provisioned backend resources needed to instantiate the source
+storage backend configured in ~/hatrac_config.json for READ access,
+and the destination storage backend configured in
+<dst_hatrac_config_file> for READ+WRITE access.
+
+"""
+
+def get_store(config):
+    backend = config.get('storage_backend')
+    if backend == 'filesystem':
+        return hatrac.model.storage.filesystem.HatracStorage(config)
+    elif backend == 'amazons3':
+        return hatrac.model.storage.amazons3.HatracStorage(config)
+    elif backend == 'overlay':
+        return hatrac.model.storage.overlay.HatracStorage(config)
+    else:
+        raise ValueError('Invalid storage_backend %r in destination config' % (backend,))
+
+def main(cmd, options):
+    global total_download_bytes
+    global total_download_s
+    global total_upload_bytes
+    global total_upload_s
+
+    init_logging(logging.INFO)
+    if cmd == 'plan':
+        src_directory = hatrac.directory
+        if len(options) < 1:
+            raise ValueError('Missing required num_workers argument')
+        try:
+            num_workers = int(options[0])
+        except:
+            raise ValueError('Invalid num_workers argument')
+        generate_worker_dbs(src_directory, num_workers)
+        return 0
+    elif cmd == 'perform':
+        try:
+            src_store = get_store(hatrac.core.config)
+        except Exception as e:
+            logger.error(e)
+            raise ValueError('Invalid ~/hatrac_config.json source storage config')
+
+        if len(options) < 1:
+            raise ValueError('Missing required dst_hatrac_config_file argument')
+
+        try:
+            with open(options[0], 'r') as f:
+                dst_config = json.load(f)
+                dst_store = get_store(dst_config)
+        except Exception as e:
+            logger.error(e)
+            raise ValueError('Invalid dst_hatrac_config_file destination storage config')
+
+        if len(options) < 2:
+            logger.warning('No work to do without worker_db_file arguments...')
+        for dbfile in options[1:]:
+            process_work(dbfile, src_store, dst_store)
+
+        logger.info("download average %f MiB/sec" % (total_download_bytes/total_download_s/1024/1024))
+        logger.info("upload average %f MiB/sec" % (total_upload_bytes/total_upload_s/1024/1024))
+
+        return 0
+    elif cmd == 'merge':
+        src_directory = hatrac.directory
+        if len(options) < 1:
+            logger.warning('No merge to do without worker_db_file arguments...')
+        return transactional_merge(src_directory, options)
+    elif cmd == 'check':
+        num_problems = 0
+        if len(options) < 1:
+            logger.warning('No checks to do without worker_db_file arguments...')
+        for dbfile in options:
+            num_problems += check_work(dbfile)
+        if num_problems > 0:
+            logger.error('Existing non-zero with %d detected problems' % (num_problems,))
+            return 2
+        return 0
+    elif cmd == 'help':
+        sys.stdout.write(help_txt)
+        return 0
+    else:
+        raise ValueError('Unknown sub-command %r' % (cmd,))
+
+if __name__ == '__main__':
+    try:
+        if len(sys.argv) < 2:
+            raise ValueError('Missing required sub-command')
+        res = main(sys.argv[1], sys.argv[2:])
+    except Exception as e:
+        logger.error(e)
+        sys.stderr.write(brief_help_txt)
+        raise
+        exit(2)
+    exit(res)

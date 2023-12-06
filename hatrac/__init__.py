@@ -14,18 +14,29 @@ from . import model
 def instantiate(config):
     """Return a directory service instance for config."""
     # instantiate storage singleton
+    if model.HatracStorage is None:
+        raise core.HatracConfigError('storage backend not configured')
+
     storage = model.HatracStorage(config)
+
     # instantiate directory singleton
-    directory = model.HatracDirectory(config, storage)
-    return directory
+    try:
+        return model.HatracDirectory(config, storage)
+    except psycopg2.OperationalError as e:
+        raise core.HatracConfigError('metadata directory DB not accessible: %s' % e)
 
 # instantiate a default singleton
 try:
     directory = instantiate(core.config)
-except psycopg2.OperationalError:
+except core.HatracConfigError as e:
+    sys.stderr.write('WARNING: could not instantiate hatrac backend singletons: %s\n' % e)
     directory = None
 
-from . import rest
+try:
+    from . import rest
+except psycopg2.OperationalError as e:
+    sys.stderr.write('WARNING: could not import hatrac rest service module: %s\n' % e)
+    pass
 
 # TODO: conditionalize this if we ever have alternate directory impls
 def deploy_cli(argv, config=None):
