@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import os
 import sys
 import sqlite3
 import json
@@ -45,6 +46,9 @@ def generate_worker_dbs(hdir, num_workers=4, conn=None, cur=None):
     def generate_worker_db(worker):
         dbfile = 'hatrac_async_migrate_%d_of_%d.sqlite3' % (worker, num_workers)
         logger.info('  %d opening %s...' % (worker, dbfile))
+
+        name_pattern = os.getenv('MATCH_NAME_PATTERN', '.*')
+
         with sqlite3.connect(dbfile) as conn2:
             cur2 = conn2.cursor()
             cur2.execute("""
@@ -82,10 +86,12 @@ FROM hatrac.version v
 JOIN hatrac.name n ON (v.nameid = n.id)
 WHERE NOT v.is_deleted
   AND NOT n.is_deleted
+  AND n.name ~ %(name_pattern)s
   AND mod(v.id, %(num_workers)d) = %(worker)d;
             """ % {
                 "num_workers": num_workers,
-                "worker": worker
+                "worker": worker,
+                "name_pattern": sql_literal(name_pattern),
             })
             for row in cur:
                 cur2.execute(
@@ -129,6 +135,8 @@ def transactional_merge(src_directory, dbfiles, conn=None, cur=None):
     for dbfile in dbfiles:
         merge_work(src_directory, dbfile, conn, cur)
 
+    name_pattern = os.getenv('MATCH_NAME_PATTERN', '.*')
+
     cur.execute(
         """
 SELECT count(*)
@@ -136,8 +144,11 @@ FROM hatrac.version v
 JOIN hatrac.name n ON (v.nameid = n.id)
 WHERE NOT v.is_deleted
   AND NOT n.is_deleted
+  AND n.name ~ %(name_pattern)s
   AND NOT COALESCE(v.aux, '{}')::jsonb ? 'measured_sha256'
-        """)
+        """ % {
+            "name_pattern": sql_literal(name_pattern),
+        })
     num_not_migrated = cur.fetchone()[0]
     if num_not_migrated:
         logger.error('Aborting merge due to %d non-migrated object versions. Repeat plan and perform steps first?' % (num_not_migrated,))
@@ -490,6 +501,10 @@ To avoid corruption or other malfunction, the source and destination
 bulk storage configurations SHOULD NOT share any actual storage
 resources.
 
+Environment variable MATCH_NAME_PATTERN, using PostgreSQL regexp,
+limits which object names will be included in the migration. This is
+an expert-only feature.
+
 See the full 'help' text for more detailed guidance.
 
 """
@@ -499,7 +514,8 @@ help_txt = brief_help_txt.strip() + """
 Migration considerations:
 
 Run steps (1) and (4) as the daemon user with access to the service
-postgres database.
+postgres database. Pass identical MATCH_NAME_PATTERN regexp to both
+steps to limit which source service objects are migrated.
 
 Steps (2) and (3) access worker_db_files and step (2) accesses source
 and destination bulk storage.
@@ -512,6 +528,10 @@ system ahead of time.
 Step (4) should be performed with the hatrac service offline, since
 the service configuration needs to be changed in concert with the
 merged database updates.
+
+The use of MATCH_NAME_PATTERN is an expert feature and may create
+invalid migrations. Generally, you MUST migrate all objects in a
+particular storage backend.
 
 See below for more detailed guidance.
 
@@ -631,6 +651,30 @@ source and destination based on these configurations and performs bulk
 data reads and writes using the same backend functions used normally
 by the web service. It also reads and writes the worker_db_files,
 but does not access the hatrac service database.
+
+Environment variable MATCH_NAME_PATTERN defaults to '.*' and is used
+to plan (and merge) a partial migration. During the "plan" step, the
+pattern selects which objects to include in the worker_db_files.  All
+entries in the worker_db_files will be processed in subsequent
+steps. The pattern also limits which objects are validated in the
+hatrac service database in the "merge" step, so that the objects
+excluded by the pattern are not detected as problems.
+
+Viable scenarios for migrating a subset of objects:
+
+1. An entire "amazons3" mapped bucket will be included in the future
+   service config under the same mapping. The namespace(s) mapped to
+   this bucket should be excluded from the migration.
+
+2. The future service config will use the "overlay" backend and map
+   the new migration destination storage on top of the original source
+   storage. In this case, ad hoc subsets are possible. It is the
+   caller's responsibility to delete migrated objects from the source
+   storage, as desired. The migration tool only copies content to the
+   destination, never attempting to modify the source.
+
+Non-expert users should avoid the MATCH_NAME_PATTERN feature and
+always plan to do a full migration.
 
 
 Environmental Considerations:
