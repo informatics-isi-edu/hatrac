@@ -312,6 +312,9 @@ class HatracObject (HatracName):
     def upload_resolve(self, upload):
         return self.directory.upload_resolve(self, upload)
 
+    def rename_from(self, src_object, src_version_ids, copy_acls, client_context=None):
+        return self.directory.object_rename_from(self, src_object, src_version_ids, copy_acls, client_context)
+
 class HatracVersions (object):
     def is_object(self):
         return False
@@ -563,22 +566,6 @@ class connection (psycopg2.extensions.connection):
           JOIN hatrac.upload u ON (u.nameid = n.id)
           WHERE $1 = ANY (n.ancestors)
           ORDER BY n.name, u.id ;
-
-        PREPARE hatrac_version_aux_url_update (int8, text) AS
-          UPDATE hatrac.version v 
-          SET aux = ('{"url":"' || $2 || '"}')::jsonb
-          WHERE id = $1 ;
-
-        PREPARE hatrac_version_aux_url_delete (int8) AS 
-          UPDATE hatrac.version
-          SET aux = aux::jsonb - 'url' 
-          WHERE id = $1 ;
-
-        PREPARE hatrac_version_aux_version_update (int8, text) AS 
-          UPDATE hatrac.version
-          SET aux = CASE WHEN $2 IS NOT NULL THEN 
-          ('{"version":"' || $2 || '"}')::jsonb ELSE aux::jsonb - 'version' END
-          WHERE id = $1 ;
 
 """ % dict(
     owner_acl=ancestor_acl_sql('owner'),
@@ -1065,17 +1052,68 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         self.pc.perform(lambda conn, cur: self._complete_version(conn, cur, resource, version))
         return self.version_resolve(object, version)
 
-    @db_wrap()
-    def version_aux_version_update(self, resource, version, client_context=None, conn=None, cur=None):
-        self._hatrac_version_aux_version_update(conn, cur, resource, version)
+    @db_wrap(enforce_acl=(1, 5, ['owner', 'ancestor_owner']))
+    def object_rename_from(self, dst_object, src_object, src_version_ids, copy_acls, client_context, conn=None, cur=None):
+        """Create, persist, and return HatracObjectVersion instances for each src_version_id."""
+        src_object.enforce_acl(['owner', 'ancestor_owner'], client_context)
+
+        if src_object.name == dst_object.name:
+            raise core.Conflict('Object renaming cannot use the target name as the source_name.')
+
+        if copy_acls:
+            for aclname in src_object._acl_names:
+                self._set_resource_acl(conn, cur, dst_object, aclname, src_object.acls[aclname])
+
+        if src_version_ids:
+            try:
+                src_versions = [ self.version_resolve(src_object, vid) for vid in src_version_ids ]
+            except core.NotFound as ev:
+                raise core.Conflict(ev)
+        else:
+            src_versions = self.object_enumerate_versions(src_object)
+
+        dst_versions = []
+        for src_version in src_versions:
+            # flatten dst aux to refer to src storage config
+            aux = dict(src_version.aux)
+            aux.pop('rename_to', None)
+            aux.setdefault('name', src_object.name)
+            aux.setdefault('version', src_version.version)
+            if aux['version'] == src_version.version:
+                aux.pop('version')
+
+            # idempotent if the stored-as config is consistent...
+            try:
+                dst_version = self.version_resolve(dst_object, src_version.version, False, conn=conn, cur=cur)
+                if (dst_version.aux.get('name'), dst_version.aux.get('version', dst_version.version)) != (aux['name'], aux.get('version', dst_version.version)):
+                    raise core.Conflict('Existing destination version %s conflicts with rename request' % (dst_version.asurl(),))
+            except core.NotFound as ev:
+                dst_version = HatracObjectVersion(
+                    self, dst_object,
+                    **self._create_version(conn, cur, dst_object, src_version.nbytes, src_version.metadata, aux)
+                )
+                self._complete_version(conn, cur, dst_version, src_version.version)
+                dst_versions.append(dst_version)
+
+            # always set dst ACLs to requested state
+            if copy_acls:
+                for aclname in src_version._acl_names:
+                    self._set_resource_acl(conn, cur, dst_version, aclname, src_version.acls[aclname])
+            else:
+                self._set_resource_acl_role(conn, cur, dst_version, 'owner', client_context.client)
+
+            # always revise src metadata to redirect to dst
+            self._update_resource_aux(conn, cur, src_version, {"rename_to": [dst_object.name, dst_version.version]})
+
+        return dst_versions
 
     @db_wrap()
-    def version_aux_url_update(self, resource, url_prefix, client_context=None, conn=None, cur=None):
-        self._hatrac_version_aux_url_update(conn, cur, resource, url_prefix)
+    def version_aux_update(self, resource, updates, client_context=None, conn=None, cur=None):
+        self._update_reource_aux(conn, cur, resource, updates)
 
     @db_wrap()
-    def version_aux_url_delete(self, resource, client_context=None, conn=None, cur=None):
-        self._hatrac_version_aux_url_delete(conn, cur, resource)
+    def version_aux_pop(self, resource, fieldname, client_context=None, conn=None, cur=None):
+        self._pop_resource_aux(conn, cur, resource, fieldname)
 
     @db_wrap(enforce_acl=(1, 3, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
@@ -1141,13 +1179,17 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
             raise core.NotFound('Resource %s is not available.' % objversion)
+        name = objversion.aux.get('name', object.name)
+        version = objversion.aux.get('version', objversion.version)
         if get_data:
-            nbytes, metadata, data = self.storage.get_content_range(object.name,
-                                                                    objversion.version,
-                                                                    objversion.metadata,
-                                                                    get_slice,
-                                                                    objversion.aux,
-                                                                    objversion.nbytes)
+            nbytes, metadata, data = self.storage.get_content_range(
+                name,
+                version,
+                objversion.metadata,
+                get_slice,
+                objversion.aux,
+                objversion.nbytes
+            )
         else:
             nbytes = objversion.nbytes
             metadata = objversion.metadata
@@ -1173,7 +1215,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         """Return a HatracObjectVersion instance corresponding to referenced version.
         """
         return HatracObjectVersion(
-            self, 
+            self,
             object, 
             **self._version_lookup(conn, cur, object, version, not raise_notfound)
         )
@@ -1257,7 +1299,24 @@ WHERE n.id = %(id)s ;
 )
         )
 
+    def _update_resource_aux(self, conn, cur, resource, updates):
+        if resource.aux is None:
+            resource.aux = dict()
+        resource.aux.update(updates)
+        cur.execute("""
+UPDATE hatrac.%(table)s n
+SET aux = %(aux)s
+WHERE n.id = %(id)s ;
+""" % dict(
+    table=sql_identifier(resource._table_name),
+    id=sql_literal(resource.id),
+    aux=sql_literal(json.dumps(resource.aux)),
+)
+        )
+
     def _pop_resource_metadata(self, conn, cur, resource, fieldname):
+        if resource.aux is None:
+            resource.aux = dict()
         resource.metadata.pop(fieldname)
         cur.execute("""
 UPDATE hatrac.%(table)s n
@@ -1270,6 +1329,19 @@ WHERE n.id = %(id)s ;
 )
         )
         
+    def _pop_resource_aux(self, conn, cur, resource, fieldname):
+        resource.aux.pop(fieldname)
+        cur.execute("""
+UPDATE hatrac.%(table)s n
+SET aux = %(metadata)s
+WHERE n.id = %(id)s ;
+""" % dict(
+    table=sql_identifier(resource._table_name),
+    id=sql_literal(resource.id),
+    aux=sql_literal(json.dumps(resource.aux)),
+)
+        )
+
     def _set_resource_acl_role(self, conn, cur, resource, access, role):
         if access not in resource._acl_names:
             raise core.BadRequest('Invalid ACL name %s for %s.' % (access, resource))
@@ -1339,11 +1411,11 @@ RETURNING *
         )
         return list(cur)[0]
 
-    def _create_version(self, conn, cur, object, nbytes=None, metadata={}):
+    def _create_version(self, conn, cur, object, nbytes=None, metadata={}, aux=None):
         cur.execute("""
 INSERT INTO hatrac.version
-(nameid, nbytes, metadata, is_deleted)
-VALUES (%(nameid)s, %(nbytes)s, %(metadata)s, True)
+(nameid, nbytes, metadata, is_deleted, aux)
+VALUES (%(nameid)s, %(nbytes)s, %(metadata)s, True, %(aux)s)
 RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS "ancestors"
 """ % dict(
     name=sql_literal(object.name),
@@ -1351,7 +1423,8 @@ RETURNING *, %(name)s AS "name", %(pid)s AS pid, ARRAY[%(ancestors)s]::int8[] AS
     pid=sql_literal(object.pid),
     ancestors=','.join([sql_literal(a) for a in object.ancestors]),
     nbytes=nbytes is not None and sql_literal(int(nbytes)) or 'NULL::int8',
-    metadata=sql_literal(metadata.to_sql())
+    metadata=sql_literal(metadata.to_sql()),
+    aux=sql_literal(json.dumps(aux)),
 )
         )
         return list(cur)[0]
@@ -1405,6 +1478,7 @@ VALUES (%(uploadid)s, %(position)s, %(aux)s)
             sql_literal(version),
             sql_literal(is_deleted)
         ))
+        resource.version = version
 
     def _delete_name(self, conn, cur, resource):
         cur.execute("EXECUTE hatrac_delete_name(%s);" % sql_literal(resource.id))
@@ -1504,14 +1578,3 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(int(resource.id))
         ))
         return list(cur)
-
-    def _hatrac_version_aux_url_update(self, conn, cur, resource, url_prefix):
-        cur.execute("EXECUTE hatrac_version_aux_url_update(%s, %s);" %
-                    (sql_literal(resource.id), sql_literal(url_prefix + resource.asurl())))
-
-    def _hatrac_version_aux_url_delete(self, conn, cur, resource):
-        cur.execute("EXECUTE hatrac_version_aux_url_delete(%s);" % (sql_literal(resource.id)))
-
-    def _hatrac_version_aux_version_update(self, conn, cur, resource, version):
-        cur.execute("EXECUTE hatrac_version_aux_version_update(%s, %s);" %
-                    (sql_literal(resource.id), sql_literal(version)))

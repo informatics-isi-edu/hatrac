@@ -100,7 +100,13 @@ class HatracMigrateCLI (BaseCLI):
                 if name.is_object():
                     versions = self.directory.object_enumerate_versions(name)
                     for version in versions:
-                        if linked:
+                        if version.aux.get("rename_to"):
+                            # the renamed object does not need to be migrated...
+                            # instead, content will be migrated under the new/renamed name
+                            # the renamed record is a stub to forward to the new one
+                            # and does not use its own backing storage after migration
+                            pass
+                        elif linked:
                             url = version.aux.get("url")
                             if url:
                                 objects[url] = version
@@ -147,7 +153,7 @@ class HatracMigrateCLI (BaseCLI):
                 else:
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(msg)
-                    self.directory.version_aux_url_update(obj, base_url)
+                    self.directory.version_aux_update(obj, {"url": base_url + obj.asurl()})
                     succeeded += 1
             except Exception as e:
                 logger.warning(
@@ -356,9 +362,11 @@ class HatracMigrateCLI (BaseCLI):
                 # 3.3 Post-transfer database updates
                 # We only care about storing the returned aux version in the non-filesystem backend case
                 version = version if self.backend != "filesystem" else None
-                self.directory.version_aux_version_update(obj, version)
+                self.directory.version_aux_update(obj, {"version": version})
                 # On a successful transfer, we will automatically delete the aux redirect url
-                self.directory.version_aux_url_delete(obj)
+                # We will also forget about any legacy storage name inherited from the original system
+                self.directory.version_aux_pop(obj, "name")
+                self.directory.version_aux_pop(obj, "url")
                 success = True
             except Exception as e:
                 logger.error("Error during transfer of [%s] to backend storage: %s" %

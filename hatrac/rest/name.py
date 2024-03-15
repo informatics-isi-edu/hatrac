@@ -8,6 +8,8 @@
 
 """
 
+import json
+from typing import NamedTuple
 from flask import request, make_response, g as hatrac_ctx
 
 from .. import core
@@ -44,6 +46,11 @@ class NameVersion (RestHandler):
         resource = self.resolve_version(
             path, name, version
         )
+        while resource.aux.get('rename_to'):
+            name, version = resource.aux['rename_to']
+            resource = self.resolve_version(
+                name, '', version
+            )
         self.set_http_etag(resource.version)
         self.http_check_preconditions()
         body, status, headers = self.get_content(
@@ -97,6 +104,37 @@ _NameVersions_view = app.route(
     '/<hpath:path>/<hstring:name>;versions'
 )(NameVersions.as_view('NameVersions')))
 
+class ObjectRenameCommand (NamedTuple):
+    command: str
+    source_name: str
+    source_versions: [ str ] = []
+    copy_acls: bool = False
+
+    @classmethod
+    def from_json(cls, doc):
+        """Do some runtime validation of input doc (i.e. decoded JSON) to instantiate this class"""
+        if not isinstance(doc, dict):
+            raise ValueError('Input must be an object (a.k.a. dictionary or hash-mapping).')
+        extra_keys = set(doc.keys()).difference(set(cls._fields))
+        if extra_keys:
+            raise ValueError('Unexpected field(s): %r' % (', '.join(extra_keys),))
+        missing_keys = set(cls._fields).difference(cls._field_defaults.keys()).difference(doc.keys())
+        if missing_keys:
+            raise ValueError('Missing required field(s): %r' % (', '.join(missing_keys),))
+        res = cls(**doc)
+        field_idx = { cls._fields[i]: i for i in range(len(cls._fields)) }
+        for k, t in cls.__annotations__.items():
+            v = res[field_idx[k]]
+            if isinstance(t, type):
+                if not isinstance(v, t):
+                    raise ValueError('Field %r value %r must be a %s' % (k, v, {'str': 'string', 'bool': 'boolean'}[t.__name__]))
+            elif isinstance(t, list) and len(t) == 1:
+                if not isinstance(v, list):
+                    raise ValueError('Field %r value %r must be a list' % (k, v))
+                for e in v:
+                    if not isinstance(e, t[0]):
+                        raise ValueError('Field %r element %r must be a %s' % (k, e, {'str': 'string'}[t[0].__name__]))
+        return res
 
 class Name (RestHandler):
     """Represent Hatrac resources addressed by bare names.
@@ -106,6 +144,62 @@ class Name (RestHandler):
 
     def __init__(self):
         RestHandler.__init__(self)
+
+    def post(self, name="", path="/"):
+        """Perform advanced object-creation command
+
+        """
+        self.enforce_firewall('create')
+        in_content_type = self.in_content_type()
+
+        if in_content_type != 'application/json':
+            raise core.BadRequest('POST method requires application/json object-creation command input.')
+
+        # TODO: refactor if we add other command modes in the future...
+        try:
+            cmd_doc = json.loads(request.stream.read().decode())
+            cmd = ObjectRenameCommand.from_json(cmd_doc)
+        except ValueError as ev:
+            raise core.BadRequest('Error reading JSON input: %s' % ev)
+
+        if cmd.command != 'rename_from':
+            raise core.BadRequest('Invalid command input. Field "command" value %r not understood.' % (cmd.command,))
+
+        src_object = self.resolve(cmd.source_name, '', False)
+        if not src_object or not src_object.is_object():
+            raise core.Conflict('Request input field "source_name"=%r must name an existing object.' % (cmd.source_name,))
+
+        resource = self.resolve(path, name, False)
+        if not resource:
+            make_parents = request.args.get('parents', 'false').lower() == 'true'
+
+            # check precondition for current state of resource not existing
+            self.http_check_preconditions('PUT', False)
+            resource = hatrac_ctx.hatrac_directory.create_name(
+                self._fullname(path, name),
+                True, # is object
+                make_parents,
+                hatrac_ctx.webauthn2_context
+            )
+        elif not resource.is_object():
+            raise core.Conflict('Existing namespace cannot be a target for advanced object-creation commands.')
+        else:
+            try:
+                # check preconditions for current state of version existing
+                version = resource.get_current_version()
+                self.set_http_etag(version.version)
+                self.http_check_preconditions('PUT')
+            except core.Conflict:
+                # check precondition for current state of version not existing
+                self.http_check_preconditions('PUT', False)
+
+        resources = resource.rename_from(
+            src_object,
+            cmd.source_versions,
+            cmd.copy_acls,
+            hatrac_ctx.webauthn2_context
+        )
+        return self.create_multi_response(resources)
 
     def put(self, name="", path="/"):
         """Create object version or empty zone."""
@@ -211,6 +305,11 @@ class Name (RestHandler):
         )
         if resource.is_object():
             resource = resource.get_current_version()
+            while resource.aux.get('rename_to'):
+                name, version = resource.aux['rename_to']
+                resource = self.resolve_version(
+                    name, '', version
+                )
             self.set_http_etag(resource.version)
         else:
             self.set_http_etag(
