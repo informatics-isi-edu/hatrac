@@ -361,12 +361,15 @@ class HatracMigrateCLI (BaseCLI):
 
                 # 3.3 Post-transfer database updates
                 # We only care about storing the returned aux version in the non-filesystem backend case
-                version = version if self.backend != "filesystem" else None
-                self.directory.version_aux_update(obj, {"version": version})
+                if self.backend != "filesystem":
+                    self.directory.version_aux_update(obj, {"version": version})
+                else:
+                    self.directory.version_aux_pop(obj, "version", None)
                 # On a successful transfer, we will automatically delete the aux redirect url
                 # We will also forget about any legacy storage name inherited from the original system
-                self.directory.version_aux_pop(obj, "name")
-                self.directory.version_aux_pop(obj, "url")
+                self.directory.version_aux_pop(obj, "hname", None)
+                self.directory.version_aux_pop(obj, "hversion", None)
+                self.directory.version_aux_pop(obj, "url", None)
                 success = True
             except Exception as e:
                 logger.error("Error during transfer of [%s] to backend storage: %s" %

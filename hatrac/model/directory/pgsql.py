@@ -58,6 +58,9 @@ from webauthn2.util import jsonWriter
 from ...core import coalesce, Metadata, sql_literal, sql_identifier, Redirect, hatrac_debug, web_storage, negotiated_content_type
 from ... import core
 
+class _Sentinel (object): pass
+_sentinel = _Sentinel()
+
 def regexp_escape(s):
     safe = set(
         [ chr(i) for i in range(ord('a'), ord('z')+1) ]
@@ -221,11 +224,11 @@ class HatracName (object):
         """Delete resource and its children."""
         return self.directory.delete_name(self, client_context)
 
-    def update_metadata(self, updates, client_context):
-        self.directory.update_resource_metadata(self, updates, client_context)
+    def update_metadata(self, client_context, updates):
+        self.directory.update_resource_metadata(self, client_context, updates)
 
-    def pop_metadata(self, fieldname, client_context):
-        self.directory.pop_resource_metadata(self, fieldname, client_context)
+    def pop_metadata(self, client_context, fieldname, default=_sentinel):
+        self.directory.pop_resource_metadata(self, client_context, fieldname, default)
         
     def set_acl(self, access, acl, client_context):
         self.directory.set_resource_acl(self, access, acl, client_context)
@@ -1074,20 +1077,38 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
 
         dst_versions = []
         for src_version in src_versions:
-            # flatten dst aux to refer to src storage config
-            aux = dict(src_version.aux)
-            aux.pop('rename_to', None)
-            aux.setdefault('name', src_object.name)
-            aux.setdefault('version', src_version.version)
-            if aux['version'] == src_version.version:
-                aux.pop('version')
+            # sanity check while allowing idempotent repetition of same rename request
+            if 'rename_to' in src_version.aux:
+                hname, hversion = src_version.aux['rename_to']
+                if hname != dst_object.name or hversion != src_version.version:
+                    raise core.Conflict("Source %s has conflicting rename target %s:%s" % (
+                        src_version.asurl(),
+                        hname,
+                        hversion,
+                    ))
 
-            # idempotent if the stored-as config is consistent...
+            # fabricate dst aux to refer to src storage
+            aux = dict(src_version.aux)
+            aux.setdefault('hname', src_object.name)
+            if aux.get('hversion', src_version.version) == src_version.version:
+                # avoid copying hversion when it will match synchronized dst_version.version 
+                aux.pop('hversion', None)
+            else:
+                # for safety, if an alien hversion has been configured by some other means...
+                aux['hversion'] = src_version.version 
+            # never copy over the rename_to...
+            aux.pop('rename_to', None)
+
             try:
+                # sanity check existing dst_version for idempotent creation
                 dst_version = self.version_resolve(dst_object, src_version.version, False, conn=conn, cur=cur)
-                if (dst_version.aux.get('name'), dst_version.aux.get('version', dst_version.version)) != (aux['name'], aux.get('version', dst_version.version)):
+                if ( (dst_version.aux.get('hname', dst_version.name),
+                      dst_version.aux.get('hversion', dst_version.version))
+                     != (src_object.name,
+                         src_version.version) ):
                     raise core.Conflict('Existing destination version %s conflicts with rename request' % (dst_version.asurl(),))
             except core.NotFound as ev:
+                # create dst_version
                 dst_version = HatracObjectVersion(
                     self, dst_object,
                     **self._create_version(conn, cur, dst_object, src_version.nbytes, src_version.metadata, aux)
@@ -1112,8 +1133,8 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         self._update_reource_aux(conn, cur, resource, updates)
 
     @db_wrap()
-    def version_aux_pop(self, resource, fieldname, client_context=None, conn=None, cur=None):
-        self._pop_resource_aux(conn, cur, resource, fieldname)
+    def version_aux_pop(self, resource, fieldname, default=_sentinel, client_context=None, conn=None, cur=None):
+        self._pop_resource_aux(conn, cur, resource, fieldname, default)
 
     @db_wrap(enforce_acl=(1, 3, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
@@ -1179,12 +1200,12 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
             raise core.NotFound('Resource %s is not available.' % objversion)
-        name = objversion.aux.get('name', object.name)
-        version = objversion.aux.get('version', objversion.version)
+        hname = objversion.aux.get('hname', object.name)
+        hversion = objversion.aux.get('hversion', objversion.version)
         if get_data:
             nbytes, metadata, data = self.storage.get_content_range(
-                name,
-                version,
+                hname,
+                hversion,
                 objversion.metadata,
                 get_slice,
                 objversion.aux,
@@ -1237,13 +1258,13 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         else:
             raise core.Conflict('Object %s currently has no content.' % object)
 
-    @db_wrap(enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
-    def update_resource_metadata(self, resource, updates, client_context, conn=None, cur=None):
+    @db_wrap(enforce_acl=(1, 2, ['owner', 'ancestor_owner']))
+    def update_resource_metadata(self, resource, client_context, updates, conn=None, cur=None):
         self._update_resource_metadata(conn, cur, resource, updates)
         
-    @db_wrap(enforce_acl=(1, 3, ['owner', 'ancestor_owner']))
-    def pop_resource_metadata(self, resource, fieldname, client_context, conn=None, cur=None):
-        self._pop_resource_metadata(conn, cur, resource, fieldname)
+    @db_wrap(enforce_acl=(1, 2, ['owner', 'ancestor_owner']))
+    def pop_resource_metadata(self, resource, client_context, fieldname, default=_sentinel, conn=None, cur=None):
+        self._pop_resource_metadata(conn, cur, resource, fieldname, default)
         
     @db_wrap(enforce_acl=(1, 4, ['owner', 'ancestor_owner']))
     def set_resource_acl_role(self, resource, access, role, client_context, conn=None, cur=None):
@@ -1314,10 +1335,13 @@ WHERE n.id = %(id)s ;
 )
         )
 
-    def _pop_resource_metadata(self, conn, cur, resource, fieldname):
-        if resource.aux is None:
-            resource.aux = dict()
-        resource.metadata.pop(fieldname)
+    def _pop_resource_metadata(self, conn, cur, resource, fieldname, default=_sentinel):
+        if resource.metadata is None:
+            resource.metadata = dict()
+        if not isinstance(default, _Sentinel):
+            resource.metadata.pop(fieldname, default)
+        else:
+            resource.metadata.pop(fieldname)
         cur.execute("""
 UPDATE hatrac.%(table)s n
 SET metadata = %(metadata)s
@@ -1329,8 +1353,13 @@ WHERE n.id = %(id)s ;
 )
         )
         
-    def _pop_resource_aux(self, conn, cur, resource, fieldname):
-        resource.aux.pop(fieldname)
+    def _pop_resource_aux(self, conn, cur, resource, fieldname, default=_sentinel):
+        if resource.aux is None:
+            resource.aux = dict()
+        if not isinstance(default, _Sentinel):
+            resource.aux.pop(fieldname, default)
+        else:
+            resource.aux.pop(fieldname)
         cur.execute("""
 UPDATE hatrac.%(table)s n
 SET aux = %(metadata)s

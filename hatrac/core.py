@@ -264,6 +264,11 @@ class MetadataBytes (bytes):
     def encode(self):
         return self
 
+
+class _Sentinel (object): pass
+_sentinel = _Sentinel()
+
+
 class Metadata (dict):
 
     _all_keys = {
@@ -400,10 +405,13 @@ class Metadata (dict):
             k = k.lower()
             if k not in self or self[k] != v:
                 self[k.lower()] = v
-            
-    def pop(self, k):
+
+    def pop(self, k, default=_sentinel):
         k = k.lower()
-        return dict.pop(self, k)
+        if not isinstance(default, _Sentinel):
+            return dict.pop(self, k, default)
+        else:
+            return dict.pop(self, k)
 
 
 class Redirect(object):
