@@ -110,31 +110,32 @@ class ObjectRenameCommand (NamedTuple):
     source_versions: [ str ] = []
     copy_acls: bool = False
 
-    @classmethod
-    def from_json(cls, doc):
-        """Do some runtime validation of input doc (i.e. decoded JSON) to instantiate this class"""
-        if not isinstance(doc, dict):
-            raise ValueError('Input must be an object (a.k.a. dictionary or hash-mapping).')
-        extra_keys = set(doc.keys()).difference(set(cls._fields))
-        if extra_keys:
-            raise ValueError('Unexpected field(s): %r' % (', '.join(extra_keys),))
-        missing_keys = set(cls._fields).difference(cls._field_defaults.keys()).difference(doc.keys())
-        if missing_keys:
-            raise ValueError('Missing required field(s): %r' % (', '.join(missing_keys),))
-        res = cls(**doc)
-        field_idx = { cls._fields[i]: i for i in range(len(cls._fields)) }
-        for k, t in cls.__annotations__.items():
-            v = res[field_idx[k]]
-            if isinstance(t, type):
-                if not isinstance(v, t):
-                    raise ValueError('Field %r value %r must be a %s' % (k, v, {'str': 'string', 'bool': 'boolean'}[t.__name__]))
-            elif isinstance(t, list) and len(t) == 1:
-                if not isinstance(v, list):
-                    raise ValueError('Field %r value %r must be a list' % (k, v))
-                for e in v:
-                    if not isinstance(e, t[0]):
-                        raise ValueError('Field %r element %r must be a %s' % (k, e, {'str': 'string'}[t[0].__name__]))
-        return res
+def ObjectRenameCommand_from_json(cls, doc):
+    """Do some runtime validation of input doc (i.e. decoded JSON) to instantiate a rename command"""
+    # HACK: convert @classmethod to standalone function to bypass issues with older python versions
+    cls = ObjectRenameCommand
+    if not isinstance(doc, dict):
+        raise ValueError('Input must be an object (a.k.a. dictionary or hash-mapping).')
+    extra_keys = set(doc.keys()).difference(set(cls._fields))
+    if extra_keys:
+        raise ValueError('Unexpected field(s): %r' % (', '.join(extra_keys),))
+    missing_keys = set(cls._fields).difference(cls._field_defaults.keys()).difference(doc.keys())
+    if missing_keys:
+        raise ValueError('Missing required field(s): %r' % (', '.join(missing_keys),))
+    res = cls(**doc)
+    field_idx = { cls._fields[i]: i for i in range(len(cls._fields)) }
+    for k, t in cls.__annotations__.items():
+        v = res[field_idx[k]]
+        if isinstance(t, type):
+            if not isinstance(v, t):
+                raise ValueError('Field %r value %r must be a %s' % (k, v, {'str': 'string', 'bool': 'boolean'}[t.__name__]))
+        elif isinstance(t, list) and len(t) == 1:
+            if not isinstance(v, list):
+                raise ValueError('Field %r value %r must be a list' % (k, v))
+            for e in v:
+                if not isinstance(e, t[0]):
+                    raise ValueError('Field %r element %r must be a %s' % (k, e, {'str': 'string'}[t[0].__name__]))
+    return res
 
 class Name (RestHandler):
     """Represent Hatrac resources addressed by bare names.
@@ -158,7 +159,7 @@ class Name (RestHandler):
         # TODO: refactor if we add other command modes in the future...
         try:
             cmd_doc = json.loads(request.stream.read().decode())
-            cmd = ObjectRenameCommand.from_json(cmd_doc)
+            cmd = ObjectRenameCommand_from_json(cmd_doc)
         except ValueError as ev:
             raise core.BadRequest('Error reading JSON input: %s' % ev)
 
