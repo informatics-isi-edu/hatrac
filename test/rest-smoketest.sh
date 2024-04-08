@@ -378,6 +378,7 @@ sha=$(mysha256sum < $0)
 script_size=$(stat -c "%s" $0)
 
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
+dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
 obj1_vers0="$(cat ${RESPONSE_CONTENT})"
 obj1_vers0="${obj1_vers0#/hatrac}"
 
@@ -425,6 +426,50 @@ dotest_anon "200::*::*" "${obj1_vers0}"
 dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1;versions"
 dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
 dotest_anon "200::*::*" "${obj1_vers0};metadata/"
+
+# test object rename w/ default ACLs
+cat > ${TEST_DATA} <<EOF
+{
+  "command": "rename_from",
+  "source_name": "/ns-${RUNKEY}/foo/obj1"
+}
+EOF
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/obj1rename" -T ${TEST_DATA} -X POST -H "Content-Type: application/json"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename"
+# access is controlled by new rename target's default ACLs
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1rename"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1"
+# revised ACL on rename target affects both source and target URLs
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1rename;acl/subtree-read" -T ${TEST_ACL_ANON} -H "Content-Type: application/json"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
+# test idempotence
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1rename" -T ${TEST_DATA} -X POST -H "Content-Type: application/json"
+# test refusal to rename twice
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1rename2" -T ${TEST_DATA} -X POST -H "Content-Type: application/json"
+
+# test transitive rename and copied ACLs
+cat > ${TEST_DATA} <<EOF
+{
+  "command": "rename_from",
+  "source_name": "/ns-${RUNKEY}/foo/obj1rename"
+}
+EOF
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/obj1rename2" -T ${TEST_DATA} -X POST -H "Content-Type: application/json"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename2"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename2"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename2"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename2"
+# copied ACL on rename target affects source and target URLs
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1rename;acl/subtree-read" -X DELETE
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename2"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
 
 # metadata on object-version
 dotest "200::application/json::*" "${obj1_vers0};metadata/"
