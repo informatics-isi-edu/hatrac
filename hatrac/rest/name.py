@@ -9,7 +9,7 @@
 """
 
 import json
-from typing import NamedTuple
+from typing import NamedTuple, List
 from flask import request, make_response, g as hatrac_ctx
 
 from .. import core
@@ -107,7 +107,7 @@ _NameVersions_view = app.route(
 class ObjectRenameCommand (NamedTuple):
     command: str
     source_name: str
-    source_versions: [ str ] = []
+    source_versions: List[ str ] = []
     copy_acls: bool = False
 
 def ObjectRenameCommand_from_json(cls, doc):
