@@ -110,7 +110,7 @@ class ObjectRenameCommand (NamedTuple):
     source_versions: List[ str ] = []
     copy_acls: bool = False
 
-def ObjectRenameCommand_from_json(cls, doc):
+def ObjectRenameCommand_from_json(doc):
     """Do some runtime validation of input doc (i.e. decoded JSON) to instantiate a rename command"""
     # HACK: convert @classmethod to standalone function to bypass issues with older python versions
     cls = ObjectRenameCommand
