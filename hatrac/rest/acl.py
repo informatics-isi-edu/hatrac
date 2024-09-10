@@ -6,6 +6,7 @@
 
 import json
 from flask import request, g as hatrac_ctx
+from urllib.parse import unquote
 
 from . import app
 from .core import RestHandler, \
@@ -20,6 +21,7 @@ class ACLEntry (RestHandler):
     def put(self, access, role, path="/", name="", version=""):
         """Add entry to ACL."""
         self.enforce_firewall('manage_acl')
+        role = unquote(role)
         resource = self.resolve_name_or_version(
             path, name, version
         )
@@ -35,6 +37,7 @@ class ACLEntry (RestHandler):
     def delete(self, access, role, path="/", name="", version=""):
         """Remove entry from ACL."""
         self.enforce_firewall('manage_acl')
+        role = unquote(role)
         resource = self.resolve_name_or_version(
             path, name, version
         )
@@ -50,6 +53,7 @@ class ACLEntry (RestHandler):
     def get(self, access, role, path="/", name="", version=""):
         """Get entry from ACL."""
         self.get_body = False if request.method == 'HEAD' else True
+        role = unquote(role)
         resource = self.resolve_name_or_version(path, name, version).acls[access]
         self.set_http_etag(hash_list(resource))
         resource = resource[role]
