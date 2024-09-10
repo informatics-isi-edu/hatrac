@@ -587,6 +587,21 @@ class RestHandler (flask.views.MethodView):
         }
         return (body, status, headers)
 
+    def create_multi_response(self, resources):
+        """Form response for batch resource creation request."""
+        if resources:
+            status = 201
+            body = '\n'.join([ resource.asurl() for resource in resources ]) + '\n'
+            headers = {
+                'content-type': 'text/uri-list',
+                'content-length': len(body),
+            }
+        else:
+            status = 204
+            body = ''
+            headers = {}
+        return (body, status, headers)
+
     def delete_response(self):
         """Form response for deletion request."""
         return ('', 204)
