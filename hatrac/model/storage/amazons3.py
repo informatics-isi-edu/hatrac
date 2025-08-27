@@ -200,7 +200,10 @@ class BucketConfig (object):
                 session = boto3.session.Session(**session_config)
             if session is None:
                 session = boto3.session.Session()
-            client_config = bucket_config.get("client_config", dict())
+            # this ensures the correct signature_version for S3 is set in the client, if not present
+            client_config = bucket_config.get("client_config", {"config":{"signature_version": "s3v4"}})
+            client_config.update({"config": session.Config(**client_config['config'])})
+
             self.client = session.client("s3", **client_config)
             bucket_config["s3_boto_client"] = self.client
 
