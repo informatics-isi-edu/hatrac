@@ -17,8 +17,8 @@ setup(
         "flask>=2.3.3",
         "psycopg2",
         "webauthn2",
-        "boto3<=1.34.157",
-        "botocore<=1.34.157",
+        "boto3",
+        "botocore"
     ],
     maintainer_email="isrd-support@isi.edu",
     license='Apache 2.0',
