@@ -98,7 +98,7 @@ class ACL (set):
     def __getitem__(self, role):
         if role not in self:
             raise core.NotFound(
-                'ACL member %s;acl/%s/%s not found.' % (self.resource, self.access, role)
+                'ACL member %s;acl/%s/%s not found.' % (self.resource, self.access, urllib.parse.quote(role, safe=''))
             )
         entry = ACLEntry(role + '\n')
         entry.resource = self.resource

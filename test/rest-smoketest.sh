@@ -49,9 +49,17 @@ RESPONSE_HEADERS=/tmp/${RUNKEY}-response-headers
 RESPONSE_CONTENT=/tmp/${RUNKEY}-response-content
 TEST_DATA=/tmp/${RUNKEY}-test-data
 TEST_ACL_ANON=/tmp/${RUNKEY}-test-acl-anon.json
+TEST_ACL_URI=/tmp/${RUNKEY}-test-acl-uri.json
 
 cat > ${TEST_ACL_ANON} <<EOF
 ["*"]
+EOF
+
+test_acl_uri_member='scheme://authority/path'
+test_acl_uri_member_quoted='scheme%3A%2F%2Fauthority%2Fpath'
+
+cat > ${TEST_ACL_URI} <<EOF
+["unlikely value", "${test_acl_uri_member}"]
 EOF
 
 cleanup()
@@ -833,7 +841,12 @@ dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/owner"
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/owner" --head
 dotest "200::application/json::*" "/ns-${RUNKEY}/foo;acl/create"
-dotest "404::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create" -T ${TEST_ACL_URI} -H "Content-Type: application/json"
+dotest "200::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/${test_acl_uri_member_quoted}"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/${test_acl_uri_member_quoted}" -X DELETE
+dotest "404::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/${test_acl_uri_member_quoted}"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/${test_acl_uri_member_quoted}" -X PUT
+dotest "200::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/${test_acl_uri_member_quoted}"
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X PUT
 dotest "200::text/plain*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" --head
 dotest "204::*::*" "/ns-${RUNKEY}/foo/bar;acl/create/DUMMY" -X DELETE -H "If-Match: *"

@@ -8,6 +8,10 @@ PYLIBDIR=$(shell python3 -c 'import site;import os.path;print([d for d in site.g
 CONFDIR=/etc
 SHAREDIR=$(SYSPREFIX)/share/hatrac
 
+ifndef HATRAC_ADMIN_GROUP
+override HATRAC_ADMIN_GROUP = "https://auth.globus.org/3938e0d0-ed35-11e5-8641-22000ab4b42b"
+endif
+
 ifeq ($(wildcard /etc/httpd/conf.d),/etc/httpd/conf.d)
 	HTTPSVC=httpd
 else
@@ -39,7 +43,7 @@ testvars: force
 	@echo PYLIBDIR=$(PYLIBDIR)
 
 wsgi_hatrac.conf: force
-	sudo su -c \
+	su -c \
 		'python3 -c "import hatrac as m;m.sample_httpd_config()"' \
 		- hatrac > $@
 
@@ -53,10 +57,17 @@ DEPLOY_FILES=\
 	$(HTTPDCONFDIR)/wsgi_hatrac.conf \
 	$(DAEMONHOME)/hatrac_config.json
 
-deploy: install $(DEPLOY_FILES) force
+deploy: $(DEPLOY_FILES) force
+	su -c "hatrac-deploy $(HATRAC_ADMIN_GROUP)" - hatrac
+
+deploy-full: $(DEPLOY_FILES) force
+	su -c "createdb -O hatrac hatrac" - postgres
+	su -c "hatrac-deploy $(HATRAC_ADMIN_GROUP)" - hatrac
+	mkdir -p /var/www/hatrac
+	chown hatrac /var/www/hatrac
 
 uninstall: force
-	pip3 uninstall -y ermresolve
+	pip3 uninstall -y hatrac
 
 force:
 
