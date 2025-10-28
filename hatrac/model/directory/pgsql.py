@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2023 University of Southern California
+# Copyright 2015-2025 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -1023,7 +1023,16 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             for res in deleted_uploads:
                 self.storage.cancel_upload(res.name, res.job)
             for res in deleted_versions:
-                self.storage.delete(res.name, res.version, aux=res.aux)
+                aux = res.aux if res.aux else {}
+                if 'rename_to' in aux:
+                    # when this was already renamed, we no longer own the backing storage
+                    # so deletion should not reclaim anything
+                    pass
+                else:
+                    # handle rename target pointing to original storage...
+                    hname = aux.get('hname', res.name)
+                    hversion = aux.get('hversion', res.version)
+                    self.storage.delete(hname, hversion, aux=res.aux)
             for res in deleted_names:
                 self.storage.delete_namespace(res.name)
 
@@ -1033,7 +1042,14 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     def delete_version(self, resource, client_context, conn=None, cur=None):
         """Delete an existing version."""
         self._delete_version(conn, cur, resource)
-        return lambda : self.storage.delete(resource.name, resource.version, aux=resource.aux)
+        if 'rename_to' in resource.aux:
+            # when this was already renamed, we no longer own the backing storage
+            # so deletion should not reclaim anything
+            return lambda : None
+        # handle rename target pointing to original storage...
+        hname = resource.aux.get('hname', resource.object.name)
+        hversion = resource.aux.get('hversion', resource.version)
+        return lambda : self.storage.delete(hname, hversion, aux=resource.aux)
 
     @db_wrap(enforce_acl=(1, 2, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version(self, object, client_context, nbytes=None, metadata={}, conn=None, cur=None):
@@ -1200,6 +1216,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
         """Return (nbytes, data_generator) pair for specific version."""
         if objversion.is_deleted:
             raise core.NotFound('Resource %s is not available.' % objversion)
+        # handle rename target pointing to original storage...
         hname = objversion.aux.get('hname', object.name)
         hversion = objversion.aux.get('hversion', objversion.version)
         if get_data:

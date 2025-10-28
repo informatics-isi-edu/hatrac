@@ -69,3 +69,17 @@ rather than recreating the content under the old/legacy storage address.
 
 2. The old/legacy records are kept with `rename_to` so that they
 continue to allow HTTP access via legacy URLs.
+
+
+### Deletion with Renaming
+
+All deletion permutations are allowed with different results.
+
+1. A rename_from source can be deleted and it only deletes the DB
+entry while not touching the backing storage which is owned by the new
+rename_to target. The target can still be accessed.
+
+2. A rename_to target can be deleted and it deletes the DB entry and
+the original backing storage which it owns. The rename_from source DB
+entry exists and can itself be managed or deleted, but will raise 409
+errors on attempts to GET the content.

@@ -473,13 +473,18 @@ object name specified in the request URL.
 
 This logical renaming operation combines two complementary effects:
 
-1. The old versions are mirrored (copied) under the new object name.
-2. The old versions are adjusted to forward to the new object name.
+1. A new version is created under the new name to hold content of each old version.
+2. Each old version is turned into a "forwarding" record to its correpsonding new version.
 
 Subsequent data retrieval under either the old or new name will
 include a `Location` response header providing the new object
-name. Data access will enforce access control based on the ACLs
-configured on the new name.
+name and version. Data access will enforce access control based on the ACLs
+configured on the new name and version.
+
+The content is re-homed to the new version and subject to deletion
+when that new object version is deleted. The old version can be
+deleted to remove the forwarding rule, but will not affect the content
+held under the new version.
 
 A JSON command description is provided as input:
 

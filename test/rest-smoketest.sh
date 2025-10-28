@@ -386,6 +386,9 @@ sha=$(mysha256sum < $0)
 script_size=$(stat -c "%s" $0)
 
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
+obj1_versA="$(cat ${RESPONSE_CONTENT})"
+obj1_versA="${obj1_versA#/hatrac}"
+
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
 obj1_vers0="$(cat ${RESPONSE_CONTENT})"
 obj1_vers0="${obj1_vers0#/hatrac}"
@@ -435,6 +438,79 @@ dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1;versions"
 dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
 dotest_anon "200::*::*" "${obj1_vers0};metadata/"
 
+# metadata on object-version
+dotest "200::application/json::*" "${obj1_vers0};metadata/"
+dotest "200::application/json::*" "${obj1_vers0};metadata/?cid=smoke"
+dotest "200::application/json::*" "${obj1_vers0};metadata?cid=smoke"
+
+# service assigns content-type automagically
+dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "200::*::*" "${obj1_vers0};metadata/content-type"
+dotest "200::*::*" "${obj1_vers0};metadata/content-type?cid=smoke"
+
+# we can modify content-type
+cat > ${TEST_DATA} <<EOF
+text/plain
+EOF
+dotest "204::*::*" "${obj1_vers0};metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "200::*::*" "${obj1_vers0};metadata/content-type"
+dotest "204::*::*" "${obj1_vers0};metadata/content-type" -X DELETE
+dotest "204::*::*" "${obj1_vers0};metadata/content-type?cid=smoke" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "204::*::*" "${obj1_vers0};metadata/content-type?cid=smoke" -X DELETE
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "404::*::*" "${obj1_vers0};metadata/content-type"
+
+# we can modify content-type repeatedly
+cat > ${TEST_DATA} <<EOF
+application/x-bash
+EOF
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "200::text/plain*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "200::application/x-bash::*" "${obj1_vers0}"
+dotest "206::application/x-bash::*" "${obj1_vers0}" -H "Range: bytes=2-"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -X DELETE
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
+dotest "404::*::*" "${obj1_vers0};metadata/content-type"
+# restore for rename test below
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
+
+# checksums can be applied once and are immutable
+dotest "404::*::*" "${obj1_vers0};metadata/content-md5"
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5"
+cat > ${TEST_DATA} <<EOF
+$(mymd5sum < $0)
+EOF
+dotest "204::*::*" "${obj1_vers0};metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
+cat > ${TEST_DATA} <<EOF
+$(echo "" | mymd5sum)
+EOF
+dotest "409::*::*" "${obj1_vers0};metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
+
+dotest "404::*::*" "${obj1_vers0};metadata/content-sha256"
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256"
+cat > ${TEST_DATA} <<EOF
+$(mysha256sum < $0)
+EOF
+dotest "204::*::*" "${obj1_vers0};metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
+cat > ${TEST_DATA} <<EOF
+$(echo "" | mysha256sum)
+EOF
+dotest "409::*::*" "${obj1_vers0};metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
+
+# test path with escaped unicode name "ǝɯɐuǝlᴉɟ ǝpoɔᴉun"
+TEST_DISPOSITION="filename*=UTF-8''%C7%9D%C9%AF%C9%90u%C7%9Dl%E1%B4%89%C9%9F%20%C7%9Dpo%C9%94%E1%B4%89un"
+TEST_NS="${TEST_DISPOSITION:17}" # strip off prefix: filename*=UTF-8''
+
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/${TEST_NS}"       -X PUT -H "Content-Type: application/x-hatrac-namespace"
+dotest "200::application/json::*" /ns-${RUNKEY}/"${TEST_NS}"
+dotest "204::*::*" /ns-${RUNKEY}/"${TEST_NS}" -X DELETE
+dotest "404::*::*" /ns-${RUNKEY}/"${TEST_NS}"
+
 # test object rename w/ default ACLs
 cat > ${TEST_DATA} <<EOF
 {
@@ -479,80 +555,26 @@ dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename2"
 dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
 dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
 
-# metadata on object-version
-dotest "200::application/json::*" "${obj1_vers0};metadata/"
-dotest "200::application/json::*" "${obj1_vers0};metadata/?cid=smoke"
-dotest "200::application/json::*" "${obj1_vers0};metadata?cid=smoke"
-
-# service assigns content-type automagically
-dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
-dotest "200::*::*" "${obj1_vers0};metadata/content-type"
-dotest "200::*::*" "${obj1_vers0};metadata/content-type?cid=smoke"
-
-# we can modify content-type
-cat > ${TEST_DATA} <<EOF
-text/plain
-EOF
-dotest "204::*::*" "${obj1_vers0};metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
-dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
-dotest "200::*::*" "${obj1_vers0};metadata/content-type"
-dotest "204::*::*" "${obj1_vers0};metadata/content-type" -X DELETE
-dotest "204::*::*" "${obj1_vers0};metadata/content-type?cid=smoke" -T ${TEST_DATA} -H "Content-Type: text/plain"
-dotest "204::*::*" "${obj1_vers0};metadata/content-type?cid=smoke" -X DELETE
-dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
-dotest "404::*::*" "${obj1_vers0};metadata/content-type"
-
-# we can modify content-type repeatedly
-cat > ${TEST_DATA} <<EOF
-application/x-bash
-EOF
-dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
-dotest "200::text/plain*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
-dotest "200::application/x-bash::*" "${obj1_vers0}"
-dotest "206::application/x-bash::*" "${obj1_vers0}" -H "Range: bytes=2-"
-dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -X DELETE
-dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
-dotest "404::*::*" "${obj1_vers0};metadata/content-type"
-
-# checksums can be applied once and are immutable
-dotest "404::*::*" "${obj1_vers0};metadata/content-md5"
-dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5"
-cat > ${TEST_DATA} <<EOF
-$(mymd5sum < $0)
-EOF
-dotest "204::*::*" "${obj1_vers0};metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
-dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
-cat > ${TEST_DATA} <<EOF
-$(echo "" | mymd5sum)
-EOF
-dotest "409::*::*" "${obj1_vers0};metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
-dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-md5" -T ${TEST_DATA} -H "Content-Type: text/plain"
-
-dotest "404::*::*" "${obj1_vers0};metadata/content-sha256"
-dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256"
-cat > ${TEST_DATA} <<EOF
-$(mysha256sum < $0)
-EOF
-dotest "204::*::*" "${obj1_vers0};metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
-dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
-cat > ${TEST_DATA} <<EOF
-$(echo "" | mysha256sum)
-EOF
-dotest "409::*::*" "${obj1_vers0};metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
-dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-sha256" -T ${TEST_DATA} -H "Content-Type: text/plain"
-
-# test path with escaped unicode name "ǝɯɐuǝlᴉɟ ǝpoɔᴉun"
-TEST_DISPOSITION="filename*=UTF-8''%C7%9D%C9%AF%C9%90u%C7%9Dl%E1%B4%89%C9%9F%20%C7%9Dpo%C9%94%E1%B4%89un"
-TEST_NS="${TEST_DISPOSITION:17}" # strip off prefix: filename*=UTF-8''
-
-dotest "201::text/uri-list::*" "/ns-${RUNKEY}/${TEST_NS}"       -X PUT -H "Content-Type: application/x-hatrac-namespace"
-dotest "200::application/json::*" /ns-${RUNKEY}/"${TEST_NS}"
-dotest "204::*::*" /ns-${RUNKEY}/"${TEST_NS}" -X DELETE
-dotest "404::*::*" /ns-${RUNKEY}/"${TEST_NS}"
-
+# test deletion corner cases...
+#
+# deleting the (rename source) name prevents further uploads to that name
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj1 -X DELETE
 dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1?cid=smoke" -X DELETE
 dotest "409::*::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
+# and makes it unavailable, without affecting rename target(s)
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename2"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1"
+#
+# deleting the final rename target name
+dotest "204::*::*" /ns-${RUNKEY}/foo/obj1rename2 -X DELETE
+# makes it unavailable and also affects rename source
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1rename2"
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1rename"
+#
+# orphaned rename source can also be deleted
+dotest "204::*::*" /ns-${RUNKEY}/foo/obj1rename -X DELETE
+
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
     -H "Content-Type: application/x-bash" \

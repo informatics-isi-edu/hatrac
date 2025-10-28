@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2022 University of Southern California
+# Copyright 2015-2025 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -48,9 +48,12 @@ class NameVersion (RestHandler):
         )
         while resource.aux.get('rename_to'):
             name, version = resource.aux['rename_to']
-            resource = self.resolve_version(
-                name, '', version
-            )
+            try:
+                resource = self.resolve_version(
+                    name, '', version
+                )
+            except core.NotFound as e:
+                raise Conflict('Object %s was renamed to %s:%s which no longer exists.' % (resource, name, version))
         self.set_http_etag(resource.version)
         self.http_check_preconditions()
         body, status, headers = self.get_content(
@@ -308,9 +311,12 @@ class Name (RestHandler):
             resource = resource.get_current_version()
             while resource.aux.get('rename_to'):
                 name, version = resource.aux['rename_to']
-                resource = self.resolve_version(
-                    name, '', version
-                )
+                try:
+                    resource = self.resolve_version(
+                        name, '', version
+                    )
+                except core.NotFound as e:
+                    raise Conflict('Object %s was renamed to %s:%s which no longer exists.' % (resource, name, version))
             self.set_http_etag(resource.version)
         else:
             self.set_http_etag(
