@@ -386,6 +386,10 @@ sha=$(mysha256sum < $0)
 script_size=$(stat -c "%s" $0)
 
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
+obj1_versA="$(cat ${RESPONSE_CONTENT})"
+obj1_versA="${obj1_versA#/hatrac}"
+
+dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
 obj1_vers0="$(cat ${RESPONSE_CONTENT})"
 obj1_vers0="${obj1_vers0#/hatrac}"
 
@@ -468,6 +472,8 @@ dotest "206::application/x-bash::*" "${obj1_vers0}" -H "Range: bytes=2-"
 dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -X DELETE
 dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type"
 dotest "404::*::*" "${obj1_vers0};metadata/content-type"
+# restore for rename test below
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/content-type" -T ${TEST_DATA} -H "Content-Type: text/plain"
 
 # checksums can be applied once and are immutable
 dotest "404::*::*" "${obj1_vers0};metadata/content-md5"
@@ -505,9 +511,70 @@ dotest "200::application/json::*" /ns-${RUNKEY}/"${TEST_NS}"
 dotest "204::*::*" /ns-${RUNKEY}/"${TEST_NS}" -X DELETE
 dotest "404::*::*" /ns-${RUNKEY}/"${TEST_NS}"
 
+# test object rename w/ default ACLs
+cat > ${TEST_DATA} <<EOF
+{
+  "command": "rename_from",
+  "source_name": "/ns-${RUNKEY}/foo/obj1"
+}
+EOF
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/obj1rename" -T ${TEST_DATA} -X POST -H "Content-Type: application/json"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename"
+# access is controlled by new rename target's default ACLs
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1rename"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo/obj1"
+# revised ACL on rename target affects both source and target URLs
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1rename;acl/subtree-read" -T ${TEST_ACL_ANON} -H "Content-Type: application/json"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
+# test idempotence
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1rename" -T ${TEST_DATA} -X POST -H "Content-Type: application/json"
+# test refusal to rename twice
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1rename2" -T ${TEST_DATA} -X POST -H "Content-Type: application/json"
+
+# test transitive rename and copied ACLs
+cat > ${TEST_DATA} <<EOF
+{
+  "command": "rename_from",
+  "source_name": "/ns-${RUNKEY}/foo/obj1rename"
+}
+EOF
+dotest "201::text/uri-list::*" "/ns-${RUNKEY}/foo/obj1rename2" -T ${TEST_DATA} -X POST -H "Content-Type: application/json"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename2"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename2"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename2"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
+dohdrtest 'content-location' "\([^:[:space:]]\+\)" "/hatrac/ns-${RUNKEY}/foo/obj1rename2"
+# copied ACL on rename target affects source and target URLs
+dotest "204::*::*" "/ns-${RUNKEY}/foo/obj1rename;acl/subtree-read" -X DELETE
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename2"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1"
+
+# test deletion corner cases...
+#
+# deleting the (rename source) name prevents further uploads to that name
 dotest "204::*::*" /ns-${RUNKEY}/foo/obj1 -X DELETE
 dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1?cid=smoke" -X DELETE
 dotest "409::*::*" /ns-${RUNKEY}/foo/obj1 -X PUT -T $0 -H "Content-Type: application/x-bash"
+# and makes it unavailable, without affecting rename target(s)
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename2"
+dotest "200::application/x-bash::*" "/ns-${RUNKEY}/foo/obj1rename"
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1"
+#
+# deleting the final rename target name
+dotest "204::*::*" /ns-${RUNKEY}/foo/obj1rename2 -X DELETE
+# makes it unavailable and also affects rename source
+dotest "404::*::*" "/ns-${RUNKEY}/foo/obj1rename2"
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1rename"
+#
+# orphaned rename source can also be deleted
+dotest "204::*::*" /ns-${RUNKEY}/foo/obj1rename -X DELETE
+
 dotest "201::text/uri-list::*" /ns-${RUNKEY}/foo2/obj1 \
     -X PUT -T $0 \
     -H "Content-Type: application/x-bash" \

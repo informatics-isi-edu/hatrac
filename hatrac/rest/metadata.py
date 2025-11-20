@@ -1,6 +1,6 @@
 
 #
-# Copyright 2016-2022 University of Southern California
+# Copyright 2016-2025 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -37,8 +37,8 @@ class Metadata (RestHandler):
         self.http_check_preconditions('PUT')
 
         resource.update_metadata(
+            hatrac_ctx.webauthn2_context,
             hatrac_ctx.hatrac_directory.metadata_from_http({ fieldname: value }),
-            hatrac_ctx.webauthn2_context
         )
         return self.update_response()
 
@@ -57,8 +57,9 @@ class Metadata (RestHandler):
         self.http_check_preconditions('DELETE')
 
         resource.pop_metadata(
+            hatrac_ctx.webauthn2_context,
             fieldname,
-            hatrac_ctx.webauthn2_context
+            None,
         )
         return self.update_response()
 

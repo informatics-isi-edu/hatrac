@@ -31,6 +31,7 @@ The REST API supports the following operations.
   - [Delete nested namespace](#nested-namespace-deletion)
 2. Object operations
   - [Create or update object](#object-creation-and-update)
+  - [Rename object](#object-renaming)
   - [Get object content](#object-retrieval)
   - [Delete object](#object-deletion)
 3. Object version operations
@@ -363,10 +364,10 @@ an existing object.  Literal object content is provided as input:
     Content-Type: text/plain
     Content-Length: 14
     Content-MD5: ZXS/CYPMeEBJpBYNGYhyjA==
-	Content-SHA256: 5+aEMqzlEZxe9xPaDUZ0GyBvTUaZf4s0yMpPgV/0yt0=
-	Content-Disposition: filename*=UTF-8''test.txt
-	If-Match: etag_value
-	If-None-Match: *
+    Content-SHA256: 5+aEMqzlEZxe9xPaDUZ0GyBvTUaZf4s0yMpPgV/0yt0=
+    Content-Disposition: filename*=UTF-8''test.txt
+    If-Match: etag_value
+    If-None-Match: *
     
     ...content...
 
@@ -464,6 +465,58 @@ solution is to first create an empty object (e.g. with `Content-Type:
 text/plan`) and then immediately update its content with the desired
 content.
 
+### Object Renaming
+
+The POST operation with a special batch command input is used to
+logically rename versions of an existing *old* object under the *new*
+object name specified in the request URL.
+
+This logical renaming operation combines two complementary effects:
+
+1. A new version is created under the new name to hold content of each old version.
+2. Each old version is turned into a "forwarding" record to its correpsonding new version.
+
+Subsequent data retrieval under either the old or new name will
+include a `Location` response header providing the new object
+name and version. Data access will enforce access control based on the ACLs
+configured on the new name and version.
+
+The content is re-homed to the new version and subject to deletion
+when that new object version is deleted. The old version can be
+deleted to remove the forwarding rule, but will not affect the content
+held under the new version.
+
+A JSON command description is provided as input:
+
+    POST /new_namespace_path/new_object_name
+    Host: authority_name
+    Content-Type: application/json
+    If-Match: etag_value
+    If-None-Match: *
+    
+    {
+        "command": "rename_from",
+        "source_name": "/oldnamespace/old_object_name",
+        "source_versions": [ "oldversion1", "oldversion2", ... ],
+        "copy_acls": true,
+    }
+
+The JSON command description is an object with several fields:
+
+- `"command"`: The fixed string `"rename_from"`.
+- `"source_name"`: The existing old object path within the service instance.
+- `"source_versions"`: Which old object versions to mirror under the new object name (optional, defaults to all versions).
+- `"copy_acls"`: Whether to copy ACLs from old to new versions (optional, defaults to `false` to set minimal new version ownership).
+
+In order to be authorized to perform renaming, the client must have
+ownership privileges on the old object and must either be allowed to
+create the new object name or have ownership of the existing new
+object name.
+
+This is done via service-internal metadata reconfiguration, not
+consuming additional bulk storage consumption nor incurring any bulk
+data movement in the storage backend.
+
 ### Object Retrieval
 
 The GET operation is used to retrieve the current version of an object:
@@ -525,9 +578,9 @@ for which a successful response is:
     Content-Type: content_type
     Content-Length: N
     Content-MD5: hash_value
-	Content-SHA256: hash_value
-	Content-Disposition: filename*=UTF-8''filename
-	Content-Location: /namespace_path/object_name:version
+    Content-SHA256: hash_value
+    Content-Disposition: filename*=UTF-8''filename
+    Content-Location: /namespace_path/object_name:version
 
 The HEAD operation is essentially equivalent to the GET operation but
 with the actual object content elided.
@@ -648,8 +701,8 @@ for which the successful response is:
     Accept-Ranges: bytes
     Content-Type: content_type
     Content-MD5: hash_value
-	Content-SHA256: hash_value
-	Content-Disposition: filename*=UTF-8''filename
+    Content-SHA256: hash_value
+    Content-Disposition: filename*=UTF-8''filename
     Content-Length: N
     
 with the same interpretation as documented for Object Metadata
@@ -723,21 +776,21 @@ The GET operation is used to retrieve all metadata sub-resources en masse
 as a document:
 
     GET /resource_name;metadata
-	Host: authority_name
-	Accept: application/json
-	If-None-Match: etag_value
+    Host: authority_name
+    Accept: application/json
+    If-None-Match: etag_value
 
 for which the successful response is:
 
     200 OK
-	Content-Type: application/json
-	Content-Length: N
-	ETag: etag_value
+    Content-Type: application/json
+    Content-Length: N
+    ETag: etag_value
 	
-	{"content-type": content_type, 
-	 "content-md5": hash_value,
-	 "content-sha256": hash_value,
-	 "content-disposition": disposition}
+    {"content-type": content_type, 
+     "content-md5": hash_value,
+     "content-sha256": hash_value,
+     "content-disposition": disposition}
 
 The standard
 [object version metadata retrieval](#object-version-metadata-retrieval),
@@ -750,18 +803,18 @@ The GET operation is used to retrieve one metadata sub-resource as a
 text value:
 
     GET /resource_name;metadata/fieldname
-	Host: authority_name
-	Accept: text/plain
-	If-None-Match: etag_value
+    Host: authority_name
+    Accept: text/plain
+    If-None-Match: etag_value
 	
 for which the successful response is:
 
     200 OK
-	Content-Type: text/plain
-	Content-Length: N
-	ETag: etag_value
+    Content-Type: text/plain
+    Content-Length: N
+    ETag: etag_value
 	
-	value
+    value
 
 The textual _value_ is identical to what would be present in the HTTP
 response header value when retrieving the main resource content.

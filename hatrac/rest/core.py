@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2023 University of Southern California
+# Copyright 2015-2025 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -585,6 +585,21 @@ class RestHandler (flask.views.MethodView):
             'content-type': content_type,
             'content-length': nbytes,
         }
+        return (body, status, headers)
+
+    def create_multi_response(self, resources):
+        """Form response for batch resource creation request."""
+        if resources:
+            status = 201
+            body = '\n'.join([ resource.asurl() for resource in resources ]) + '\n'
+            headers = {
+                'content-type': 'text/uri-list',
+                'content-length': len(body),
+            }
+        else:
+            status = 204
+            body = ''
+            headers = {}
         return (body, status, headers)
 
     def delete_response(self):
