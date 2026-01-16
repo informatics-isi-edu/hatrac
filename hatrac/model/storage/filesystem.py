@@ -82,9 +82,13 @@ class HatracStorage (object):
 
         return (dirname, relname)
 
-    def create_from_file(self, name, input, nbytes, metadata={}):
+    def create_from_file(self, name, input, nbytes, metadata={}, predefined_version=None):
         """Create an entire file-version object from input content, returning version ID."""
-        version = make_random_version()
+        if predefined_version is not None:
+            # this is used by migration tasks, not the REST API
+            version = predefined_version
+        else:
+            version = make_random_version()
         dirname, relname = self._dirname_relname(name, version)
         f = make_file(dirname, relname, 'wb')
 
@@ -92,8 +96,8 @@ class HatracStorage (object):
         self.upload_chunk_from_file(None, None, 0, 0, input, nbytes, metadata, f)
         return version
 
-    def create_upload(self, name, nbytes=None, metadata={}):
-        upload_id = self.create_from_file(name, io.BytesIO(b''), 0)
+    def create_upload(self, name, nbytes=None, metadata={}, predefined_version=None):
+        upload_id = self.create_from_file(name, io.BytesIO(b''), 0, {}, predefined_version)
         return upload_id
 
     def cancel_upload(self, name, upload_id):

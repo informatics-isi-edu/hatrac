@@ -12,7 +12,7 @@ setup(
     version="1.2",
     packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage", "hatrac.rest"],
     package_data={'hatrac': ["*.wsgi"]},
-    scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-utils"],
+    scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-async-migrate", "bin/hatrac-utils"],
     install_requires=[
         "flask>=2.3.3",
         "psycopg2",
