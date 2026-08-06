@@ -67,7 +67,7 @@ A mapping of predefined ACL names to access control lists. Default configuration
   "firewall_acls": {
     "create": ["*"],
     "delete": ["*"],
-    "manage_acls": ["*"],
+    "manage_acl": ["*"],
     "manage_metadata": ["*"]
   }
 }
@@ -76,7 +76,7 @@ A mapping of predefined ACL names to access control lists. Default configuration
 These predefined ACL names affect the following kinds of request:
 - `create`: PUT of namespaces, PUT of objects or new object versions, POST of chunked upload jobs
 - `delete`: DELETE of namespaces, objects, and object-versions
-- `manage_acls`: PUT or DELETE of ACL sub-resources
+- `manage_acl`: PUT or DELETE of ACL sub-resources
 - `manage_metadata`: PUT or DELETE of metadata sub-resources
 
 The firewall ACLs are an additional, service-wide authorization step that requests must pass in addition to the fine-grained ACLs configured within the hierarchical namespace. This gives the service operator an option to withdraw some of the self-service privileges that would otherwise be granted to clients who upload content. So, even though a client might be an "owner" of an object or namespace sub-tree, the firewall ACLs might require that they also belong to a special curator group in order to further modify state.
@@ -290,4 +290,3 @@ will be detected and translated to act as the config:
 ```
 
 but *only* for the shortened types `html` and `plain` which are understood as `text/html` and `text/plain`, respectively.
-
