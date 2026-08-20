@@ -1146,7 +1146,7 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
 
     @db_wrap()
     def version_aux_update(self, resource, updates, client_context=None, conn=None, cur=None):
-        self._update_reource_aux(conn, cur, resource, updates)
+        self._update_resource_aux(conn, cur, resource, updates)
 
     @db_wrap()
     def version_aux_pop(self, resource, fieldname, default=_sentinel, client_context=None, conn=None, cur=None):

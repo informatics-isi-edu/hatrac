@@ -17,6 +17,7 @@ import os
 from collections import namedtuple
 from io import BufferedRandom, BytesIO
 import urllib.parse
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 from flask import g as hatrac_ctx
 from ...core import hatrac_debug, coalesce, max_request_payload_size_default
@@ -200,8 +201,29 @@ class BucketConfig (object):
                 session = boto3.session.Session(**session_config)
             if session is None:
                 session = boto3.session.Session()
-            client_config = bucket_config.get("client_config", dict())
-            self.client = session.client("s3", **client_config)
+
+            # S3 client configuration note:
+            #
+            # We need to ensure the correct signature_version and region_name for S3 presigning are set in the client.
+            # Since the signature region must match bucket region, if the region is not set "globally" at the session
+            # level we need to check if it is overridden in either the bucket_config or it's s3_client_kwargs.config
+            # child element.
+            #
+            # Otherwise, if region isn't in any expected config location, signing will fall back to the default
+            # region: us-east-1. So region_name priority (highest to lowest):  Client (config) -> Bucket -> Session
+            #
+            # In practice, it will likely never be necessary redeclare region in the bucket_config if it is already
+            # declared in the s3_client_kwargs.config, or vice versa since they both ultimately route to the same API
+            # parameter in session.client(). The bucket_config.region_name should probably be deprecated in the future.
+            # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/core/session.html#boto3.session.Session.client
+            client_kwargs = bucket_config.get("s3_client_kwargs", {})
+            boto_config = client_kwargs.get("config", {})
+            if "signature_version" not in boto_config:
+                boto_config["signature_version"] = "s3v4"
+            client_kwargs.update({"config": BotoConfig(**boto_config)})
+            client_kwargs.update({"region_name": bucket_config.get("region_name", session.region_name)})
+            self.client = session.client("s3", **client_kwargs)
+
             bucket_config["s3_boto_client"] = self.client
 
     def over_threshold(self, nbytes):

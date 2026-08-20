@@ -107,7 +107,7 @@ to have certain attributes in order to perform certain operations:
         "firewall_acls": {
             "create": ["object-or-ns-uploader-group"],
             "delete": ["object-or-ns-deletion-group"],
-            "manage_acls": ["acl-admin-group"],
+            "manage_acl": ["acl-admin-group"],
             "manage_metadata": ["metadata-curator-group"]
         }
     }
@@ -226,5 +226,3 @@ A workaround is to configure the SE-Linux context:
 
     semanage fcontext --add --type httpd_var_run_t "/var/run/wsgi"
     restorecon -rv /var/run/wsgi
-
-

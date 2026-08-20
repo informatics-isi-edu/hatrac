@@ -9,7 +9,7 @@ from setuptools import setup
 setup(
     name="hatrac",
     description="simple object storage service",
-    version="1.2",
+    version="1.3",
     packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage", "hatrac.rest"],
     package_data={'hatrac': ["*.wsgi"]},
     scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-utils"],
@@ -17,8 +17,8 @@ setup(
         "flask>=2.3.3",
         "psycopg2",
         "webauthn2",
-        "boto3<=1.34.157",
-        "botocore<=1.34.157",
+        "boto3",
+        "botocore"
     ],
     maintainer_email="isrd-support@isi.edu",
     license='Apache 2.0',
