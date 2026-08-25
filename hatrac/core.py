@@ -17,10 +17,14 @@ import json
 
 from webauthn2.util import merge_config, jsonWriter
 
+class HatracConfigError (ValueError):
+    pass
+
 config = merge_config(
     jsonFileName='hatrac_config.json',
     built_ins={},
 )
+
 # emulate legacy config for backwards compat
 default_firewall_acl = [] if config.get("read_only", False) else ["*"]
 # add defaults incrementally in case local config is sparsely populated
