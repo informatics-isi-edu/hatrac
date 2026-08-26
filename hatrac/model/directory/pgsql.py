@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2025 University of Southern California
+# Copyright 2015-2026 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -461,6 +461,7 @@ class connection (psycopg2.extensions.connection):
             self._prepare_hatrac_stmts()
         except psycopg2.ProgrammingError:
             self.rollback()
+        self.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ)
 
     def _prepare_hatrac_stmts(self):
         cur = self.cursor()
@@ -649,7 +650,7 @@ class PooledConnection (object):
         conn = used_pool.getconn()
         assert conn is not None
         assert conn.status == psycopg2.extensions.STATUS_READY, ("pooled connection status", conn.status)
-        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ)
+
         cur = conn.cursor(cursor_factory=DictCursor)
 
         try:
@@ -657,10 +658,11 @@ class PooledConnection (object):
                 result = bodyfunc(conn, cur)
                 conn.commit()
                 return finalfunc(result)
-            except psycopg2.InterfaceError as e:
+            except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
                 # reset bad connection
                 used_pool.putconn(conn, close=True)
                 conn = None
+                cur = None
                 raise e
             except GeneratorExit as e:
                 # happens normally at end of result yielding sequence
@@ -675,10 +677,17 @@ class PooledConnection (object):
                 raise
         finally:
             if conn is not None:
-                assert conn.status == psycopg2.extensions.STATUS_READY, ("pooled connection status", conn.status)
-                cur.close()
-                used_pool.putconn(conn)
-                conn = None
+                try:
+                    if cur is not None:
+                        cur.close()
+                    conn.commit()
+                except:
+                    used_pool.putconn(conn, close=True)
+                else:
+                    used_pool.putconn(conn)
+
+                self.conn = None
+                self.cur = None
 
 _name_table_sql = """
 CREATE TABLE IF NOT EXISTS hatrac.name (
