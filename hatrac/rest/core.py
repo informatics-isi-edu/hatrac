@@ -220,6 +220,10 @@ class ServerError (RestException):
     code = 500
     description = 'The request encountered an error on the server.'
 
+class ServiceNotAvailable (RestException):
+    code = 503
+    description = 'Service temporarily unavailable.'
+
 app.url_map.strict_slashes = False
 
 _client_session_proxy = ClientSessionCachedProxy(core.config.get('webauthn_proxy_config'))
@@ -287,6 +291,7 @@ def error_handler(ev):
             core.Forbidden: Forbidden,
             core.Unauthenticated: Unauthorized,
             core.NotFound: NotFound,
+            core.ServiceNotAvailable: ServiceNotAvailable,
         }[type(ev)](str(ev))
 
     if isinstance(ev, (RestException, werkzeug.exceptions.HTTPException)):
@@ -343,6 +348,12 @@ class RestHandler (flask.views.MethodView):
     # reserved chars:      : / ? # [ ] @ ! $ & ' ( ) * + , ; =
     # non-reserved chars:  [-._~A-Za-z0-9]
     #
+
+    def bulk_name(self, limit, last_id, last_modified_at):
+        return hatrac_ctx.hatrac_directory.bulk_name(limit, last_id, last_modified_at)
+
+    def bulk_version(self, max_nameid, limit, last_id, last_modified_at):
+        return hatrac_ctx.hatrac_directory.bulk_version(max_nameid, limit, last_id, last_modified_at)
 
     def resolve(self, path, name, raise_notfound=True):
         fullname = self._fullname(path, name)

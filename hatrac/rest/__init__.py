@@ -54,3 +54,4 @@ from . import acl
 from . import metadata
 from . import name
 from . import transfer
+from . import bulk

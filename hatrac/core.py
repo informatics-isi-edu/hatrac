@@ -194,6 +194,10 @@ class NotFound (HatracException):
     """Exceptions representing attempted access to unknown resource."""
     pass
 
+class ServiceNotAvailable (HatracException):
+    """Exceptions representing temporary unavailablity."""
+    pass
+
 def _make_bin_decoder(nbytes, context=''):
     def helper(orig):
         if len(orig) == nbytes * 2:

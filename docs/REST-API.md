@@ -20,6 +20,7 @@ This documentation is broken down into the following general topics:
 7. [Metadata](#metadata-sub-resources)
 8. [Access Control Lists](#access-control-list-sub-resources)
 9. [Chunked Uploads](#chunked-upload-resources)
+10. [Bulk Management](#bulk-management-sub-resources)
 
 ### Quick Links to Operations
 
@@ -55,6 +56,9 @@ The REST API supports the following operations.
   - [Upload data chunk](#chunk-upload)
   - [Finalize upload job](#chunked-upload-job-finalization)
   - [Cancel upload job](#chunked-upload-job-cancellation)
+7. Bulk management operations
+  - [Get name listing](#bulk-name-listing-retrieval)
+  - [Get version listing](#bulk-version-listing-retrieval)
 
 ## URL Conventions
 
@@ -1335,3 +1339,113 @@ for which the successful response is:
 Once canceled, the job resource no longer exists and associated
 storage SHOULD be reclaimed.
 
+## Bulk Management Sub-Resources
+
+Bulk management sub-resources have an HTTPS URL of the form:
+
+- https:// _authority_ / _resource name_ ;bulk/name/ _query_ (for bulk name records)
+- https:// _authority_ / _resource name_ ;bulk/version/ _query_ (for bulk version records)
+- https:// _authority_ / _resource name_ ;bulk/name/ (reserved)
+- https:// _authority_ / _resource name_ ;bulk/version/ (reserved)
+
+Where _resource name_ is a namespace, the _query_ defines paginated
+listing position in the bulk listing operations described later. URL
+syntax without a _query_ is reserved for future use and will raise an
+access error if used today.
+
+Conceptually, the two sub-resource spaces `;bulk/name/` and
+`;bulk/version/` are for bulk management of name records (namespaces
+and objects) and object-version records, respectively. These are
+slightly leaky abstractions to support bulk management of access
+control policy.
+
+### Bulk Name Listing Retrieval
+
+The GET operation is used to retrieve a paginated listing of name records en masse:
+
+    GET /resource_name;bulk/name/?limit=pagesize&last_id=id0&last_modified_at=timestamp0
+    Host: authority_name
+    Accept: application/json
+    If-None-Match: etag_value
+
+To get a full listing of the service state, use the `/;bulk/name/`
+URL, i.e. where _resource name_ is the root namespace. When a more
+specific namespace is addressed, the bulk listing will be narrowed to
+only encompass name records within that namespace hierarchy.
+
+The URL query parameters encode pagination boundary information:
+
+- `limit`: A positive integer _pagesize_ (number of records) to include
+- `last_id`: The row `id` _id0_ of the last observed row of previous page
+- `last_modified_at`: The `modified_at` _timestamp0_ of the last observed row of previous page
+
+These listings are pages of a stream sorted primary by `modified_at`
+and secondarily by `id` to break ties when several rows have the same
+modification time.
+
+To start a new listing and get the first page, the special query terms
+`last_id=0` and `last_modified_at=-infinity` may be used to specify
+that no rows have been observed yet.
+
+The successful response is:
+
+    200 OK
+    Content-Type: application/json
+    Content-Length: N
+    ETag: etag_value
+    
+    [{"id":1,...}, ...]
+
+This response exposes low-level service metadata about each namespace
+and object name, suitable for consumption by a system operator.
+
+This request may raise HTTP errors:
+
+- 409 for attempts to access the ;bulk sub-resource on object names
+- 401 or 403 for unauthenticated or insufficiently privileged clients
+
+### Bulk Version Listing Retrieval
+
+The GET operation is used to retrieve a paginated listing of version records en masse:
+
+    GET /resource_name;bulk/version/?limit=pagesize&last_id=id0&last_modified_at=timestamp0
+    Host: authority_name
+    Accept: application/json
+    If-None-Match: etag_value
+
+To get a full listing of the service state, use the `/;bulk/version/`
+URL, i.e. where _resource name_ is the root namespace. When a more
+specific namespace is addressed, the bulk listing will be narrowed to
+only encompass version records for objects within that namespace
+hierarchy.
+
+The URL query parameters encode pagination boundary information:
+
+- `limit`: A positive integer _pagesize_ (number of records) to include
+- `last_id`: The row `id` _id0_ of the last observed row of previous page
+- `last_modified_at`: The `modified_at` _timestamp0_ of the last observed row of previous page
+
+These listings are pages of a stream sorted primary by `modified_at`
+and secondarily by `id` to break ties when several rows have the same
+modification time.
+
+To start a new listing and get the first page, the special query terms
+`last_id=0` and `last_modified_at=-infinity` may be used to specify
+that no rows have been observed yet.
+
+The successful response is:
+
+    200 OK
+    Content-Type: application/json
+    Content-Length: N
+    ETag: etag_value
+    
+    [{"id":1,...}, ...]
+
+This response exposes low-level service metadata about each
+object-version, suitable for consumption by a system operator.
+
+This request may raise HTTP errors:
+
+- 409 for attempts to access the ;bulk sub-resource on object names
+- 401 or 403 for unauthenticated or insufficiently privileged clients
