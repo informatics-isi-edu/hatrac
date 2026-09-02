@@ -1827,6 +1827,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
             "FROM hatrac.version v",
             "JOIN hatrac.name n ON (v.nameid = n.id)",
             "WHERE (%s = ANY(n.ancestors) OR %s = n.id)" % (root_id, root_id,),
+            "  AND v.version IS NOT NULL",
             "  AND v.modified_at >= %s::timestamptz" % (last_modified_at,),
             "  AND (v.modified_at > %s::timestamptz OR v.id > %s)" % (last_modified_at, last_id),
             "ORDER BY v.modified_at, v.id",
