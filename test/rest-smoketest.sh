@@ -400,6 +400,25 @@ dotest "200::*::*" "/ns-${RUNKEY}/foo/obj1;metadata/"
 dotest "200::*::*" "${obj1_vers0}"
 dotest "200::*::*" "${obj1_vers0};metadata/"
 
+# bulk listings
+dotest "200::application/json::*" "/;bulk/name/?last_id=0&last_modified_at=-infinity"
+dotest "200::application/json::*" "/ns-${RUNKEY};bulk/name/?last_id=0&last_modified_at=-infinity"
+dotest "200::application/json::*" "/ns-${RUNKEY}/foo;bulk/name/?last_id=0&last_modified_at=-infinity"
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;bulk/name/?last_id=0&last_modified_at=-infinity"
+dotest_anon "401::*::*" "/;bulk/name/?last_id=0&last_modified_at=-infinity"
+dotest_anon "401::*::*" "/ns-${RUNKEY};bulk/name/?last_id=0&last_modified_at=-infinity"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo;bulk/name/?last_id=0&last_modified_at=-infinity"
+dotest_anon "409::*::*" "/ns-${RUNKEY}/foo/obj1;bulk/name/?last_id=0&last_modified_at=-infinity"
+
+dotest "200::application/json::*" "/;bulk/version/?last_id=0&last_modified_at=-infinity"
+dotest "200::application/json::*" "/ns-${RUNKEY};bulk/version/?last_id=0&last_modified_at=-infinity"
+dotest "200::application/json::*" "/ns-${RUNKEY}/foo;bulk/version/?last_id=0&last_modified_at=-infinity"
+dotest "409::*::*" "/ns-${RUNKEY}/foo/obj1;bulk/version/?last_id=0&last_modified_at=-infinity"
+dotest_anon "401::*::*" "/;bulk/version/?last_id=0&last_modified_at=-infinity"
+dotest_anon "401::*::*" "/ns-${RUNKEY};bulk/version/?last_id=0&last_modified_at=-infinity"
+dotest_anon "401::*::*" "/ns-${RUNKEY}/foo;bulk/version/?last_id=0&last_modified_at=-infinity"
+dotest_anon "409::*::*" "/ns-${RUNKEY}/foo/obj1;bulk/version/?last_id=0&last_modified_at=-infinity"
+
 # check read authz corner cases
 # namespace subtree-read (set above) grants all reads to objects and versions below
 dotest_anon "200::*::*" "/ns-${RUNKEY}/foo/obj1"

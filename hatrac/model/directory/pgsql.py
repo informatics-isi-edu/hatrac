@@ -1,6 +1,6 @@
 
 #
-# Copyright 2015-2025 University of Southern California
+# Copyright 2015-2026 University of Southern California
 # Distributed under the Apache License, Version 2.0. See LICENSE for more info.
 #
 
@@ -203,6 +203,18 @@ class HatracName (object):
     def get_versions(self):
         raise core.NotFound('Versions sub-resource on %s not available.' % self)
 
+    def bulk_name(self, limit, last_id, last_modified):
+        raise core.Conflict('Bulk name sub-resource on %s not available' % self)
+
+    def bulk_version(self, limit, last_id, last_modified):
+        raise core.Conflict('Bulk version sub-resource on %s not available' % self)
+
+    def get_name_modified_etag(self):
+        raise NotImplementedError()
+
+    def get_version_modified_etag(self):
+        raise NotImplementedError()
+
     def is_object(self):
         raise NotImplementedError()
 
@@ -263,6 +275,18 @@ class HatracNamespace (HatracName):
         """Return (nbytes, metadata, data_generator) for namespace."""
         self.enforce_acl(['owner', 'read', 'ancestor_owner', 'ancestor_read'], client_context)
         return negotiated_uri_list(self, self.directory.namespace_enumerate_names(self, False))
+
+    def bulk_name(self, limit, last_id, last_modified):
+        return BulkName(self, limit, last_id, last_modified)
+
+    def bulk_version(self, limit, last_id, last_modified):
+        return BulkVersion(self, limit, last_id, last_modified)
+
+    def get_name_modified_etag(self):
+        return self.directory.get_name_modified_etag()
+
+    def get_version_modified_etag(self):
+        return self.directory.get_version_modified_etag()
 
 class HatracObject (HatracName):
     """Represent a bound object."""
@@ -331,6 +355,64 @@ class HatracVersions (object):
     def get_content(self, client_context, get_data=True):
         self.object.enforce_acl(['owner', 'ancestor_owner', 'read', 'ancestor_read'], client_context)
         return negotiated_uri_list(self, self.object.directory.object_enumerate_versions(self.object))
+
+class BulkVersion (object):
+    def __init__(self, root_ns, limit, last_id, last_modified_at):
+        self.root_ns = root_ns
+        self.directory = root_ns.directory
+        self.args = {
+            "limit": limit,
+            "last_id": last_id,
+            "last_modified_at": last_modified_at,
+        }
+
+    def is_object(self):
+        return False
+
+    def asurl(self):
+        args = { k: urllib.quote(str(v), safe='') for k, v in self.args.items() if v }
+        return "%s;bulk/version/%s%s" % (
+            self.root_ns.asurl(),
+            "?" if args else "",
+            "&".join(["%s=%s" % (k, v) for k, v in args.items()])
+        )
+
+    def get_etag_material(self):
+        return self.root_ns.get_version_modified_etag()
+
+    def get_content(self, client_context, get_data=True):
+        self.root_ns.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        body = self.directory.bulk_list_versions(root_ns=self.root_ns, **self.args)
+        return len(body), Metadata({"content-type": "application/json"}), body
+
+class BulkName (object):
+    def __init__(self, root_ns, limit, last_id, last_modified_at):
+        self.root_ns = root_ns
+        self.directory = root_ns.directory
+        self.args = {
+            "limit": limit,
+            "last_id": last_id,
+            "last_modified_at": last_modified_at,
+        }
+
+    def is_object(self):
+        return False
+
+    def asurl(self):
+        args = { k: urllib.quote(str(v), safe='') for k, v in self.args.items() if v }
+        return "%s;bulk/name/%s%s" % (
+            self.root_ns.asurl(),
+            "?" if args else "",
+            "&".join(["%s=%s" % (k, v) for k, v in args.items()])
+        )
+
+    def get_etag_material(self):
+        return self.root_ns.get_name_modified_etag()
+
+    def get_content(self, client_context, get_data=True):
+        self.root_ns.enforce_acl(['owner', 'ancestor_owner'], client_context)
+        body = self.directory.bulk_list_names(root_ns=self.root_ns, **self.args)
+        return len(body), Metadata({"content-type": "application/json"}), body
 
 class HatracObjectVersion (HatracName):
     """Represent a bound object version."""
@@ -461,6 +543,7 @@ class connection (psycopg2.extensions.connection):
             self._prepare_hatrac_stmts()
         except psycopg2.ProgrammingError:
             self.rollback()
+        self.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ)
 
     def _prepare_hatrac_stmts(self):
         cur = self.cursor()
@@ -649,7 +732,7 @@ class PooledConnection (object):
         conn = used_pool.getconn()
         assert conn is not None
         assert conn.status == psycopg2.extensions.STATUS_READY, ("pooled connection status", conn.status)
-        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ)
+
         cur = conn.cursor(cursor_factory=DictCursor)
 
         try:
@@ -657,10 +740,11 @@ class PooledConnection (object):
                 result = bodyfunc(conn, cur)
                 conn.commit()
                 return finalfunc(result)
-            except psycopg2.InterfaceError as e:
+            except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
                 # reset bad connection
                 used_pool.putconn(conn, close=True)
                 conn = None
+                cur = None
                 raise e
             except GeneratorExit as e:
                 # happens normally at end of result yielding sequence
@@ -675,15 +759,24 @@ class PooledConnection (object):
                 raise
         finally:
             if conn is not None:
-                assert conn.status == psycopg2.extensions.STATUS_READY, ("pooled connection status", conn.status)
-                cur.close()
-                used_pool.putconn(conn)
-                conn = None
+                try:
+                    if cur is not None:
+                        cur.close()
+                    conn.commit()
+                except:
+                    used_pool.putconn(conn, close=True)
+                else:
+                    used_pool.putconn(conn)
+
+                self.conn = None
+                self.cur = None
 
 _name_table_sql = """
 CREATE TABLE IF NOT EXISTS hatrac.name (
   id bigserial PRIMARY KEY,
   pid int8 REFERENCES hatrac."name" (id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  modified_at timestamptz NOT NULL DEFAULT now(),
   ancestors int8[],
   name text NOT NULL UNIQUE,
   subtype int NOT NULL,
@@ -708,12 +801,50 @@ INSERT INTO hatrac.name
 (name, ancestors, subtype, is_deleted)
 VALUES ('/', array[]::int8[], 0, False)
 ON CONFLICT (name) DO NOTHING ;
+
+DO $timestamps_upgrade$
+BEGIN
+  IF (SELECT True FROM information_schema.columns
+      WHERE table_schema = 'hatrac'
+        AND table_name = 'name'
+        AND column_name = 'created_at') THEN
+     -- do nothing
+  ELSE
+     ALTER TABLE hatrac.name ADD COLUMN created_at timestamptz NOT NULL DEFAULT now();
+     ALTER TABLE hatrac.name ADD COLUMN modified_at timestamptz NOT NULL DEFAULT now();
+  END IF;
+END;
+$timestamps_upgrade$ LANGUAGE plpgsql;
+
+CREATE INDEX IF NOT EXISTS name_modified_at_idx ON hatrac."name" (modified_at) WHERE NOT is_deleted;
+
+CREATE OR REPLACE FUNCTION hatrac.maintain_row() RETURNS TRIGGER AS $$
+DECLARE
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    NEW.created_at := now();
+    NEW.modified_at := now();
+  ELSIF TG_OP = 'UPDATE' THEN
+    NEW.modified_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hatrac_syscols ON hatrac.name;
+
+CREATE TRIGGER hatrac_syscols
+  BEFORE INSERT OR UPDATE ON hatrac.name
+  FOR EACH ROW EXECUTE PROCEDURE hatrac.maintain_row();
+
 """
 
 _version_table_sql = """
 CREATE TABLE IF NOT EXISTS hatrac.version (
   id bigserial PRIMARY KEY,
   nameid int8 NOT NULL REFERENCES hatrac.name(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  modified_at timestamptz NOT NULL DEFAULT now(),
   version text,
   nbytes int8,
   metadata jsonb,
@@ -739,6 +870,28 @@ BEGIN
   END IF;
 END;
 $aux_upgrade$ LANGUAGE plpgsql;
+
+DO $timestamps_upgrade$
+BEGIN
+  IF (SELECT True FROM information_schema.columns
+      WHERE table_schema = 'hatrac'
+        AND table_name = 'version'
+        AND column_name = 'created_at') THEN
+     -- do nothing
+  ELSE
+     ALTER TABLE hatrac.version ADD COLUMN created_at timestamptz NOT NULL DEFAULT now();
+     ALTER TABLE hatrac.version ADD COLUMN modified_at timestamptz NOT NULL DEFAULT now();
+  END IF;
+END;
+$timestamps_upgrade$ LANGUAGE plpgsql;
+
+CREATE INDEX IF NOT EXISTS version_modified_at_idx ON hatrac.version (modified_at) WHERE NOT is_deleted;
+
+DROP TRIGGER IF EXISTS hatrac_syscols ON hatrac.version;
+
+CREATE TRIGGER hatrac_syscols
+  BEFORE INSERT OR UPDATE ON hatrac.version
+  FOR EACH ROW EXECUTE PROCEDURE hatrac.maintain_row();
 
 """
 
@@ -1324,6 +1477,22 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
             for row in self._namespace_enumerate_uploads(conn, cur, resource, recursive) 
         ]
 
+    @db_wrap()
+    def get_name_modified_etag(self, conn=None, cur=None):
+        return self._get_name_modified_etag(conn, cur)
+
+    @db_wrap()
+    def get_version_modified_etag(self, conn=None, cur=None):
+        return self._get_name_modified_etag(conn, cur)
+
+    @db_wrap()
+    def bulk_list_names(self, root_ns=None, last_id=None, last_modified_at=None, limit=100, conn=None, cur=None):
+        return self._bulk_list_names(conn, cur, root_ns, last_id, last_modified_at, limit, jsonify=True)
+
+    @db_wrap()
+    def bulk_list_versions(self, root_ns=None, last_id=None, last_modified_at=None, limit=100, conn=None, cur=None):
+        return self._bulk_list_versions(conn, cur, root_ns, last_id, last_modified_at, limit, jsonify=True)
+
     def _update_resource_metadata(self, conn, cur, resource, updates):
         resource.metadata.update(updates)
         cur.execute("""
@@ -1624,3 +1793,105 @@ EXECUTE hatrac_delete_upload(%(id)s);
             sql_literal(int(resource.id))
         ))
         return list(cur)
+
+    def _guard_chronology(self, conn, cur):
+        # guard for non-monotonic chronology hazard
+        cur.execute("SELECT pg_snapshot_xmin(s.s) < pg_snapshot_xmax(s.s) FROM (SELECT pg_current_snapshot()) s(s)")
+        busy = next(cur)[0]
+        if busy:
+            raise core.ServiceNotAvailable('Bulk listing is temporarily unavailable.')
+
+    def _jsonify(self, sql):
+        sql_parts = [
+            "WITH q AS (", sql, ")",
+            "SELECT COALESCE(",
+            "  array_to_json(array_agg(row_to_json(q.*)), True)::text,",
+            "  '[]'",
+            ")",
+            "FROM q",
+        ]
+        return "\n".join(sql_parts)
+
+    def _bulk_list_versions(self, conn, cur, root_ns, last_id, last_modified_at, limit, jsonify=False):
+        if not last_modified_at or not last_id:
+            raise ValueError("Both last_id and last_modified_at must be supplied")
+
+        self._guard_chronology(conn, cur)
+
+        last_id = sql_literal(last_id)
+        last_modified_at = sql_literal(last_modified_at)
+        root_id = sql_literal(root_ns.id)
+
+        sql_parts = [
+            "SELECT v.*",
+            "FROM hatrac.version v",
+            "JOIN hatrac.name n ON (v.nameid = n.id)",
+            "WHERE (%s = ANY(n.ancestors) OR %s = n.id)" % (root_id, root_id,),
+            "  AND v.version IS NOT NULL",
+            "  AND v.modified_at >= %s::timestamptz" % (last_modified_at,),
+            "  AND (v.modified_at > %s::timestamptz OR v.id > %s)" % (last_modified_at, last_id),
+            "ORDER BY v.modified_at, v.id",
+            'LIMIT %s' % (int(limit),),
+        ]
+        sql = "\n".join(sql_parts)
+
+        if jsonify:
+            cur.execute(self._jsonify(sql))
+            return next(cur)[0]
+        else:
+            cur.execute(sql)
+            return list(cur)
+
+    def _bulk_list_names(self, conn, cur, root_ns, last_id, last_modified_at, limit, jsonify=False):
+        if not last_modified_at or not last_id:
+            raise ValueError("Both last_id and last_modified_at must be supplied")
+
+        self._guard_chronology(conn, cur)
+
+        last_id = sql_literal(last_id)
+        last_modified_at = sql_literal(last_modified_at)
+        root_id = sql_literal(root_ns.id)
+
+        sql_parts = [
+            "SELECT *",
+            "FROM hatrac.name",
+            "WHERE (%s = ANY(ancestors) OR %s = id)" % (root_id, root_id,),
+            "  AND modified_at >= %s::timestamptz" % (last_modified_at,),
+            "  AND (modified_at > %s::timestamptz OR id > %s)" % (last_modified_at, last_id),
+            "ORDER BY modified_at, id",
+            'LIMIT %s' % (int(limit),),
+        ]
+        sql = "\n".join(sql_parts)
+
+        if jsonify:
+            cur.execute(self._jsonify(sql))
+            return next(cur)[0]
+        else:
+            cur.execute(sql)
+            return list(cur)
+
+    def _get_name_modified_etag(self, conn, cur):
+        self._guard_chronology(conn, cur)
+        sql_parts = [
+            "SELECT modified_at",
+            "FROM hatrac.name",
+            "ORDER BY modified_at DESC",
+            "LIMIT 1",
+        ]
+        cur.execute("\n".join(sql_parts))
+        return next(cur)[0]
+
+    def _get_version_modified_etag(self, conn, cur):
+        self._guard_chronology(conn, cur)
+        name_etag = sql_literal(self._get_name_modified_etag(conn, cur))
+        sql_parts = [
+            "SELECT GREATEST(modified_at, %s)" % (name_etag,),
+            "FROM (",
+            "  SELECT modified_at" %
+            "  FROM hatrac.version",
+            "  ORDER BY modified_at DESC",
+            "  LIMIT 1",
+            ") s",
+        ]
+        cur.execute("\n".join(sql_parts))
+        return next(cur)[0]
