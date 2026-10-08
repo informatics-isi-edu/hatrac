@@ -1188,7 +1188,13 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
                     # handle rename target pointing to original storage...
                     hname = aux.get('hname', res.name)
                     hversion = aux.get('hversion', res.version)
-                    self.storage.delete(hname, hversion, aux=res.aux)
+                    try:
+                        self.storage.delete(hname, hversion, aux=res.aux)
+                    except Exception as e:
+                        if res.name != hname or res.version != hversion:
+                            hatrac_debug(f"delete of namespace {resource.name} -> delete of version {res.name}:{res.version} -> delete renamed version {hname}:{hversion}, got error {e}")
+                        else:
+                            hatrac_debug(f"delete of namespace {resource.name} -> delete of version {res.name}:{res.version}, got error {e}")
             for res in deleted_names:
                 self.storage.delete_namespace(res.name)
 
