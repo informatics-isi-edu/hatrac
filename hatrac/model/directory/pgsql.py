@@ -817,7 +817,8 @@ BEGIN
 END;
 $timestamps_upgrade$ LANGUAGE plpgsql;
 
-CREATE INDEX IF NOT EXISTS name_modified_at_idx ON hatrac."name" (modified_at) WHERE NOT is_deleted;
+DROP INDEX IF EXISTS hatrac.name_modified_at_idx;
+CREATE INDEX IF NOT EXISTS name_modified_at_id_idx ON hatrac."name" (modified_at, id);
 
 CREATE OR REPLACE FUNCTION hatrac.maintain_row() RETURNS TRIGGER AS $$
 DECLARE
@@ -886,7 +887,8 @@ BEGIN
 END;
 $timestamps_upgrade$ LANGUAGE plpgsql;
 
-CREATE INDEX IF NOT EXISTS version_modified_at_idx ON hatrac.version (modified_at) WHERE NOT is_deleted;
+DROP INDEX IF EXISTS hatrac.version_modified_at_idx;
+CREATE INDEX IF NOT EXISTS version_modified_at_id_idx ON hatrac.version (modified_at, id) WHERE version IS NOT NULL;
 
 DROP TRIGGER IF EXISTS hatrac_syscols ON hatrac.version;
 
@@ -1829,16 +1831,22 @@ EXECUTE hatrac_delete_upload(%(id)s);
 
         last_id = sql_literal(last_id)
         last_modified_at = sql_literal(last_modified_at)
-        root_id = sql_literal(root_ns.id)
+
+        where_clauses = [
+            "v.version IS NOT NULL",
+            "v.modified_at >= %s::timestamptz" % (last_modified_at,),
+            "(v.modified_at > %s::timestamptz OR v.id > %s)" % (last_modified_at, last_id),
+        ]
+
+        if root_ns.name != "/":
+            root_id = sql_literal(root_ns.id)
+            where_clauses.append("(%s = ANY(n.ancestors) OR %s = n.id)" % (root_id, root_id,))
 
         sql_parts = [
             "SELECT v.*",
             "FROM hatrac.version v",
             "JOIN hatrac.name n ON (v.nameid = n.id)",
-            "WHERE (%s = ANY(n.ancestors) OR %s = n.id)" % (root_id, root_id,),
-            "  AND v.version IS NOT NULL",
-            "  AND v.modified_at >= %s::timestamptz" % (last_modified_at,),
-            "  AND (v.modified_at > %s::timestamptz OR v.id > %s)" % (last_modified_at, last_id),
+            "WHERE %s" % ("\n  AND ".join(where_clauses)),
             "ORDER BY v.modified_at, v.id",
             'LIMIT %s' % (int(limit),),
         ]
@@ -1859,14 +1867,20 @@ EXECUTE hatrac_delete_upload(%(id)s);
 
         last_id = sql_literal(last_id)
         last_modified_at = sql_literal(last_modified_at)
-        root_id = sql_literal(root_ns.id)
+
+        where_clauses = [
+            "modified_at >= %s::timestamptz" % (last_modified_at,),
+            "(modified_at > %s::timestamptz OR id > %s)" % (last_modified_at, last_id),
+        ]
+
+        if root_ns.name != "/":
+            root_id = sql_literal(root_ns.id)
+            where_clauses.append("(%s = ANY(ancestors) OR %s = id)" % (root_id, root_id,))
 
         sql_parts = [
             "SELECT *",
             "FROM hatrac.name",
-            "WHERE (%s = ANY(ancestors) OR %s = id)" % (root_id, root_id,),
-            "  AND modified_at >= %s::timestamptz" % (last_modified_at,),
-            "  AND (modified_at > %s::timestamptz OR id > %s)" % (last_modified_at, last_id),
+            "WHERE %s" % ("\n  AND ".join(where_clauses)),
             "ORDER BY modified_at, id",
             'LIMIT %s' % (int(limit),),
         ]
