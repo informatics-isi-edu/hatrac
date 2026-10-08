@@ -89,7 +89,15 @@ class HatracStorage (object):
         f = make_file(dirname, relname, 'wb')
 
         # upload whole content at offset 0 (for code reuse)
-        self.upload_chunk_from_file(None, None, 0, 0, input, nbytes, metadata, f)
+        try:
+            self.upload_chunk_from_file(None, None, 0, 0, input, nbytes, metadata, f)
+        except Exception as e:
+            # cleanup failed file that will never be tracked
+            try:
+                self.delete(name, version)
+            except ObjectVersionMissing:
+                pass
+            raise
         return version
 
     def create_upload(self, name, nbytes=None, metadata={}):

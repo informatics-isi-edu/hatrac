@@ -604,11 +604,12 @@ class connection (psycopg2.extensions.connection):
           WHERE v.nameid = $1 AND NOT v.is_deleted
           ORDER BY n.id, v.id ;
 
-        PREPARE hatrac_namepattern_enumerate_versions (text) AS
+        PREPARE hatrac_namespace_enumerate_versions (int8) AS
           SELECT n.name, n.pid, n.ancestors, n.subtype, n.update, n."subtree-owner", n."subtree-read", v.*, %(owner_acl)s, %(read_acl)s
           FROM hatrac.name n
           JOIN hatrac.version v ON (v.nameid = n.id)
-          WHERE n.name ~ $1 AND NOT v.is_deleted
+          WHERE $1 = ANY(n.ancestors)
+            AND NOT v.is_deleted
           ORDER BY n.name, v.id ;
 
         PREPARE hatrac_namespace_children_noacl (int8) AS
@@ -1166,8 +1167,10 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
 
         for res in deleted_uploads:
             self._delete_upload(conn, cur, res)
+
         for res in deleted_versions:
             self._delete_version(conn, cur, res)
+
         for res in deleted_names:
             self._delete_name(conn, cur, res)
 
@@ -1185,7 +1188,13 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
                     # handle rename target pointing to original storage...
                     hname = aux.get('hname', res.name)
                     hversion = aux.get('hversion', res.version)
-                    self.storage.delete(hname, hversion, aux=res.aux)
+                    try:
+                        self.storage.delete(hname, hversion, aux=res.aux)
+                    except Exception as e:
+                        if res.name != hname or res.version != hversion:
+                            hatrac_debug(f"delete of namespace {resource.name} -> delete of version {res.name}:{res.version} -> delete renamed version {hname}:{hversion}, got error {e}")
+                        else:
+                            hatrac_debug(f"delete of namespace {resource.name} -> delete of version {res.name}:{res.version}, got error {e}")
             for res in deleted_names:
                 self.storage.delete_namespace(res.name)
 
@@ -1772,7 +1781,7 @@ EXECUTE hatrac_delete_upload(%(id)s);
         if resource.is_object():
             cur.execute("EXECUTE hatrac_object_enumerate_versions(%s);" % sql_literal(int(resource.id)))
         else:
-            cur.execute("EXECUTE hatrac_namepattern_enumerate_versions(%s);" % sql_literal(sql_literal("^" + regexp_escape(resource.name) + '/')))
+            cur.execute("EXECUTE hatrac_namespace_enumerate_versions(%s);" % sql_literal(int(resource.id)))
         def helper(row):
             row['metadata'] = Metadata.from_sql(row['metadata'])
             return row
