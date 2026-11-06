@@ -9,7 +9,7 @@ from setuptools import setup
 setup(
     name="hatrac",
     description="simple object storage service",
-    version="1.4",
+    version="1.5",
     packages=["hatrac", "hatrac.model", "hatrac.model.directory", "hatrac.model.storage", "hatrac.rest"],
     package_data={'hatrac': ["*.wsgi"]},
     scripts=["bin/hatrac-deploy", "bin/hatrac-migrate", "bin/hatrac-utils"],
@@ -28,9 +28,10 @@ setup(
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: POSIX',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10'
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14'
     ])

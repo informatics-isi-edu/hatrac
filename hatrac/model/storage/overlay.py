@@ -118,6 +118,12 @@ class HatracStorage (object):
     def create_from_file(self, name, input, nbytes, metadata={}):
         return self.backends[0].create_from_file(name, input, nbytes, metadata)
 
+    def validate_upload(self, name, nbytes, chunksize):
+        # uploads go to the first backend, so only its limits apply
+        validate_upload = getattr(self.backends[0], 'validate_upload', None)
+        if validate_upload is not None:
+            validate_upload(name, nbytes, chunksize)
+
     def create_upload(self, name, nbytes=None, metadata={}):
         return self.backends[0].create_upload(name, nbytes, metadata)
 

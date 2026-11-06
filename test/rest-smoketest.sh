@@ -67,6 +67,7 @@ cleanup()
     rm -f ${RESPONSE_HEADERS} ${RESPONSE_CONTENT} ${TEST_DATA} ${TEST_ACL_ANON}
     rm -f /tmp/parts-${RUNKEY}*
     rm -f /tmp/dummy-${RUNKEY}
+    rm -f /tmp/short-${RUNKEY}
 }
 
 trap cleanup 0
@@ -855,6 +856,63 @@ then
     # mismatched chunk checksums (only enforced in filesystem backend?)
     dotest "400::*::*" "${upload}/0" -T "${parts[0]}" -H "Content-MD5: $(echo "" | mymd5sum)"
 fi
+
+# upload jobs that could never complete are rejected when the job is created
+dojobtest()
+{
+    # args: status content-length chunk-length
+    cat > ${TEST_DATA} <<EOF
+{
+  "content-length": $2,
+  "content-type": "application/octet-stream",
+  "chunk-length": $3
+}
+EOF
+    dotest "$1" "/ns-${RUNKEY}/foo2/objshape;upload?cid=smoke" \
+	   -T "${TEST_DATA}" \
+	   -X POST \
+	   -H "Content-Type: application/json"
+}
+
+dojobtest "400::*::*" 1000 0
+dojobtest "400::*::*" 1000 -5
+dojobtest "400::*::*" -1 1000
+# chunks larger than the default max_request_payload_size (128 MiB)
+dojobtest "400::*::*" $(( 300 * 1024 * 1024 )) $(( 200 * 1024 * 1024 ))
+# a chunk-length larger than the content is fine if the content fits in one request
+dojobtest "201::text/uri-list::*" 1000 $(( 200 * 1024 * 1024 ))
+upload="$(cat ${RESPONSE_CONTENT})"
+upload="${upload#/hatrac}"
+dotest "204::*::*" "${upload}" -X DELETE
+
+if [[ "$DEPLOYMENT" = "amazons3" ]]
+then
+    # more chunks than the S3 multipart part limit (10000)
+    dojobtest "400::*::*" $(( 10001 * 5 * 1024 * 1024 )) $(( 5 * 1024 * 1024 ))
+    # chunks below the S3 minimum part size (5 MiB) in a multi-chunk upload
+    dojobtest "400::*::*" $(( 7 * 1024 * 1024 )) $(( 1024 * 1024 ))
+    # a single chunk may be smaller than the minimum part size
+    dojobtest "201::text/uri-list::*" 1000 $(( 1024 * 1024 ))
+    upload="$(cat ${RESPONSE_CONTENT})"
+    upload="${upload#/hatrac}"
+    dotest "204::*::*" "${upload}" -X DELETE
+fi
+
+# chunk byte counts must match the job: every chunk but the last is chunk-length bytes,
+# and the last chunk holds the remainder
+douploadtest "/ns-${RUNKEY}/foo2/obj3" "" "" "201::text/uri-list::*"
+head -c 100 "${parts[1]}" > /tmp/short-${RUNKEY}
+dotest "409::*::*" "${upload}/0" -T /tmp/short-${RUNKEY}
+dotest "409::*::*" "${upload}/1" -T /tmp/short-${RUNKEY}
+dotest "204::*::*" "${upload}/0" -T "${parts[0]}"
+if [[ "$DEPLOYMENT" = "amazons3" ]]
+then
+    # backends that track chunks reject finalizing with a chunk missing
+    dotest "409::*::*" "${upload}" -X POST
+fi
+dotest "204::*::*" "${upload}/1" -T "${parts[1]}"
+dotest "201::*::*" "${upload}" -X POST
+dotest "200::application/x-bash::${upload_total_bytes}" /ns-${RUNKEY}/foo2/obj3
 
 # check object conditional updates
 dotest "412::*::*" /ns-${RUNKEY}/foo2/obj1 \

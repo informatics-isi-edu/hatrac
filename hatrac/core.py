@@ -198,6 +198,67 @@ class ServiceNotAvailable (HatracException):
     """Exceptions representing temporary unavailablity."""
     pass
 
+def upload_chunk_count(nbytes, chunksize):
+    """Return the number of chunks in an upload job of nbytes total using chunksize chunks."""
+    return (nbytes + chunksize - 1) // chunksize
+
+def upload_chunk_nbytes(nbytes, chunksize, position):
+    """Return the expected byte count of the chunk at position, or None if position is out of range.
+
+       Every chunk except the last is exactly chunksize bytes; the last chunk holds the remainder.
+    """
+    nchunks = upload_chunk_count(nbytes, chunksize)
+    if position < 0 or position >= nchunks:
+        return None
+    if position < nchunks - 1:
+        return chunksize
+    return nbytes - chunksize * (nchunks - 1)
+
+def validate_upload_shape(nbytes, chunksize, max_payload_size=None):
+    """Validate the shape of a requested upload job, raising BadRequest if it can never complete.
+
+       This covers the storage-independent rules. Storage backends may impose further limits
+       via their own validate_upload method.
+    """
+    if chunksize <= 0:
+        raise BadRequest('Upload job chunk-length must be greater than zero.')
+    if nbytes < 0:
+        raise BadRequest('Upload job content-length must not be negative.')
+    if max_payload_size is None:
+        max_payload_size = config.get("max_request_payload_size", max_request_payload_size_default)
+    # each chunk is sent in one request, so the largest chunk must fit within the request payload limit
+    if min(chunksize, nbytes) > max_payload_size:
+        raise BadRequest(
+            'Upload job chunk-length %d exceeds the maximum request payload size of %d bytes.'
+            % (chunksize, max_payload_size)
+        )
+
+def validate_multipart_shape(nbytes, chunksize, max_parts, min_part_size, max_part_size):
+    """Validate an upload job for storage that sends each chunk as one multipart upload part.
+
+       Raises BadRequest if the job needs more than max_parts chunks, uses chunks smaller than
+       min_part_size for an upload of more than one chunk (the last part has no minimum), or
+       uses chunks larger than max_part_size.
+    """
+    nchunks = upload_chunk_count(nbytes, chunksize)
+    if nchunks > max_parts:
+        raise BadRequest(
+            'Upload job of %d bytes with chunk-length %d needs %d chunks, but this storage allows at most %d. '
+            'Use a chunk-length of at least %d.'
+            % (nbytes, chunksize, nchunks, max_parts, upload_chunk_count(nbytes, max_parts))
+        )
+    if nchunks > 1 and chunksize < min_part_size:
+        raise BadRequest(
+            'Upload job chunk-length %d is smaller than the minimum of %d bytes allowed by this storage '
+            'for uploads of more than one chunk.'
+            % (chunksize, min_part_size)
+        )
+    if min(chunksize, nbytes) > max_part_size:
+        raise BadRequest(
+            'Upload job chunk-length %d exceeds the maximum of %d bytes allowed by this storage.'
+            % (chunksize, max_part_size)
+        )
+
 def _make_bin_decoder(nbytes, context=''):
     def helper(orig):
         if len(orig) == nbytes * 2:
