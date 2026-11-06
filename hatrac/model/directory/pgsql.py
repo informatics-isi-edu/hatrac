@@ -1318,6 +1318,11 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
 
     @db_wrap(enforce_acl=(1, 3, ['owner', 'update', 'ancestor_owner', 'ancestor_update']))
     def create_version_upload_job(self, object, chunksize, client_context, nbytes=None, metadata={}, conn=None, cur=None):
+        # let the storage backend reject job shapes it cannot complete (e.g. S3 multipart part limits)
+        # before any storage-side upload state is created
+        validate_upload = getattr(self.storage, 'validate_upload', None)
+        if validate_upload is not None:
+            validate_upload(object.name, nbytes, chunksize)
         job = self.storage.create_upload(object.name, nbytes, metadata)
         resource = HatracUpload(self, object, **self._create_upload(conn, cur, object, job, chunksize, nbytes, metadata))
         self._set_resource_acl_role(conn, cur, resource, 'owner', client_context.client)
@@ -1325,15 +1330,15 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
 
     def upload_chunk_from_file(self, upload, position, input, client_context, nbytes, metadata={}):
         upload.enforce_acl(['owner'], client_context)
-        nchunks = upload.nbytes / upload.chunksize
-        remainder = upload.nbytes % upload.chunksize
         assert position >= 0
-        if position < (nchunks - 1) and nbytes != upload.chunksize:
-            raise core.Conflict('Uploaded chunk byte count %s does not match job chunk size %s.' % (nbytes, upload.chunksize))
-        if remainder and position == nchunks and nbytes != remainder:
-            raise core.Conflict('Uploaded chunk byte count %s does not match final chunk size %s.' % (nbytes, remainder))
-        if position > nchunks or position == nchunks and remainder == 0:
+        expected_nbytes = core.upload_chunk_nbytes(upload.nbytes, upload.chunksize, position)
+        if expected_nbytes is None:
             raise core.Conflict('Uploaded chunk number %s out of range.' % position)
+        if nbytes != expected_nbytes:
+            raise core.Conflict(
+                'Uploaded chunk byte count %s does not match expected byte count %s for chunk %s.'
+                % (nbytes, expected_nbytes, position)
+            )
         aux = self.storage.upload_chunk_from_file(
             upload.object.name, 
             upload.job, 
@@ -1354,6 +1359,14 @@ ALTER TABLE hatrac.%(table)s ALTER COLUMN metadata SET NOT NULL;
     def upload_finalize(self, upload, client_context, conn=None, cur=None):
         if self.storage.track_chunks:
             chunk_aux = list(self._chunk_list(conn, cur, upload))
+            # every chunk must have been received, or the stored object would silently be missing data
+            # (S3 completes a multipart upload with gaps in the part numbers)
+            expected_nchunks = core.upload_chunk_count(upload.nbytes, upload.chunksize)
+            if len(chunk_aux) != expected_nchunks:
+                raise core.Conflict(
+                    'Upload job is incomplete: %d of %d chunks have been received.'
+                    % (len(chunk_aux), expected_nchunks)
+                )
         else:
             chunk_aux = None
         version_id = self.storage.finalize_upload(upload.name, upload.job, chunk_aux, metadata=upload.metadata)

@@ -1204,6 +1204,12 @@ In either case, the successful response is:
 where the new job is ready to receive data chunks.
 
 Typical PUT error responses would be:
+  - **400 Bad Request**: the job description is malformed, or describes
+      an upload that could never be completed: `chunk-length` is not
+      greater than zero, `content-length` is negative, the chunks would
+      exceed the service's maximum request payload size, or the
+      storage backend cannot accept the job's chunk count or chunk size
+      (e.g. the amazons3 backend applies S3's multipart upload limits).
   - **401 Unauthorized**: the client is not authenticated and
       anonymous creation of a job is not supported.
   - **403 Forbidden**: the client is authenticated but does not have
@@ -1259,7 +1265,10 @@ Typical PUT error responses would be:
   - **403 Forbidden**: the client is authenticated but does not have
       sufficient privilege to upload the chunk.
   - **400 Bad Request**: the chunk number is not a non-negative integer.
-  - **409 Conflict**: the chunk number is too large for the defined job.
+  - **409 Conflict**: the chunk number is too large for the defined job,
+      or the chunk's byte count does not match the job: every chunk
+      except the last must be exactly `chunk-length` bytes, and the last
+      chunk must hold exactly the remaining bytes of `content-length`.
 
 ### Chunked Upload Job Finalization
 
@@ -1297,6 +1306,10 @@ Typical POST error responses would be:
     `Content-MD5` header of the original upload job. An implementation
     MAY skip this validation but it is RECOMMENDED to perform this
     validation rather than create broken objects.
+  - **409 Conflict** the upload job is incomplete because not every
+    chunk has been received. Implementations that track individual
+    chunks (such as the amazons3 backend) reject such jobs rather than
+    create objects with missing content.
 
 ### Chunked Upload Job Status Retrieval
 

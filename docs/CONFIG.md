@@ -56,7 +56,7 @@ follow the strict quoting rules described above.
 
 An integer byte count. The default is 134217728, i.e. 128 MiB.
 
-This policy setting limits the size of object payload that a client may send to the service in one request. Requests exceeding this size will be rejected with an HTTP `413` error code. To create larger objects, a client must use the chunked upload job feature to send the large object content as a sequence of smaller chunk requests.
+This policy setting limits the size of object payload that a client may send to the service in one request. Requests exceeding this size will be rejected with an HTTP `413` error code. To create larger objects, a client must use the chunked upload job feature to send the large object content as a sequence of smaller chunk requests. Since each chunk is sent in one request, a chunked upload job whose chunks would exceed this size is rejected with HTTP `400` when the job is created.
 
 ### `firewall_acls`
 
@@ -115,6 +115,9 @@ A nested document containing many configuration fields for the amazons3 backend.
     "default_session": { ... },
     "buckets": { ... },
     "legacy_mapping": <boolean>,
+    "multipart_max_parts": <integer (default 10000)>,
+    "multipart_min_part_size": <integer (default 5242880)>,
+    "multipart_max_part_size": <integer (default 5368709120)>
   }
   ...
 }
@@ -166,6 +169,22 @@ For backwards compatibility, either `buckets` or `bucket_mappings` are recognize
 When `true`, simplifies the interpretation of the `s3_config`.`bucket` config to ignore deeper path prefixes. The default is `false`.
 
 This is a backwards-compatibility option to emulate the way the legacy codebase would ignore path suffixes and treat `"/prefix/suffix"` the same as `"/prefix"`.
+
+#### `s3_config`.`multipart_max_parts`
+
+The maximum number of chunks allowed in one chunked upload job. The default is `10000`, the Amazon S3 limit on the number of parts in a multipart upload.
+
+The amazons3 backend sends each chunk of an upload job as one part of an S3 multipart upload, so a job whose `content-length` and `chunk-length` would need more chunks than this is rejected with HTTP `400` when the job is created. Without this check, such a job would fail only when the first chunk past the limit is sent. Change it only for an S3-compatible service with a different limit.
+
+#### `s3_config`.`multipart_min_part_size`
+
+The minimum chunk size in bytes for chunked upload jobs of more than one chunk. The default is `5242880` (5 MiB), the Amazon S3 minimum part size; the last part of a multipart upload has no minimum.
+
+Jobs with a smaller `chunk-length` that need more than one chunk are rejected with HTTP `400` when the job is created. Without this check, such a job would fail only when it is finalized. Change it only for an S3-compatible service with a different limit.
+
+#### `s3_config`.`multipart_max_part_size`
+
+The maximum chunk size in bytes for chunked upload jobs. The default is `5368709120` (5 GiB), the Amazon S3 maximum part size. In practice the smaller `max_request_payload_size` limit usually applies first.
 
 #### `s3_config`.`buckets`.`bucket_name`
 

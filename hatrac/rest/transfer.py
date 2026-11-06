@@ -143,6 +143,9 @@ class ObjectTransfers (RestHandler):
         except ValueError as ev:
             raise BadRequest('Invalid count: %s.' % ev)
 
+        # reject job shapes that can never complete, before any state is created
+        core.validate_upload_shape(nbytes, chunksize)
+
         metadata = {}
 
         for hdr, keys in [

@@ -20,9 +20,16 @@ import urllib.parse
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 from flask import g as hatrac_ctx
-from ...core import hatrac_debug, coalesce, max_request_payload_size_default
+from ...core import hatrac_debug, coalesce, max_request_payload_size_default, validate_multipart_shape
 from ...core import NotFound, BadRequest, Conflict, Redirect, ObjectVersionMissing
 from .filesystem import make_random_version
+
+# Amazon S3 multipart upload limits (https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html):
+# at most 10,000 parts per upload, each from 5 MiB to 5 GiB, except that the last part has no minimum.
+# Each hatrac upload chunk is sent as one part. Overridable via s3_config for S3-compatible services.
+S3_MULTIPART_MAX_PARTS_DEFAULT = 10000
+S3_MULTIPART_MIN_PART_SIZE_DEFAULT = 5 * 1024 ** 2
+S3_MULTIPART_MAX_PART_SIZE_DEFAULT = 5 * 1024 ** 3
 
 
 #boto3.set_stream_logger('', level='DEBUG')
@@ -332,6 +339,23 @@ class HatracStorage:
             self.s3_default_session,
             legacy_mode=legacy_mode,
         )
+        self.multipart_max_parts = int(self.s3_config.get(
+            'multipart_max_parts', S3_MULTIPART_MAX_PARTS_DEFAULT))
+        self.multipart_min_part_size = int(self.s3_config.get(
+            'multipart_min_part_size', S3_MULTIPART_MIN_PART_SIZE_DEFAULT))
+        self.multipart_max_part_size = int(self.s3_config.get(
+            'multipart_max_part_size', S3_MULTIPART_MAX_PART_SIZE_DEFAULT))
+
+    def validate_upload(self, name, nbytes, chunksize):
+        """Reject an upload job whose chunks cannot be completed as an S3 multipart upload.
+
+           Each chunk is sent as one multipart upload part, so the job's chunk count and
+           chunk size must be within the multipart limits. Without this check, a job with too
+           many chunks fails when the first chunk past the limit is sent, and one with chunks
+           that are too small fails only when the upload is finalized.
+        """
+        validate_multipart_shape(
+            nbytes, chunksize, self.multipart_max_parts, self.multipart_min_part_size, self.multipart_max_part_size)
 
     @s3_bucket_wrap()
     def create_from_file(self, name, input, nbytes, metadata={}, bucket_config=None):
